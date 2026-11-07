@@ -1,0 +1,34 @@
+# Ambientes e credenciais
+.env
+*.env
+*.json
+credentials.json
+barsi-quant-ia-*.json
+
+# Dados bancários e extratos confidenciais
+extratos/
+*.ofx
+*.csv
+*.pdf
+
+# Python e Venv
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Banco de dados e planilhas locais
+memory/
+*.db
+*.sqlite
+*.xlsx
+cache/
+
+# Testes e relatórios
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Outros
+exclude/
