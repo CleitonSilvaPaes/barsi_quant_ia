@@ -207,49 +207,87 @@ class GSpreadAdapter(SheetsPort):
             "09": "Setembro", "10": "Outubro", "11": "Novembro", "12": "Dezembro"
         }
 
-        updates = []
-        for mes_chave, r in sorted(resumos.items()):
+        # Agrupa meses válidos por ano para suportar fechamento e virada de ano
+        anos_map = {}
+        for mes_chave in sorted(resumos.keys()):
+            r = resumos[mes_chave]
             if r.total_entradas == 0 and r.total_saidas == 0:
                 continue
+            ano = mes_chave.split("-")[0]
+            anos_map.setdefault(ano, []).append(mes_chave)
 
-            partes = mes_chave.split("-")
-            if len(partes) != 2:
-                continue
-            ano, mes_num = partes[0], partes[1]
-            nome_mes = f"{meses_pt.get(mes_num, mes_num)}/{ano}"
+        updates = []
+        for ano, meses_ano in sorted(anos_map.items()):
+            totais_ano = {k: 0.0 for k in ["salario", "proventos", "fatura", "colchao", "acoes", "fiis"]}
 
-            # Procura a coluna do mês no cabeçalho
-            target_col_idx = None
-            for c_idx, col_name in enumerate(header_vals, start=1):
-                if nome_mes.lower() in col_name.lower():
-                    target_col_idx = c_idx
-                    break
+            for mes_chave in meses_ano:
+                r = resumos[mes_chave]
+                mes_num = mes_chave.split("-")[1]
+                nome_mes = f"{meses_pt.get(mes_num, mes_num)}/{ano}"
 
-            # Se o mês não existe na planilha (ex: Dezembro/2026 novo), insere a coluna automaticamente
-            if not target_col_idx:
-                insert_before_idx = len(header_vals)
+                # Acumula para o consolidado anual
+                totais_ano["salario"] += r.salario_entradas
+                totais_ano["proventos"] += r.proventos_recebidos
+                totais_ano["fatura"] += r.faturas_cartao
+                totais_ano["colchao"] += r.reserva_rdb
+                totais_ano["acoes"] += r.compras_acoes_barsi
+                totais_ano["fiis"] += r.compras_fiis
+
+                # Procura a coluna do mês no cabeçalho
+                target_col_idx = None
                 for c_idx, col_name in enumerate(header_vals, start=1):
-                    if "VARIAÇÃO" in col_name.upper():
-                        insert_before_idx = c_idx
+                    if nome_mes.lower() in col_name.lower():
+                        target_col_idx = c_idx
                         break
-                ws.insert_cols([[f"{nome_mes} (R$)"]], col=insert_before_idx)
-                target_col_idx = insert_before_idx
-                header_vals = ws.row_values(header_row_idx)
 
-            col_letter = self._col_idx_to_letter(target_col_idx)
+                # Se o mês não existe na planilha (ex: Dezembro/2026 novo ou meses 01..09), insere a coluna
+                if not target_col_idx:
+                    insert_before_idx = len(header_vals)
+                    for c_idx, col_name in enumerate(header_vals, start=1):
+                        if any(term in col_name.upper() for term in ["VARIAÇÃO", "CONSOLIDADO", "TOTAL"]):
+                            insert_before_idx = c_idx
+                            break
+                    ws.insert_cols([[f"{nome_mes} (R$)"]], col=insert_before_idx)
+                    target_col_idx = insert_before_idx
+                    header_vals = ws.row_values(header_row_idx)
 
-            if "salario" in row_map and r.salario_entradas > 0:
-                updates.append({"range": f"{col_letter}{row_map['salario']}", "values": [[f"R$ {r.salario_entradas:.2f}".replace(".", ",")]]})
-            if "proventos" in row_map and r.proventos_recebidos > 0:
-                updates.append({"range": f"{col_letter}{row_map['proventos']}", "values": [[f"R$ {r.proventos_recebidos:.2f}".replace(".", ",")]]})
-            if "fatura" in row_map and r.faturas_cartao > 0:
-                updates.append({"range": f"{col_letter}{row_map['fatura']}", "values": [[f"R$ {r.faturas_cartao:.2f}".replace(".", ",")]]})
-            if "colchao" in row_map and r.reserva_rdb > 0:
-                updates.append({"range": f"{col_letter}{row_map['colchao']}", "values": [[f"R$ {r.reserva_rdb:.2f}".replace(".", ",")]]})
-            if "acoes" in row_map and r.compras_acoes_barsi > 0:
-                updates.append({"range": f"{col_letter}{row_map['acoes']}", "values": [[f"R$ {r.compras_acoes_barsi:.2f}".replace(".", ",")]]})
-            if "fiis" in row_map and r.compras_fiis > 0:
-                updates.append({"range": f"{col_letter}{row_map['fiis']}", "values": [[f"R$ {r.compras_fiis:.2f}".replace(".", ",")]]})
+                col_letter = self._col_idx_to_letter(target_col_idx)
+
+                if "salario" in row_map and r.salario_entradas > 0:
+                    updates.append({"range": f"{col_letter}{row_map['salario']}", "values": [[f"R$ {r.salario_entradas:.2f}".replace(".", ",")]]})
+                if "proventos" in row_map and r.proventos_recebidos > 0:
+                    updates.append({"range": f"{col_letter}{row_map['proventos']}", "values": [[f"R$ {r.proventos_recebidos:.2f}".replace(".", ",")]]})
+                if "fatura" in row_map and r.faturas_cartao > 0:
+                    updates.append({"range": f"{col_letter}{row_map['fatura']}", "values": [[f"R$ {r.faturas_cartao:.2f}".replace(".", ",")]]})
+                if "colchao" in row_map and r.reserva_rdb > 0:
+                    updates.append({"range": f"{col_letter}{row_map['colchao']}", "values": [[f"R$ {r.reserva_rdb:.2f}".replace(".", ",")]]})
+                if "acoes" in row_map and r.compras_acoes_barsi > 0:
+                    updates.append({"range": f"{col_letter}{row_map['acoes']}", "values": [[f"R$ {r.compras_acoes_barsi:.2f}".replace(".", ",")]]})
+                if "fiis" in row_map and r.compras_fiis > 0:
+                    updates.append({"range": f"{col_letter}{row_map['fiis']}", "values": [[f"R$ {r.compras_fiis:.2f}".replace(".", ",")]]})
+
+            # Se houver virada de ano (ex: próximo ano detectado), cria/atualiza coluna de Consolidado Anual
+            if len(anos_map) > 1 and ano != max(anos_map.keys()):
+                col_consolidado = f"Consolidado {ano} (R$)"
+                cons_col_idx = None
+                for c_idx, col_name in enumerate(header_vals, start=1):
+                    if col_consolidado.lower() in col_name.lower():
+                        cons_col_idx = c_idx
+                        break
+                if not cons_col_idx:
+                    insert_pos = len(header_vals)
+                    for c_idx, col_name in enumerate(header_vals, start=1):
+                        if "VARIAÇÃO" in col_name.upper():
+                            insert_pos = c_idx
+                            break
+                    ws.insert_cols([[col_consolidado]], col=insert_pos)
+                    cons_col_idx = insert_pos
+                    header_vals = ws.row_values(header_row_idx)
+
+                c_letter = self._col_idx_to_letter(cons_col_idx)
+                for rubrica, valor in totais_ano.items():
+                    if rubrica in row_map and valor > 0:
+                        updates.append({"range": f"{c_letter}{row_map[rubrica]}", "values": [[f"R$ {valor:.2f}".replace(".", ",")]]})
 
         if updates:
             ws.batch_update(updates)

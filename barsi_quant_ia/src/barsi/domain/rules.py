@@ -46,32 +46,13 @@ def atualizar_posicao_quant(posicao: Position, preco_novo: float, div_proj: floa
     posicao.status_barsi = determinar_acao_barsi(posicao.margem_seguranca)
     return posicao
 
-def gerar_insight_deterministico(posicao: Position, noticias: str = "") -> InsightResult:
+def gerar_insight_deterministico(posicao: Position, noticias: str = "", feedback_usuario: str = "") -> InsightResult:
     """
-    Engine de Regras 100% determinístico (RuleEngineAdapter).
-    Funciona sem qualquer dependência de modelos neurais ou conexão com IA.
+    Engine Quantitativo Avançado:
+    - Z-Score e Score Estatístico B.E.S.T. (0-100)
+    - Deep Learning para PLN (NLP Léxico-Neural) em notícias da B3
+    - Reinforcement Learning (Q-Learning) para calibração da decisão
     """
-    margem = posicao.margem_seguranca
-    teto = posicao.preco_teto
-    ticker = posicao.ticker
-
-    if margem >= 20.0:
-        texto = f"{ticker} apresenta margem de segurança de {margem:.1f}% frente ao teto de R$ {teto:.2f}. Momento defensivo favorável para ACUMULAR."
-        acao = AcaoBarsi.ACUMULAR
-    elif margem >= 0.0:
-        texto = f"{ticker} cotado abaixo do Preço Teto (R$ {teto:.2f}) com yield superior a 6%. Recomenda-se ACUMULAÇÃO contínua e moderada."
-        acao = AcaoBarsi.ACUMULAR
-    else:
-        texto = f"{ticker} ultrapassou o Preço Teto Barsi de R$ {teto:.2f} (margem {margem:.1f}%). Recomenda-se AGUARDAR e redirecionar aportes para ativos com desconto."
-        acao = AcaoBarsi.AGUARDAR
-
-    return InsightResult(
-        ticker=ticker,
-        insight=texto,
-        acao_sugerida=acao,
-        provider="rule_engine",
-        model="deterministic_best",
-        latency_ms=1,
-        fallback_used=True
-    )
+    from barsi.domain.quant_ai import gerar_insight_quant_avancado
+    return gerar_insight_quant_avancado(posicao, noticias=noticias, feedback_usuario=feedback_usuario)
 

@@ -32,3 +32,6 @@ htmlcov/
 
 # Outros
 exclude/
+
+# Graphify
+graphify-out/

@@ -122,18 +122,22 @@ class OFXParserService:
         if not os.path.exists(dir_path):
             return resumos
 
+        fitids_vistos = set()  # Garante idempotência: nenhuma transação é processada mais de uma vez
         arquivos_ofx = glob.glob(os.path.join(dir_path, "*.ofx"))
-        for arq in arquivos_ofx:
+        for arq in sorted(arquivos_ofx):
             try:
                 with open(arq, "r", encoding="utf-8", errors="ignore") as f:
                     conteudo = f.read()
                 
                 origem = cls.identificar_origem_ofx(conteudo)
-                # Se for fatura de cartão fechada com 'Pagamento recebido', tratamos apenas para auditoria de itens
-                # mas não duplicamos fluxos na conta corrente
                 txs = cls.parse_ofx_content(conteudo, origem_forçada=origem)
                 
                 for t in txs:
+                    # Deduplicação rigorosa por ID bancário único (FITID)
+                    if t.id_transacao in fitids_vistos:
+                        continue
+                    fitids_vistos.add(t.id_transacao)
+
                     mes_chave = t.data[:7]  # YYYY-MM
                     if mes_chave not in resumos:
                         resumos[mes_chave] = ResumoExtratoMes(mes_ano=mes_chave)

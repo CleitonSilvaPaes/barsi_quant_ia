@@ -85,3 +85,19 @@ def test_ofx_estorno_e_cancelamento_fii():
         assert r.compras_fiis == 311.95
         assert r.total_investimentos == 311.95
 
+def test_ofx_idempotencia_duplicacao():
+    """Garante que se o mesmo extrato for adicionado duas vezes ou reprocessado, os valores não se multiplicam."""
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Cria dois arquivos com o mesmo conteúdo/FITIDs
+        for i in [1, 2]:
+            fpath = os.path.join(tmpdir, f"extrato_copia_{i}.ofx")
+            with open(fpath, "w", encoding="utf-8") as f:
+                f.write(SAMPLE_OFX)
+        
+        resumos = OFXParserService.processar_diretorio_extratos(tmpdir)
+        r = resumos["2026-11"]
+        # Mesmo com 2 arquivos idênticos, o salário deve ser contado apenas 1 vez (4340.50), e não duplicado
+        assert r.salario_entradas == 4340.50
+        assert r.compras_acoes_barsi == 312.40
+
