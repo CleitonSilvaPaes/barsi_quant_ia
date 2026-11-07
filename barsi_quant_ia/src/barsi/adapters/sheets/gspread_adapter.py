@@ -108,12 +108,12 @@ class GSpreadAdapter(SheetsPort):
                 updates = []
                 for p in positions:
                     row = p.row_index
-                    # Col H: Cotação Atual
-                    updates.append({"range": f"H{row}", "values": [[f"R$ {p.preco_atual:.2f}".replace(".", ",")]]})
-                    # Col J: Preço Teto Barsi
-                    updates.append({"range": f"J{row}", "values": [[f"R$ {p.preco_teto:.2f}".replace(".", ",")]]})
-                    # Col K: Margem de Segurança
-                    updates.append({"range": f"K{row}", "values": [[f"{p.margem_seguranca:.2f}%".replace(".", ",")]]})
+                    # Col H: Cotação Atual (numérico puro para viabilizar fórmulas)
+                    updates.append({"range": f"H{row}", "values": [[round(p.preco_atual, 2)]]})
+                    # Col J: Preço Teto Barsi (numérico puro)
+                    updates.append({"range": f"J{row}", "values": [[round(p.preco_teto, 2)]]})
+                    # Col K: Margem de Segurança (decimal puro para exibição em %)
+                    updates.append({"range": f"K{row}", "values": [[round(p.margem_seguranca / 100.0, 4)]]})
                     # Col P: Status Recomendação Barsi
                     updates.append({"range": f"P{row}", "values": [[p.status_barsi.value]]})
                 ws.batch_update(updates)

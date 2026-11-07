@@ -51,6 +51,31 @@ def api(
     setup_logging(settings.log_level)
     uvicorn.run("barsi.api.http:app", host=host, port=port, reload=False, log_level="warning")
 
+@app.command()
+def extratos(
+    dir_path: str = typer.Option("extratos", "--dir", help="Pasta com arquivos de extrato .ofx")
+):
+    """Lê e processa os extratos bancários da pasta extratos/ para conciliação Barsi."""
+    from barsi.services.ofx_service import OFXParserService
+    resumos = OFXParserService.processar_diretorio_extratos(dir_path)
+    if not resumos:
+        typer.echo(f"[!] Nenhum extrato .ofx encontrado em '{dir_path}'")
+        return
+
+    typer.echo("\n========================================================")
+    typer.echo("   CONCILIAÇÃO BANCÁRIA & APORTES (MÉTODO BARSI)       ")
+    typer.echo("========================================================")
+    for mes, r in sorted(resumos.items()):
+        typer.echo(f"\n📅 Mês de Referência: {mes}")
+        typer.echo(f"   (+) Salário / Renda Principal : R$ {r.salario_entradas:>9.2f}")
+        typer.echo(f"   (+) Proventos B3 / Dividendos : R$ {r.proventos_recebidos:>9.2f}")
+        typer.echo(f"   (-) Compras de Ações e FIIs   : R$ {r.compras_acoes_barsi:>9.2f}")
+        if r.detalhes_ativos:
+            for t, val in r.detalhes_ativos.items():
+                typer.echo(f"       • {t:<6} : R$ {val:>8.2f}")
+        typer.echo(f"   (-) Faturas e Tributos        : R$ {r.faturas_e_boletos:>9.2f}")
+        typer.echo(f"   (-) Total de Saídas           : R$ {r.total_saidas:>9.2f}")
+
 if __name__ == "__main__":
     app()
 
