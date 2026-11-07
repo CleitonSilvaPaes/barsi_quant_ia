@@ -132,3 +132,4 @@ E para enviar os dados para a aba `Budget_Manager_Fluxo`:
 ```bash
 python -m barsi extratos --sync-sheet
 ```
+

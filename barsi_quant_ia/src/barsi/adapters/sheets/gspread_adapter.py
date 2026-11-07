@@ -142,6 +142,7 @@ class GSpreadAdapter(SheetsPort):
                     ws_ia.update(range_name="A11:M20", values=log_rows)
 
                 logger.info("google_sheets_pro_updated", count=len(positions))
+                self._sync_to_local_xlsx(positions)
                 return
 
             # Cenário 2: Layout Legado
@@ -157,17 +158,16 @@ class GSpreadAdapter(SheetsPort):
 
         await asyncio.to_thread(_update)
 
+    def _col_idx_to_letter(self, idx: int) -> str:
+        """Converte índice numérico (1, 2, 3...) em letra de coluna Excel/Sheets (A, B, C...)."""
+        string = ""
+        while idx > 0:
+            idx, remainder = divmod(idx - 1, 26)
+            string = chr(65 + remainder) + string
+        return string
+
     def sync_budget_manager(self, resumos: dict):
-        """Sincroniza os valores de conciliação de extratos com a aba Budget_Manager_Fluxo."""
-        # Pega o mês mais recente disponível nos resumos
-        meses_ordenados = sorted(resumos.keys())
-        if not meses_ordenados:
-            return
-        
-        # Pega preferencialmente novembro/2026 se presente
-        mes_alvo = "2026-11" if "2026-11" in resumos else meses_ordenados[-1]
-        r = resumos[mes_alvo]
-        
+        """Sincroniza os valores de conciliação de extratos com a aba Budget_Manager_Fluxo de forma 100% dinâmica."""
         sh = self._get_client_and_spreadsheet()
         worksheet_titles = [w.title for w in sh.worksheets()]
         if "Budget_Manager_Fluxo" not in worksheet_titles:
@@ -175,22 +175,114 @@ class GSpreadAdapter(SheetsPort):
             return
             
         ws = sh.worksheet("Budget_Manager_Fluxo")
+        all_rows = ws.get_all_values()
+        if len(all_rows) < 10:
+            return
+
+        header_row_idx = 9  # Linha do cabeçalho de colunas orçamentárias
+        header_vals = all_rows[header_row_idx - 1]
+
+        # Mapeia linhas por palavra-chave na coluna A para nunca depender de números de linha fixos
+        row_map = {}
+        for r_idx, row in enumerate(all_rows, start=1):
+            if not row:
+                continue
+            txt = row[0].strip().upper()
+            if "SALÁRIO" in txt:
+                row_map["salario"] = r_idx
+            elif "PROVENTOS RECEBIDOS" in txt or "DIVIDENDOS" in txt:
+                row_map["proventos"] = r_idx
+            elif "FATURA CARTÃO" in txt or "FATURA" in txt:
+                row_map["fatura"] = r_idx
+            elif "NOVO DEPÓSITO NO COLCHÃO" in txt or "COLCHÃO" in txt:
+                row_map["colchao"] = r_idx
+            elif "AÇÕES B.E.S.T." in txt:
+                row_map["acoes"] = r_idx
+            elif "FII PAPEL" in txt or "MXRF11" in txt:
+                row_map["fiis"] = r_idx
+
+        meses_pt = {
+            "01": "Janeiro", "02": "Fevereiro", "03": "Março", "04": "Abril",
+            "05": "Maio", "06": "Junho", "07": "Julho", "08": "Agosto",
+            "09": "Setembro", "10": "Outubro", "11": "Novembro", "12": "Dezembro"
+        }
+
         updates = []
-        
-        if r.salario_entradas > 0:
-            updates.append({"range": "C11", "values": [[f"R$ {r.salario_entradas:.2f}".replace(".", ",")]]})
-        if r.proventos_recebidos > 0:
-            updates.append({"range": "C12", "values": [[f"R$ {r.proventos_recebidos:.2f}".replace(".", ",")]]})
-        if r.faturas_cartao > 0:
-            updates.append({"range": "C17", "values": [[f"R$ {r.faturas_cartao:.2f}".replace(".", ",")]]})
-        if r.reserva_rdb > 0:
-            updates.append({"range": "C27", "values": [[f"R$ {r.reserva_rdb:.2f}".replace(".", ",")]]})
-        if r.compras_acoes_barsi > 0:
-            updates.append({"range": "C31", "values": [[f"R$ {r.compras_acoes_barsi:.2f}".replace(".", ",")]]})
-        if r.compras_fiis > 0:
-            updates.append({"range": "C32", "values": [[f"R$ {r.compras_fiis:.2f}".replace(".", ",")]]})
-            
+        for mes_chave, r in sorted(resumos.items()):
+            if r.total_entradas == 0 and r.total_saidas == 0:
+                continue
+
+            partes = mes_chave.split("-")
+            if len(partes) != 2:
+                continue
+            ano, mes_num = partes[0], partes[1]
+            nome_mes = f"{meses_pt.get(mes_num, mes_num)}/{ano}"
+
+            # Procura a coluna do mês no cabeçalho
+            target_col_idx = None
+            for c_idx, col_name in enumerate(header_vals, start=1):
+                if nome_mes.lower() in col_name.lower():
+                    target_col_idx = c_idx
+                    break
+
+            # Se o mês não existe na planilha (ex: Dezembro/2026 novo), insere a coluna automaticamente
+            if not target_col_idx:
+                insert_before_idx = len(header_vals)
+                for c_idx, col_name in enumerate(header_vals, start=1):
+                    if "VARIAÇÃO" in col_name.upper():
+                        insert_before_idx = c_idx
+                        break
+                ws.insert_cols([[f"{nome_mes} (R$)"]], col=insert_before_idx)
+                target_col_idx = insert_before_idx
+                header_vals = ws.row_values(header_row_idx)
+
+            col_letter = self._col_idx_to_letter(target_col_idx)
+
+            if "salario" in row_map and r.salario_entradas > 0:
+                updates.append({"range": f"{col_letter}{row_map['salario']}", "values": [[f"R$ {r.salario_entradas:.2f}".replace(".", ",")]]})
+            if "proventos" in row_map and r.proventos_recebidos > 0:
+                updates.append({"range": f"{col_letter}{row_map['proventos']}", "values": [[f"R$ {r.proventos_recebidos:.2f}".replace(".", ",")]]})
+            if "fatura" in row_map and r.faturas_cartao > 0:
+                updates.append({"range": f"{col_letter}{row_map['fatura']}", "values": [[f"R$ {r.faturas_cartao:.2f}".replace(".", ",")]]})
+            if "colchao" in row_map and r.reserva_rdb > 0:
+                updates.append({"range": f"{col_letter}{row_map['colchao']}", "values": [[f"R$ {r.reserva_rdb:.2f}".replace(".", ",")]]})
+            if "acoes" in row_map and r.compras_acoes_barsi > 0:
+                updates.append({"range": f"{col_letter}{row_map['acoes']}", "values": [[f"R$ {r.compras_acoes_barsi:.2f}".replace(".", ",")]]})
+            if "fiis" in row_map and r.compras_fiis > 0:
+                updates.append({"range": f"{col_letter}{row_map['fiis']}", "values": [[f"R$ {r.compras_fiis:.2f}".replace(".", ",")]]})
+
         if updates:
             ws.batch_update(updates)
-            logger.info("budget_manager_synced", mes=mes_alvo, updates=len(updates))
+            logger.info("budget_manager_dynamic_synced", updates=len(updates))
+
+    def _sync_to_local_xlsx(self, positions: List[Position], file_path: str = "carteira_barsi_quant_ia.xlsx"):
+        """Atualiza a planilha Excel local (.xlsx) mantendo paridade 100% com o Google Sheets."""
+        if not os.path.exists(file_path):
+            return
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(file_path)
+            sheet_names = wb.sheetnames
+
+            # Cenário 1: Layout Pro
+            if "Screener_BEST_Custodia" in sheet_names:
+                ws = wb["Screener_BEST_Custodia"]
+                for p in positions:
+                    r = p.row_index
+                    ws[f"H{r}"] = round(p.preco_atual, 2)
+                    ws[f"J{r}"] = round(p.preco_teto, 2)
+                    ws[f"K{r}"] = round(p.margem_seguranca / 100.0, 4)
+                    ws[f"P{r}"] = p.status_barsi.value
+            elif "Dashboard Barsi" in sheet_names:
+                ws = wb["Dashboard Barsi"]
+                for p in positions:
+                    r = p.row_index
+                    ws[f"D{r}"] = round(p.preco_atual, 2)
+                    ws[f"I{r}"] = p.status_barsi.value
+                    ws[f"L{r}"] = p.insight_atual
+            
+            wb.save(file_path)
+            logger.info("local_xlsx_mirrored_successfully", path=file_path)
+        except Exception as exc:
+            logger.warn("local_xlsx_mirror_failed", error=str(exc))
 

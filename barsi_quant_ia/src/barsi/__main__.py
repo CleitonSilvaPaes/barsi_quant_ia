@@ -108,6 +108,62 @@ def extratos(
         else:
             typer.echo("[!] Adapter atual não suporta sync de orçamento.")
 
+@app.command()
+def tvbox(
+    ip: str = typer.Option("192.168.100.72", "--ip", help="IP da TV Box na rede"),
+    user: str = typer.Option("cleiton", "--user", help="Usuário SSH"),
+    password: str = typer.Option("compstream", "--pass", help="Senha SSH")
+):
+    """Consulta a telemetria ao vivo da TV Box (Temperatura, RAM, Uptime e Timer)."""
+    import paramiko
+    typer.echo(f"\n[+] Conectando na TV Box ({user}@{ip})...")
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        ssh.connect(ip, username=user, password=password, timeout=5)
+    except Exception as exc:
+        typer.echo(f"[!] Falha na conexão SSH com a TV Box: {exc}")
+        return
+
+    # Consulta temperatura
+    _, stdout, _ = ssh.exec_command("cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null || vcgencmd measure_temp")
+    temp_raw = stdout.read().decode().strip()
+    try:
+        temp_c = f"{float(temp_raw)/1000.0:.1f} °C" if temp_raw.isdigit() else temp_raw
+    except Exception:
+        temp_c = "N/D"
+
+    # Consulta memória RAM
+    _, stdout, _ = ssh.exec_command("free -h | awk '/Mem:/ {print $3 \" usados de \" $2 \" (\" $7 \" disponíveis)\"}'")
+    ram_info = stdout.read().decode().strip()
+
+    # Consulta Uptime
+    _, stdout, _ = ssh.exec_command("uptime -p")
+    uptime_info = stdout.read().decode().strip()
+
+    # Consulta status do timer
+    _, stdout, _ = ssh.exec_command("systemctl is-active barsi-sync.timer 2>/dev/null")
+    timer_status = stdout.read().decode().strip()
+
+    # Consulta última execução do service
+    _, stdout, _ = ssh.exec_command("systemctl show barsi.service --property=ActiveEnterTimestamp,ExecMainExitTimestamp,SubState --no-pager")
+    service_props = stdout.read().decode().strip()
+
+    ssh.close()
+
+    typer.echo("="*55)
+    typer.echo("      TELEMETRIA DA TV BOX (DEBIAN ARM64 - S905W)      ")
+    typer.echo("="*55)
+    typer.echo(f"🌡️  Temperatura CPU : {temp_c}")
+    typer.echo(f"🧠 Memória RAM     : {ram_info}")
+    typer.echo(f"⏱️  Tempo de Atividade: {uptime_info}")
+    typer.echo(f"⏰ Systemd Timer   : {'● ATIVO (Seg-Sex 09h-18h)' if timer_status == 'active' else '○ INATIVO'}")
+    typer.echo("\n📋 Última Execução:")
+    for line in service_props.splitlines():
+        if line:
+            typer.echo(f"   • {line}")
+    typer.echo("="*55 + "\n")
+
 if __name__ == "__main__":
     app()
 
