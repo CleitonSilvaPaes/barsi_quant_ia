@@ -122,8 +122,23 @@ class OFXParserService:
         if not os.path.exists(dir_path):
             return resumos
 
-        fitids_vistos = set()  # Garante idempotência: nenhuma transação é processada mais de uma vez
-        arquivos_ofx = glob.glob(os.path.join(dir_path, "*.ofx"))
+        # Descompacta automaticamente arquivos .zip presentes no diretório de extratos
+        import zipfile
+        for zip_file in glob.glob(os.path.join(dir_path, "*.zip")):
+            try:
+                with zipfile.ZipFile(zip_file, "r") as z:
+                    for f in z.namelist():
+                        if f.lower().endswith(".ofx"):
+                            base_name = os.path.basename(f)
+                            target_file = os.path.join(dir_path, base_name)
+                            if not os.path.exists(target_file):
+                                with open(target_file, "wb") as out_f:
+                                    out_f.write(z.read(f))
+            except Exception:
+                pass
+
+        transacoes_vistas = set()  # Garante idempotência: suporta estornos/cancelamentos com mesmo FITID
+        arquivos_ofx = glob.glob(os.path.join(dir_path, "**", "*.ofx"), recursive=True)
         for arq in sorted(arquivos_ofx):
             try:
                 with open(arq, "r", encoding="utf-8", errors="ignore") as f:
@@ -133,10 +148,11 @@ class OFXParserService:
                 txs = cls.parse_ofx_content(conteudo, origem_forçada=origem)
                 
                 for t in txs:
-                    # Deduplicação rigorosa por ID bancário único (FITID)
-                    if t.id_transacao in fitids_vistos:
+                    # Deduplicação rigorosa por ID, Tipo e Valor (trata débitos e estornos cancelados no mesmo FITID)
+                    tx_key = (t.id_transacao, t.tipo, round(t.valor, 2))
+                    if tx_key in transacoes_vistas:
                         continue
-                    fitids_vistos.add(t.id_transacao)
+                    transacoes_vistas.add(tx_key)
 
                     mes_chave = t.data[:7]  # YYYY-MM
                     if mes_chave not in resumos:
@@ -193,6 +209,15 @@ class OFXParserService:
 
                 # Consolida totais
                 for mes, r in resumos.items():
+                    # Se não houver pagamento de fatura na conta corrente, utiliza a soma dos débitos do cartão
+                    if r.faturas_cartao == 0.0:
+                        gastos_cartao = sum(
+                            abs(t.valor) for t in r.transacoes 
+                            if t.origem == "CARTAO" and (t.tipo == "DEBIT" or t.valor < 0)
+                        )
+                        if gastos_cartao > 0:
+                            r.faturas_cartao = round(gastos_cartao, 2)
+
                     r.faturas_e_boletos = round(r.faturas_cartao + r.tributos_e_taxas + r.moradia_e_familia + r.cooperativa_ailos, 2)
                     r.total_entradas = round(r.salario_entradas + r.proventos_recebidos + r.outras_entradas, 2)
                     r.total_saidas = round(r.faturas_e_boletos + r.reserva_rdb + r.total_investimentos + r.despesas_variaveis, 2)

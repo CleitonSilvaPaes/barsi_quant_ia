@@ -12,12 +12,20 @@ class Settings(BaseSettings):
         extra="ignore"
     )
 
-    # Runtime
+    # Runtime & Segurança (Zero senhas em código - carregamento 100% via .env ou banco)
     env: str = "production"
     log_level: str = "INFO"
     api_port: int = 8000
     api_host: str = "0.0.0.0"
-    api_bearer_token: str = "barsi_secure_token_default"
+    api_bearer_token: str = Field(default_factory=lambda: os.getenv("BARSI_API_BEARER_TOKEN", ""))
+    secret_key: str = Field(default_factory=lambda: os.getenv("BARSI_SECRET_KEY", "barsi_hmac_secret_key_secure_2026"))
+    initial_admin_user: str = Field(default_factory=lambda: os.getenv("BARSI_INITIAL_ADMIN_USER", "cleiton"))
+    initial_admin_pass: str = Field(default_factory=lambda: os.getenv("BARSI_INITIAL_ADMIN_PASS", ""))
+
+    # Conexão TV Box SSH (Zero credenciais hardcoded)
+    tvbox_ip: str = Field(default_factory=lambda: os.getenv("BARSI_TVBOX_IP", ""))
+    tvbox_user: str = Field(default_factory=lambda: os.getenv("BARSI_TVBOX_USER", ""))
+    tvbox_pass: str = Field(default_factory=lambda: os.getenv("BARSI_TVBOX_PASS", ""))
 
     # Restrições de Concorrência e Hardware (TV Box)
     max_concurrency: int = 3

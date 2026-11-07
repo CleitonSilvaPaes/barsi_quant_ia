@@ -101,3 +101,63 @@ def test_ofx_idempotencia_duplicacao():
         assert r.salario_entradas == 4340.50
         assert r.compras_acoes_barsi == 312.40
 
+def test_ofx_fatura_cartao_sem_duplicidade():
+    """Valida que extrato de cartão não causa contagem duplicada e que fatura isolada é apurada corretamente."""
+    ofx_cartao = """OFXHEADER:100
+<OFX>
+<CREDITCARDMSGSRSV1>
+<CCACCTINFO>
+<BANKTRANLIST>
+<STMTTRN>
+<TRNTYPE>DEBIT</TRNTYPE>
+<DTPOSTED>20261102000000[-3:BRT]</DTPOSTED>
+<TRNAMT>-150.00</TRNAMT>
+<FITID>card-01</FITID>
+<MEMO>SUPERMERCADO KOCH</MEMO>
+</STMTTRN>
+<STMTTRN>
+<TRNTYPE>DEBIT</TRNTYPE>
+<DTPOSTED>20261103000000[-3:BRT]</DTPOSTED>
+<TRNAMT>-85.50</TRNAMT>
+<FITID>card-02</FITID>
+<MEMO>POSTO IPIRANGA</MEMO>
+</STMTTRN>
+</BANKTRANLIST>
+</CCACCTINFO>
+</CREDITCARDMSGSRSV1>
+</OFX>"""
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as tmpdir:
+        card_file = os.path.join(tmpdir, "fatura_cartao.ofx")
+        with open(card_file, "w", encoding="utf-8") as f:
+            f.write(ofx_cartao)
+        
+        # Cenário 1: Apenas fatura de cartão -> apura total_gastos_cartao como fatura
+        resumos = OFXParserService.processar_diretorio_extratos(tmpdir)
+        r = resumos["2026-11"]
+        assert r.faturas_cartao == 235.50
+        assert r.total_saidas == 235.50
+
+        # Cenário 2: Adiciona extrato de conta corrente com o pagamento da fatura já consolidado
+        conta_file = os.path.join(tmpdir, "extrato_conta.ofx")
+        ofx_conta = """OFXHEADER:100
+<OFX>
+<BANKTRANLIST>
+<STMTTRN>
+<TRNTYPE>DEBIT</TRNTYPE>
+<DTPOSTED>20261108000000[-3:BRT]</DTPOSTED>
+<TRNAMT>-235.50</TRNAMT>
+<FITID>conta-pagto-fatura</FITID>
+<MEMO>Pagamento de fatura Nubank</MEMO>
+</STMTTRN>
+</BANKTRANLIST>
+</OFX>"""
+        with open(conta_file, "w", encoding="utf-8") as f:
+            f.write(ofx_conta)
+
+        resumos2 = OFXParserService.processar_diretorio_extratos(tmpdir)
+        r2 = resumos2["2026-11"]
+        # Não deve duplicar (235.50 + 235.50 = 471). Deve permanecer estritamente 235.50!
+        assert r2.faturas_cartao == 235.50
+        assert r2.total_saidas == 235.50
+

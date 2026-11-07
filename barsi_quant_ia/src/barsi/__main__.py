@@ -109,18 +109,81 @@ def extratos(
             typer.echo("[!] Adapter atual não suporta sync de orçamento.")
 
 @app.command()
-def tvbox(
-    ip: str = typer.Option("192.168.100.72", "--ip", help="IP da TV Box na rede"),
-    user: str = typer.Option("cleiton", "--user", help="Usuário SSH"),
-    password: str = typer.Option("compstream", "--pass", help="Senha SSH")
+def sync_tvbox(
+    ip: Optional[str] = typer.Option(None, "--ip", help="IP da TV Box na rede (lê de BARSI_TVBOX_IP se nulo)"),
+    user: Optional[str] = typer.Option(None, "--user", help="Usuário SSH (lê de BARSI_TVBOX_USER se nulo)"),
+    password: Optional[str] = typer.Option(None, "--pass", help="Senha SSH (lê de BARSI_TVBOX_PASS se nulo)")
 ):
-    """Consulta a telemetria ao vivo da TV Box (Temperatura, RAM, Uptime e Timer)."""
-    import paramiko
-    typer.echo(f"\n[+] Conectando na TV Box ({user}@{ip})...")
+    """Sincroniza todos os fontes, modelos, templates e extratos da máquina local para a TV Box."""
+    import os, glob, getpass, paramiko
+    from scp import SCPClient
+
+    target_ip = ip or settings.tvbox_ip or "192.168.100.72"
+    target_user = user or settings.tvbox_user or "cleiton"
+    target_pass = password or settings.tvbox_pass or getpass.getpass(f"Senha SSH para {target_user}@{target_ip}: ")
+
+    typer.echo(f"\n[+] Conectando na TV Box ({target_user}@{target_ip}) para sincronização completa...")
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     try:
-        ssh.connect(ip, username=user, password=password, timeout=5)
+        ssh.connect(target_ip, username=target_user, password=target_pass, timeout=8)
+    except Exception as exc:
+        typer.echo(f"[!] Falha na conexão SSH com a TV Box: {exc}")
+        return
+
+    # Garante diretórios essenciais na TV Box
+    ssh.exec_command("mkdir -p /home/cleiton/barsi_quant_ia/extratos /home/cleiton/barsi_quant_ia/src/barsi/api/templates /home/cleiton/barsi_quant_ia/memory")
+
+    with SCPClient(ssh.get_transport()) as scp:
+        # 1. Extratos
+        typer.echo("    - Sincronizando extratos bancários (.ofx)...")
+        for f in glob.glob("extratos/*.ofx"):
+            scp.put(f, f"/home/cleiton/barsi_quant_ia/extratos/{os.path.basename(f)}")
+
+        # 2. Código fonte principal
+        typer.echo("    - Sincronizando código fonte e adaptadores...")
+        root_src = "barsi_quant_ia/src/barsi" if os.path.exists("barsi_quant_ia/src/barsi") else "src/barsi"
+        for root, _, files in os.walk(root_src):
+            for file in files:
+                if file.endswith((".py", ".html", ".json", ".sql")) and "__pycache__" not in root:
+                    local_p = os.path.join(root, file)
+                    rel_p = os.path.relpath(local_p, root_src).replace("\\", "/")
+                    remote_p = f"/home/cleiton/barsi_quant_ia/src/barsi/{rel_p}"
+                    remote_dir = os.path.dirname(remote_p)
+                    ssh.exec_command(f"mkdir -p {remote_dir}")
+                    scp.put(local_p, remote_p)
+
+        # 3. Credentials se existir
+        cred_p = "barsi_quant_ia/credentials.json" if os.path.exists("barsi_quant_ia/credentials.json") else "credentials.json"
+        if os.path.exists(cred_p):
+            scp.put(cred_p, "/home/cleiton/barsi_quant_ia/credentials.json")
+
+    typer.echo("    - Reiniciando serviço barsi-api na TV Box...")
+    stdin, stdout, stderr = ssh.exec_command("sudo systemctl restart barsi-api.service", get_pty=True)
+    stdin.write(f"{target_pass}\n")
+    stdin.flush()
+    stdout.channel.recv_exit_status()
+    ssh.close()
+    typer.echo("[✔] TV Box sincronizada com sucesso e serviço reiniciado!\n")
+
+@app.command()
+def tvbox(
+    ip: Optional[str] = typer.Option(None, "--ip", help="IP da TV Box na rede (lê de BARSI_TVBOX_IP se nulo)"),
+    user: Optional[str] = typer.Option(None, "--user", help="Usuário SSH (lê de BARSI_TVBOX_USER se nulo)"),
+    password: Optional[str] = typer.Option(None, "--pass", help="Senha SSH (lê de BARSI_TVBOX_PASS se nulo)")
+):
+    """Consulta a telemetria ao vivo da TV Box (Temperatura, RAM, Uptime e Timer)."""
+    import getpass, paramiko
+
+    target_ip = ip or settings.tvbox_ip or "192.168.100.72"
+    target_user = user or settings.tvbox_user or "cleiton"
+    target_pass = password or settings.tvbox_pass or getpass.getpass(f"Senha SSH para {target_user}@{target_ip}: ")
+
+    typer.echo(f"\n[+] Conectando na TV Box ({target_user}@{target_ip})...")
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        ssh.connect(target_ip, username=target_user, password=target_pass, timeout=5)
     except Exception as exc:
         typer.echo(f"[!] Falha na conexão SSH com a TV Box: {exc}")
         return
@@ -163,6 +226,40 @@ def tvbox(
         if line:
             typer.echo(f"   • {line}")
     typer.echo("="*55 + "\n")
+
+@app.command()
+def user_add(
+    username: str = typer.Argument(..., help="Nome de usuário"),
+    password: str = typer.Argument(..., help="Senha de acesso"),
+    role: str = typer.Option("leitor", "--role", help="Perfil: admin | investidor | leitor")
+):
+    """Cria um usuário criptografado no banco SQLite com perfil de acesso (RBAC)."""
+    from barsi.adapters.history.user_repository import UserRepository
+    repo = UserRepository(settings.sqlite_db_path)
+    if role not in ["admin", "investidor", "leitor"]:
+        typer.echo("[!] Perfil inválido! Escolha: admin | investidor | leitor")
+        return
+    ok = repo.create_user(username, password, role=role)
+    if ok:
+        typer.echo(f"[✔] Usuário '{username}' criado com sucesso no banco SQLite! Perfil: {role.upper()}")
+    else:
+        typer.echo(f"[!] Erro: Usuário '{username}' já existe no banco.")
+
+@app.command()
+def user_list():
+    """Lista todos os usuários e perfis cadastrados no banco de dados SQLite."""
+    from barsi.adapters.history.user_repository import UserRepository
+    repo = UserRepository(settings.sqlite_db_path)
+    rows = repo.list_users()
+
+    typer.echo("\n=======================================================")
+    typer.echo("     USUÁRIOS E PERFIS DE ACESSO (SQLITE RBAC)        ")
+    typer.echo("=======================================================")
+    if not rows:
+        typer.echo("Nenhum usuário cadastrado.")
+    for r in rows:
+        typer.echo(f" • ID: {r['id']} | Usuário: {r['username']:<12} | Perfil: {r['role'].upper():<10} | Permissões: {r['permissoes']}")
+    typer.echo("=======================================================\n")
 
 if __name__ == "__main__":
     app()

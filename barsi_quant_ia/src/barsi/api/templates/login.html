@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Login — Barsi Quant IA</title>
+  <style>
+    body { background: #0f172a; color: #f8fafc; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+    .card { background: #1e293b; padding: 2.5rem; border-radius: 1rem; border: 1px solid #334155; width: 100%; max-width: 360px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+    h2 { color: #38bdf8; margin-top: 0; text-align: center; margin-bottom: 1.5rem; }
+    input { width: 100%; box-sizing: border-box; padding: 0.75rem; margin-bottom: 1rem; background: #0f172a; border: 1px solid #475569; border-radius: 0.5rem; color: #fff; font-size: 1rem; }
+    button { width: 100%; padding: 0.75rem; background: #2563eb; color: #fff; border: none; border-radius: 0.5rem; font-weight: bold; font-size: 1rem; cursor: pointer; }
+    button:hover { background: #1d4ed8; }
+    .err { color: #ef4444; margin-bottom: 1rem; font-weight: 500; font-size: 0.9rem; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>🔐 Barsi Quant IA</h2>
+    {{ERROR_MSG}}
+    <form method="POST" action="/login">
+      <input type="text" name="username" placeholder="Usuário" required />
+      <input type="password" name="password" placeholder="Senha" required />
+      <button type="submit">Entrar no Painel</button>
+    </form>
+  </div>
+</body>
+</html>
+
