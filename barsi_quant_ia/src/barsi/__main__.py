@@ -53,7 +53,8 @@ def api(
 
 @app.command()
 def extratos(
-    dir_path: str = typer.Option("extratos", "--dir", help="Pasta com arquivos de extrato .ofx")
+    dir_path: str = typer.Option("extratos", "--dir", help="Pasta com arquivos de extrato .ofx"),
+    sync_sheet: bool = typer.Option(False, "--sync-sheet", help="Sincroniza valores consolidados na aba Budget_Manager_Fluxo")
 ):
     """Lê e processa os extratos bancários da pasta extratos/ para conciliação Barsi."""
     from barsi.services.ofx_service import OFXParserService
@@ -62,19 +63,50 @@ def extratos(
         typer.echo(f"[!] Nenhum extrato .ofx encontrado em '{dir_path}'")
         return
 
-    typer.echo("\n========================================================")
-    typer.echo("   CONCILIAÇÃO BANCÁRIA & APORTES (MÉTODO BARSI)       ")
-    typer.echo("========================================================")
+    typer.echo("\n" + "="*65)
+    typer.echo("    CONCILIAÇÃO BANCÁRIA & APORTES (MÉTODO LUIZ BARSI)        ")
+    typer.echo("="*65)
+    
     for mes, r in sorted(resumos.items()):
-        typer.echo(f"\n📅 Mês de Referência: {mes}")
-        typer.echo(f"   (+) Salário / Renda Principal : R$ {r.salario_entradas:>9.2f}")
+        if r.total_entradas == 0 and r.total_saidas == 0:
+            continue
+        typer.echo(f"\n📅 MÊS DE REFERÊNCIA: {mes}")
+        typer.echo(f"   (+) Salário CLT / Renda       : R$ {r.salario_entradas:>9.2f}")
         typer.echo(f"   (+) Proventos B3 / Dividendos : R$ {r.proventos_recebidos:>9.2f}")
-        typer.echo(f"   (-) Compras de Ações e FIIs   : R$ {r.compras_acoes_barsi:>9.2f}")
-        if r.detalhes_ativos:
-            for t, val in r.detalhes_ativos.items():
-                typer.echo(f"       • {t:<6} : R$ {val:>8.2f}")
-        typer.echo(f"   (-) Faturas e Tributos        : R$ {r.faturas_e_boletos:>9.2f}")
-        typer.echo(f"   (-) Total de Saídas           : R$ {r.total_saidas:>9.2f}")
+        if r.outras_entradas > 0:
+            typer.echo(f"   (+) Outras Entradas           : R$ {r.outras_entradas:>9.2f}")
+        typer.echo(f"   ──> TOTAL ENTRADAS REALIZADAS : R$ {r.total_entradas:>9.2f}")
+        
+        typer.echo(f"\n   💼 INVESTIMENTOS REALIZADOS (BARSI B.E.S.T.):")
+        typer.echo(f"       • Ações B.E.S.T. Total    : R$ {r.compras_acoes_barsi:>9.2f}")
+        typer.echo(f"       • FIIs (Papel/Tijolo)     : R$ {r.compras_fiis:>9.2f}")
+        typer.echo(f"       ──> TOTAL APORTADO B3     : R$ {r.total_investimentos:>9.2f}")
+        for t, val in r.detalhes_ativos.items():
+            typer.echo(f"           - {t:<6}                : R$ {val:>8.2f}")
+        
+        typer.echo(f"\n   🛡️ SAÍDAS OBRIGATÓRIAS & COLCHÃO:")
+        typer.echo(f"       • Fatura Nubank Fechada   : R$ {r.faturas_cartao:>9.2f}")
+        typer.echo(f"       • Moradia & Família (Pix) : R$ {r.moradia_e_familia:>9.2f}")
+        typer.echo(f"       • Tributos (DAS/Sefaz)    : R$ {r.tributos_e_taxas:>9.2f}")
+        if r.cooperativa_ailos > 0:
+            typer.echo(f"       • Cooperativa Ailos       : R$ {r.cooperativa_ailos:>9.2f}")
+        typer.echo(f"       • Colchão de Giro (RDB)   : R$ {r.reserva_rdb:>9.2f}")
+        if r.despesas_variaveis > 0:
+            typer.echo(f"       • Variáveis (Débito/Dia)  : R$ {r.despesas_variaveis:>9.2f}")
+        typer.echo(f"   ──> TOTAL DE SAÍDAS EFETIVAS  : R$ {r.total_saidas:>9.2f}")
+        typer.echo(f"   💵 SALDO LIVRE / RESIDUAL     : R$ {r.saldo_livre:>9.2f}")
+
+    if sync_sheet:
+        typer.echo("\n[+] Sincronizando com Google Sheets (Budget_Manager_Fluxo)...")
+        from barsi.config import Settings
+        from barsi.adapters.factory import AdapterFactory
+        cfg = Settings()
+        sheets_adapter = AdapterFactory.create_sheets_adapter(cfg)
+        if hasattr(sheets_adapter, "sync_budget_manager"):
+            sheets_adapter.sync_budget_manager(resumos)
+            typer.echo("[✔] Sincronização orçamentária concluída com sucesso no Google Sheets!")
+        else:
+            typer.echo("[!] Adapter atual não suporta sync de orçamento.")
 
 if __name__ == "__main__":
     app()

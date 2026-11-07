@@ -157,3 +157,40 @@ class GSpreadAdapter(SheetsPort):
 
         await asyncio.to_thread(_update)
 
+    def sync_budget_manager(self, resumos: dict):
+        """Sincroniza os valores de conciliação de extratos com a aba Budget_Manager_Fluxo."""
+        # Pega o mês mais recente disponível nos resumos
+        meses_ordenados = sorted(resumos.keys())
+        if not meses_ordenados:
+            return
+        
+        # Pega preferencialmente novembro/2026 se presente
+        mes_alvo = "2026-11" if "2026-11" in resumos else meses_ordenados[-1]
+        r = resumos[mes_alvo]
+        
+        sh = self._get_client_and_spreadsheet()
+        worksheet_titles = [w.title for w in sh.worksheets()]
+        if "Budget_Manager_Fluxo" not in worksheet_titles:
+            logger.warning("budget_manager_sheet_not_found")
+            return
+            
+        ws = sh.worksheet("Budget_Manager_Fluxo")
+        updates = []
+        
+        if r.salario_entradas > 0:
+            updates.append({"range": "C11", "values": [[f"R$ {r.salario_entradas:.2f}".replace(".", ",")]]})
+        if r.proventos_recebidos > 0:
+            updates.append({"range": "C12", "values": [[f"R$ {r.proventos_recebidos:.2f}".replace(".", ",")]]})
+        if r.faturas_cartao > 0:
+            updates.append({"range": "C17", "values": [[f"R$ {r.faturas_cartao:.2f}".replace(".", ",")]]})
+        if r.reserva_rdb > 0:
+            updates.append({"range": "C27", "values": [[f"R$ {r.reserva_rdb:.2f}".replace(".", ",")]]})
+        if r.compras_acoes_barsi > 0:
+            updates.append({"range": "C31", "values": [[f"R$ {r.compras_acoes_barsi:.2f}".replace(".", ",")]]})
+        if r.compras_fiis > 0:
+            updates.append({"range": "C32", "values": [[f"R$ {r.compras_fiis:.2f}".replace(".", ",")]]})
+            
+        if updates:
+            ws.batch_update(updates)
+            logger.info("budget_manager_synced", mes=mes_alvo, updates=len(updates))
+
