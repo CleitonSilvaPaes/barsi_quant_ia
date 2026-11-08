@@ -60,3 +60,30 @@ def test_user_repository_sqlite_crud():
         assert repo.authenticate("admin_user", "senha_errada") is None
         assert repo.authenticate("usuario_inexistente", "qualquer") is None
 
+
+def test_login_rate_limiting(monkeypatch, tmp_path):
+    """Valida que mais de 5 tentativas de login falhas no minuto bloqueiam tentativas subsequentes."""
+    from fastapi.testclient import TestClient
+    from barsi.api.http import app, _login_attempts
+    import barsi.api.http as http_module
+    from barsi.config import settings
+
+    test_db = str(tmp_path / "test_rl.db")
+    monkeypatch.setattr(settings, "sqlite_db_path", test_db)
+    http_module._user_repo_cache = None
+    _login_attempts.clear()
+
+    client = TestClient(app)
+
+    # 5 tentativas com senha errada
+    for i in range(5):
+        resp = client.post("/login", data={"username": "user", "password": "wrong_password"}, follow_redirects=False)
+        assert resp.status_code == 303
+        assert "error=Usu%C3%A1rio" in resp.headers["location"] or "error=Usuário" in resp.headers["location"]
+
+    # 6ª tentativa deve ser bloqueada por rate limit
+    blocked_resp = client.post("/login", data={"username": "user", "password": "wrong_password"}, follow_redirects=False)
+    assert blocked_resp.status_code == 303
+    assert "Muitas+tentativas" in blocked_resp.headers["location"]
+
+

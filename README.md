@@ -24,3 +24,4 @@ python -m barsi run
 # 4. Iniciar servidor web local
 uvicorn barsi.api.http:app --reload --port 8000
 ```
+

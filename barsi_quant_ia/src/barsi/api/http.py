@@ -187,7 +187,10 @@ def render_page(template_name: str, request: Request, page_title: str, active_na
 
     return HTMLResponse(content=html)
 
-# ----------------- ROTAS DE AUTENTICAÇÃO -----------------
+# ----------------- ROTAS DE AUTENTICAÇÃO & RATE LIMITING -----------------
+_login_attempts: Dict[str, List[float]] = {}
+LOGIN_RATE_LIMIT_MAX = 5
+LOGIN_RATE_LIMIT_WINDOW = 60.0  # Janela de 60 segundos
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(error: Optional[str] = None):
@@ -199,6 +202,14 @@ async def login_page(error: Optional[str] = None):
 
 @app.post("/login")
 async def do_login(request: Request):
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    now = time.time()
+    recent_attempts = [t for t in _login_attempts.get(client_ip, []) if now - t < LOGIN_RATE_LIMIT_WINDOW]
+
+    if len(recent_attempts) >= LOGIN_RATE_LIMIT_MAX:
+        logger.warning("login_rate_limited", ip=client_ip)
+        return RedirectResponse(url="/login?error=Muitas+tentativas.+Aguarde+1+minuto.", status_code=303)
+
     body = (await request.body()).decode("utf-8", errors="ignore")
     params = urllib.parse.parse_qs(body)
     username = params.get("username", [""])[0].strip()
@@ -207,11 +218,16 @@ async def do_login(request: Request):
     repo = get_user_repo()
     user = repo.authenticate(username, password)
     if user:
+        _login_attempts.pop(client_ip, None)
+        logger.info("login_success", ip=client_ip, username=username, role=user["role"])
         token = create_session_token(user["id"], user["username"], user["role"], settings.secret_key)
         res = RedirectResponse(url="/", status_code=303)
         res.set_cookie(key="barsi_session", value=token, httponly=True, max_age=86400 * 7, samesite="lax")
         return res
 
+    recent_attempts.append(now)
+    _login_attempts[client_ip] = recent_attempts
+    logger.warning("login_failed", ip=client_ip, username=username, attempts=len(recent_attempts))
     return RedirectResponse(url="/login?error=Usuário+ou+senha+incorretos", status_code=303)
 
 @app.get("/logout")

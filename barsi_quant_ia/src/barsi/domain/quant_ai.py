@@ -1,8 +1,10 @@
 """Módulo de Inteligência Quantitativa, Deep Learning para NLP e Reinforcement Learning (RL) para o Método Barsi."""
+import os
 import re
 import math
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional, Any
 from barsi.domain.models import Position, AcaoBarsi, InsightResult
+from barsi.domain.tiny_mlp import TinyMLP
 
 # =====================================================================
 # 1. DEEP LEARNING LEVE PARA PROCESSAMENTO DE LINGUAGEM NATURAL (NLP)
@@ -235,7 +237,54 @@ rl_agent = QLearningBarsiAgent()
 
 
 # =====================================================================
-# 4. FUNÇÃO PRINCIPAL DE INSIGHT QUANTITATIVO AVANÇADO
+# 4. DIVIDEND SUSTAINABILITY SCORER (DSS - TINYMLP NEURAL NET)
+# =====================================================================
+class DividendSustainabilityScorer:
+    """Avaliador neural de sustentabilidade de dividendos baseado em TinyMLP (Edge ARM64)."""
+    _instance: Optional["DividendSustainabilityScorer"] = None
+
+    def __init__(self, weights_path: Optional[str] = None):
+        if weights_path is None:
+            candidate_paths = [
+                "memory/dss_weights.json",
+                os.path.join(os.path.dirname(__file__), "..", "..", "..", "memory", "dss_weights.json"),
+                os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "memory", "dss_weights.json"),
+            ]
+            for p in candidate_paths:
+                if os.path.exists(p):
+                    weights_path = p
+                    break
+        self.mlp = TinyMLP(n_inputs=8, n_hidden=6, weights_path=weights_path)
+
+    @classmethod
+    def get(cls) -> "DividendSustainabilityScorer":
+        if cls._instance is None:
+            cls._instance = DividendSustainabilityScorer()
+        return cls._instance
+
+    def score(self, posicao: Position, extras: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        extras = extras or {}
+        div_proj = posicao.div_proj or 0.0
+        preco = posicao.preco_atual or 1.0
+        margem = posicao.margem_seguranca or 0.0
+
+        features = [
+            min(div_proj * 4.0 / max(extras.get("lucro_estimado", 1.0), 0.01), 2.0) / 2.0,
+            min(div_proj / max(preco, 0.01), 0.15) / 0.15,
+            1.0 / (1.0 + extras.get("deb_ebitda", 2.0)),
+            min(extras.get("roe", 0.15), 0.30) / 0.30,
+            extras.get("perenidade", 0.85),
+            min(max(margem / 100.0, -0.5), 1.0),
+            min(extras.get("anos_pagando", 5) / 10.0, 1.0),
+            1.0 / (1.0 + extras.get("vol_anual", 0.30)),
+        ]
+        prob = self.mlp.forward(features)
+        label = "ALTA" if prob >= 0.7 else ("MÉDIA" if prob >= 0.4 else "BAIXA")
+        badge = "🟢" if prob >= 0.7 else ("🟡" if prob >= 0.4 else "🔴")
+        return {"score": round(prob, 3), "label": label, "badge": badge}
+
+# =====================================================================
+# 5. FUNÇÃO PRINCIPAL DE INSIGHT QUANTITATIVO AVANÇADO
 # =====================================================================
 def gerar_insight_quant_avancado(posicao: Position, noticias: str = "", feedback_usuario: str = "") -> InsightResult:
     """
@@ -243,6 +292,7 @@ def gerar_insight_quant_avancado(posicao: Position, noticias: str = "", feedback
     1. Estatística B.E.S.T. (Z-Score, Yield e Score Quant 0-100).
     2. Deep Learning NLP para análise de sentimento de proventos.
     3. Contextual Reinforcement Learning (Q-Learning) para ação final.
+    4. TinyMLP Neural Network para sustentabilidade de dividendos (DSS).
     """
     # 1. Estatística
     stats = StatisticalBarsiEngine.calcular_metricas_estatisticas(posicao)
@@ -255,6 +305,9 @@ def gerar_insight_quant_avancado(posicao: Position, noticias: str = "", feedback
 
     # 3. Reinforcement Learning
     best_action, q_value = rl_agent.select_action(score_quant, sent_label, feedback_usuario or posicao.feedback_usuario)
+
+    # 4. TinyMLP - Dividend Sustainability Score (DSS)
+    dss = DividendSustainabilityScorer.get().score(posicao, extras={"perenidade": stats.get("perenidade_peso", 0.85)})
 
     if best_action == "ACUMULAR_FORTE":
         acao = AcaoBarsi.ACUMULAR
@@ -270,7 +323,8 @@ def gerar_insight_quant_avancado(posicao: Position, noticias: str = "", feedback
     insight_text = (
         f"Score Quant B.E.S.T.: {score_quant}/100 (Z-Score {z_score:+.2f}, DY Proj. {yield_proj:.1f}%). "
         f"Sentimento NLP B3: {sent_label} ({sent_score:+.2f}). "
-        f"Diretriz RL: {detalhe_acao} frente ao teto de R$ {posicao.preco_teto:.2f} (margem {posicao.margem_seguranca:.1f}%)."
+        f"Diretriz RL: {detalhe_acao} frente ao teto de R$ {posicao.preco_teto:.2f} (margem {posicao.margem_seguranca:.1f}%). "
+        f"Sustentabilidade do dividendo: {dss['badge']} {dss['label']} ({dss['score']:.0%})."
     )
 
     return InsightResult(
@@ -278,7 +332,7 @@ def gerar_insight_quant_avancado(posicao: Position, noticias: str = "", feedback
         insight=insight_text,
         acao_sugerida=acao,
         provider="quant_ai_engine",
-        model="mlp_nlp_plus_qlearning_rl",
+        model="mlp_nlp_plus_qlearning_rl_dss",
         latency_ms=2,
         fallback_used=True
     )
