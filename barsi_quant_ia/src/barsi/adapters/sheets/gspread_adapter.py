@@ -500,6 +500,7 @@ class GSpreadAdapter(SheetsPort):
                 for p in positions:
                     r = p.row_index
                     qtd_tot = p.qtd_antes + p.qtd_aporte
+                    ws[f"D{r}"] = p.qtd_antes
                     ws[f"E{r}"] = p.qtd_aporte
                     ws[f"F{r}"] = qtd_tot
                     ws[f"H{r}"] = round(p.preco_atual, 2)

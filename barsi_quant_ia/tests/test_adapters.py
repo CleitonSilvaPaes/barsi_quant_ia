@@ -167,3 +167,93 @@ def test_save_carteira_edits_allows_editing_qtd_atual():
     assert p_target.total_aporte == 308.34
     assert round(p_target.qtd_antes * p_target.preco_atual, 2) == 633.81
 
+
+def test_xlsx_adapter_persists_qtd_antes(tmp_path):
+    """Valida que XLSXAdapter persiste a coluna D (qtd_antes) mantendo paridade com Google Sheets."""
+    import openpyxl
+    import asyncio
+    from barsi.adapters.sheets.xlsx_adapter import XLSXAdapter
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Screener_BEST_Custodia"
+    ws["A10"] = "BBAS3"
+    xlsx_file = tmp_path / "test_cart.xlsx"
+    wb.save(xlsx_file)
+    wb.close()
+
+    adapter = XLSXAdapter(str(xlsx_file))
+    p = Position(
+        ticker="BBAS3",
+        row_index=10,
+        qtd_antes=37,
+        qtd_aporte=18,
+        preco_atual=17.13,
+        div_proj=2.30,
+    )
+    asyncio.run(adapter.update_positions([p]))
+
+    wb2 = openpyxl.load_workbook(xlsx_file, data_only=True)
+    ws2 = wb2["Screener_BEST_Custodia"]
+    assert ws2["D10"].value == 37
+    assert ws2["E10"].value == 18
+    assert ws2["F10"].value == 55
+    wb2.close()
+
+
+def test_notification_log_deduplication(tmp_path):
+    """Valida que notification_log impede múltiplos alertas para o mesmo ticker no mesmo dia."""
+    from barsi.adapters.history.budget_repository import BudgetRepository
+    db = tmp_path / "test_notif.db"
+    repo = BudgetRepository(db_path=str(db))
+
+    # Primeiro envio hoje -> True
+    assert repo.should_notify("BBAS3", "margem_20") is True
+
+    # Segundo envio no mesmo dia -> False (bloqueado pelo dedup)
+    assert repo.should_notify("BBAS3", "margem_20") is False
+
+    # Outro ticker no mesmo dia -> True
+    assert repo.should_notify("SAPR4", "margem_20") is True
+
+
+def test_save_carteira_endpoint_persists_qtd_antes(tmp_path, monkeypatch):
+    """Testa o endpoint real POST /api/carteira usando TestClient com autenticação e persistência de qtd_antes."""
+    from fastapi.testclient import TestClient
+    from barsi.api.http import app
+    from barsi.infra.security import create_session_token
+    from barsi.config import settings
+    from barsi.adapters.factory import AdapterFactory
+
+    mock_sheets = MockSheetsAdapter()
+    monkeypatch.setattr(AdapterFactory, "create_sheets_adapter", lambda cfg: mock_sheets)
+
+    client = TestClient(app)
+    token = create_session_token(user_id=1, username="admin_test", role="admin", secret_key=settings.secret_key)
+    client.cookies.set("barsi_session", token)
+
+    payload = {
+        "items": [{
+            "ticker": "BBAS3",
+            "row_index": 7,
+            "div_proj": 2.50,
+            "qtd_antes": 37,
+            "qtd_aporte": 18,
+            "feedback": "Aportar com margem alta"
+        }]
+    }
+
+    res = client.post("/api/carteira", json=payload)
+    assert res.status_code == 200
+    assert res.json()["status"] == "ok"
+    assert res.json()["updated_count"] == 1
+
+    # Valida que o mock_sheets recebeu a posição atualizada com qtd_antes=37
+    bbas3 = next(p for p in mock_sheets.positions if p.ticker == "BBAS3")
+    assert bbas3.qtd_antes == 37
+    assert bbas3.qtd_aporte == 18
+    assert bbas3.qtd_total == 55
+    assert bbas3.div_proj == 2.50
+
+
+

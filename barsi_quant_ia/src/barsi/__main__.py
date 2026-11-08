@@ -558,20 +558,29 @@ def keywords_remove(
 
 @keywords_app.command("test")
 def keywords_test(
-    memo: str = typer.Argument(..., help="Texto ou descrição do extrato para testar classificação")
+    memo: str = typer.Argument(..., help="Texto ou descrição do extrato para testar classificação"),
+    valor: float = typer.Option(-100.0, "--valor", help="Valor da transação (positivo=crédito, negativo=débito)"),
 ):
     """Testa qual categoria o classificador atribui a uma descrição de extrato."""
-    from barsi.services.ofx_service import OFXParserService
+    from barsi.services.ofx_service import OFXParserService, _classify_transaction
     OFXParserService.reload_keywords_from_db()
     trie = OFXParserService._get_trie()
-    match = trie.match(memo.upper())
+    tipo = "CREDIT" if valor > 0 else "DEBIT"
+    cat, ticker = _classify_transaction(
+        memo_upper=memo.upper(),
+        valor=valor,
+        tipo=tipo,
+        titular_nomes=settings.titular_nomes,
+        familiar_keywords=settings.familiar_keywords,
+        trie=trie,
+    )
     typer.echo(f"\n🔍 TESTE DE CLASSIFICAÇÃO:")
     typer.echo(f"   Memo analisado : '{memo}'")
-    if match:
-        cat, bucket, prio = match
-        typer.echo(f"   [✔] Categoria  : {cat} (Bucket: {bucket}, Prioridade: {prio})\n")
-    else:
-        typer.echo(f"   [!] Nenhuma palavra-chave coincidente encontrada.\n")
+    typer.echo(f"   Valor / Tipo   : R$ {valor:.2f} ({tipo})")
+    typer.echo(f"   [✔] Categoria  : {cat.value}")
+    if ticker:
+        typer.echo(f"   [✔] Ticker     : {ticker}")
+    typer.echo("")
 
 notify_app = typer.Typer(help="Envio e teste de notificações proativas (Telegram e WhatsApp)")
 app.add_typer(notify_app, name="notify")
@@ -618,8 +627,14 @@ def notify_get_chat_id():
         data = resp.json()
         results = data.get("result", [])
         if not results:
+            bot_username = "seu_bot"
+            try:
+                me_resp = httpx.get(f"https://api.telegram.org/bot{token}/getMe", timeout=5.0).json()
+                bot_username = me_resp.get("result", {}).get("username", "seu_bot")
+            except Exception:
+                pass
             typer.echo("\n[!] Nenhuma mensagem encontrada ainda!")
-            typer.echo("    1. Abra o link do seu bot: https://t.me/barsi_quant_meualerta_bot")
+            typer.echo(f"    1. Abra o link do seu bot: https://t.me/{bot_username}")
             typer.echo("    2. Clique em 'Começar' ou envie '/start'")
             typer.echo("    3. Execute este comando novamente: python -m barsi notify get-chat-id\n")
             return

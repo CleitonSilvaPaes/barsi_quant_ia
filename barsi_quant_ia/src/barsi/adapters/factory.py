@@ -47,13 +47,40 @@ class AdapterFactory:
     @staticmethod
     def create_sheets_adapter(cfg: Settings) -> SheetsPort:
         import os
-        if cfg.sheets_provider == "gspread" and os.path.exists(cfg.sheets_credentials_json):
+        cred_path = cfg.sheets_credentials_json
+        if not os.path.exists(cred_path):
+            candidates = [
+                "credentials.json",
+                "barsi_quant_ia/credentials.json",
+                os.path.join(os.path.dirname(__file__), "../../../credentials.json"),
+                os.path.join(os.path.dirname(__file__), "../../../barsi_quant_ia/credentials.json"),
+                os.path.join(os.getcwd(), "credentials.json"),
+                os.path.join(os.getcwd(), "barsi_quant_ia/credentials.json"),
+            ]
+            for c in candidates:
+                if os.path.exists(c):
+                    cred_path = c
+                    break
+
+        if cfg.sheets_provider == "gspread" and os.path.exists(cred_path):
             return GSpreadAdapter(
-                credentials_path=cfg.sheets_credentials_json,
+                credentials_path=cred_path,
                 spreadsheet_id=cfg.sheets_spreadsheet_id,
                 sqlite_db_path=cfg.sqlite_db_path,
             )
-        return XLSXAdapter(file_path=cfg.local_xlsx_path)
+
+        xlsx_path = cfg.local_xlsx_path
+        if not os.path.exists(xlsx_path):
+            for c in [
+                "carteira_barsi_quant_ia.xlsx",
+                "barsi_quant_ia/carteira_barsi_quant_ia.xlsx",
+                os.path.join(os.path.dirname(__file__), "../../../carteira_barsi_quant_ia.xlsx"),
+            ]:
+                if os.path.exists(c):
+                    xlsx_path = c
+                    break
+
+        return XLSXAdapter(file_path=xlsx_path)
 
     @staticmethod
     def create_history_adapter(cfg: Settings) -> HistoryPort:

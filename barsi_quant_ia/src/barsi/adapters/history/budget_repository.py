@@ -96,6 +96,16 @@ INIT_BUDGET_SCHEMA_SQL = """
         created_at   TEXT NOT NULL DEFAULT (datetime('now')),
         UNIQUE(keyword, category)
     );
+
+    -- 7. Histórico de notificações para desduplicação diária (máx 1 alerta por ticker/dia)
+    CREATE TABLE IF NOT EXISTS notification_log (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticker       TEXT NOT NULL,
+        alert_type   TEXT NOT NULL,
+        sent_date    TEXT NOT NULL DEFAULT (date('now')),
+        sent_at      TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(ticker, alert_type, sent_date)
+    );
 """
 
 DEFAULT_KEYWORDS: List[Tuple[str, str, str, int]] = [
@@ -499,3 +509,18 @@ class BudgetRepository:
                     insight_atual=r["insight_atual"] or ""
                 ))
             return positions
+
+    def should_notify(self, ticker: str, alert_type: str = "margem_20") -> bool:
+        """Deduplica notificações: retorna True se ainda não notificou este ticker/tipo hoje, e registra o envio."""
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT 1 FROM notification_log WHERE ticker=? AND alert_type=? AND sent_date=date('now')",
+                (ticker, alert_type),
+            ).fetchone()
+            if row:
+                return False
+            c.execute(
+                "INSERT OR IGNORE INTO notification_log (ticker, alert_type, sent_date) VALUES (?, ?, date('now'))",
+                (ticker, alert_type),
+            )
+            return True

@@ -10,9 +10,10 @@ from barsi.ports.ai import AIPort
 from barsi.ports.sheets import SheetsPort
 from barsi.ports.history import HistoryPort
 from barsi.ports.notifications import NotificationsPort
-from barsi.domain.models import Position, RunSummary
+from barsi.domain.models import Position, RunSummary, AcaoBarsi
 from barsi.domain.rules import atualizar_posicao_quant
 from barsi.services.insight_service import InsightService
+from barsi.adapters.history.budget_repository import BudgetRepository
 from barsi.infra.logging import logger
 from barsi.infra.events import event_bus
 
@@ -25,6 +26,7 @@ class SyncService:
         sheets: SheetsPort,
         history: HistoryPort,
         notifier: Optional[NotificationsPort] = None,
+        budget_repo: Optional[BudgetRepository] = None,
         max_concurrency: int = 3
     ):
         self.market = market
@@ -32,6 +34,7 @@ class SyncService:
         self.sheets = sheets
         self.history = history
         self.notifier = notifier
+        self.budget_repo = budget_repo
         self.insight_service = InsightService(ai, history)
         self.semaphore = asyncio.Semaphore(max_concurrency)
 
@@ -59,9 +62,16 @@ class SyncService:
             pos.insight_atual = insight_res.insight
             event_bus.publish("InsightGenerated", {"ticker": ticker, "insight": insight_res.insight})
 
-            # Notificação proativa (Telegram) se atingiu critérios de aporte
-            if self.notifier and not dry_run and not getattr(pos, "is_readonly", False):
-                if pos.margem_seguranca >= 20.0 and pos.status_barsi == "ACUMULAR":
+            # Notificação proativa (Telegram/WhatsApp) com deduplicação diária (máx 1 alerta/ticker/dia)
+            if self.notifier and not dry_run and pos.margem_seguranca >= 20.0 and pos.status_barsi == AcaoBarsi.ACUMULAR:
+                should_alert = True
+                if self.budget_repo:
+                    should_alert = self.budget_repo.should_notify(ticker, "margem_20")
+                elif hasattr(self.history, "db_path") and self.history.db_path:
+                    repo = BudgetRepository(db_path=self.history.db_path)
+                    should_alert = repo.should_notify(ticker, "margem_20")
+
+                if should_alert:
                     msg_body = (
                         f"📊 *Cotação Atual:* R$ {pos.preco_atual:.2f} | *Teto:* R$ {pos.preco_teto:.2f}\n"
                         f"🛡️ *Margem de Segurança:* {pos.margem_seguranca:.1f}%\n"

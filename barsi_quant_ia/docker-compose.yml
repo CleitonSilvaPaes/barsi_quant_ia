@@ -7,10 +7,6 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    environment:
-      - BARSI_ENV=production
-      - BARSI_AI_PROVIDER=rule_engine
-      - BARSI_MARKET_PROVIDER=yfinance
     volumes:
       - ./memory:/app/memory
       - ./cache:/app/cache
