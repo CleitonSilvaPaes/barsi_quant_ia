@@ -282,8 +282,12 @@ def test_export_xlsx_endpoint(auth_client, tmp_path, monkeypatch):
     assert "Screener_BEST_Custodia" in wb.sheetnames
     ws = wb["Screener_BEST_Custodia"]
     assert ws["A10"].value == "BBAS3"
+    assert ws["D10"].value == 0
+    assert ws["E10"].value == 0
     assert ws["H10"].value == 17.13
     assert ws["I10"].value == 2.30
+    assert ws["P10"].value == "AGUARDAR"
+    assert ws["Q10"].value == "NÃO"
     wb.close()
 
 def test_export_xlsx_empty_db_returns_400(auth_client, tmp_path, monkeypatch):

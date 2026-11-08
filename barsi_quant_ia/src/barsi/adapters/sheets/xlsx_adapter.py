@@ -8,6 +8,13 @@ from barsi.infra.logging import logger
 import openpyxl
 from openpyxl.styles import Font, Alignment
 
+XLSX_HEADERS = [
+    "Ticker", "Setor", "Empresa", "Qtd Antes", "Qtd Aporte",
+    "Qtd Total", "Preço Médio", "Preço Atual", "Div Proj",
+    "Preço Teto", "Margem Seg", "DY", "Valor Total", "Meta %",
+    "Total Aporte", "Status", "Teto Manual"
+]
+
 class XLSXAdapter(SheetsPort):
     def __init__(self, file_path: str = "carteira_barsi_quant_ia.xlsx"):
         candidate_paths = [
@@ -163,13 +170,7 @@ class XLSXAdapter(SheetsPort):
                 wb = openpyxl.Workbook()
                 ws = wb.active
                 ws.title = "Screener_BEST_Custodia"
-                headers = [
-                    "Ticker", "Setor", "Empresa", "Qtd Antes", "Qtd Aporte",
-                    "Qtd Total", "Preço Médio", "Preço Atual", "Div Proj",
-                    "Preço Teto", "Margem Seg", "DY", "Valor Total", "Meta %",
-                    "Total Aporte", "Status", "Teto Manual"
-                ]
-                for col_idx, h in enumerate(headers, start=1):
+                for col_idx, h in enumerate(XLSX_HEADERS, start=1):
                     ws.cell(row=9, column=col_idx, value=h)
                 for idx, p in enumerate(positions):
                     r = p.row_index if (p.row_index and p.row_index >= 10) else (10 + idx)

@@ -741,7 +741,7 @@ async def export_xlsx(request: Request):
     if not positions:
         raise HTTPException(status_code=400, detail="Nenhuma posição no SQLite para exportar.")
     
-    from barsi.adapters.sheets.xlsx_adapter import XLSXAdapter
+    from barsi.adapters.sheets.xlsx_adapter import XLSXAdapter, XLSX_HEADERS
     import openpyxl
 
     xlsx_path = getattr(settings, "local_xlsx_path", None) or "carteira_barsi_quant_ia.xlsx"
@@ -762,13 +762,7 @@ async def export_xlsx(request: Request):
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Screener_BEST_Custodia"
-        headers = [
-            "Ticker", "Setor", "Empresa", "Qtd Antes", "Qtd Aporte",
-            "Qtd Total", "Preço Médio", "Preço Atual", "Div Proj",
-            "Preço Teto", "Margem Seg", "DY", "Valor Total", "Meta %",
-            "Total Aporte", "Status", "Teto Manual"
-        ]
-        for col_idx, h in enumerate(headers, start=1):
+        for col_idx, h in enumerate(XLSX_HEADERS, start=1):
             ws.cell(row=9, column=col_idx, value=h)
         for idx, p in enumerate(positions):
             r = p.row_index if (p.row_index and p.row_index >= 10) else (10 + idx)
