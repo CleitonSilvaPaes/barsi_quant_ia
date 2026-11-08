@@ -1,6 +1,7 @@
 """API HTTP & Painel Web Interativo com Sidebar, Roteamento Modular e Perfis (RBAC)."""
 import os
 import time
+import asyncio
 import urllib.parse
 from datetime import datetime
 from typing import List, Optional, Dict, Any
@@ -135,6 +136,9 @@ def render_page(template_name: str, request: Request, page_title: str, active_na
     role_badge = f"{user['role'].upper()}"
     navs = ["home", "carteira", "aportes", "budget", "extratos", "insights", "analytics", "settings", "admin", "help"]
 
+    is_admin = (user.get("role") == "admin")
+    admin_nav_html = f'<a href="/admin" class="nav-item {"active" if active_nav == "admin" else ""}"><span class="icon">🔐</span> Admin & Usuários</a>' if is_admin else ""
+
     html = (
         base_html.replace("{{TITLE}}", page_title)
                  .replace("{{PAGE_HEADING}}", page_title)
@@ -145,6 +149,7 @@ def render_page(template_name: str, request: Request, page_title: str, active_na
                  .replace("{{UPTIME_STR}}", uptime_str)
                  .replace("{{AI_PROVIDER}}", settings.ai_provider.upper())
                  .replace("{{USER_NAME}}", f"{user['user']} ({role_badge})")
+                 .replace("{{NAV_ADMIN_ITEM}}", admin_nav_html)
     )
     for n in navs:
         html = html.replace(f"{{{{NAV_{n.upper()}}}}}", "active" if n == active_nav else "")
@@ -220,6 +225,11 @@ async def page_settings(request: Request):
 
 @app.get("/admin", response_class=HTMLResponse)
 async def page_admin(request: Request):
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    if user.get("role") != "admin":
+        return RedirectResponse(url="/?error=Acesso+restrito+a+administradores", status_code=303)
     return render_page("admin", request, "Administração & Usuários", "admin")
 
 @app.get("/help", response_class=HTMLResponse)
@@ -625,8 +635,22 @@ def get_real_benchmarks(snapshots: List[Dict[str, Any]]) -> Dict[str, Any]:
     except Exception as e:
         logger.warn("ifix_benchmark_fetch_failed", error=str(e))
 
-    # 4. CDI 12M Real de Referência Oficial
-    cdi_ret = 11.15
+    # 4. CDI 12M Real acumulado via Banco Central do Brasil (SGS Série 4390)
+    cdi_ret = None
+    try:
+        import urllib.request, json
+        bcb_url = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.4390/dados/ultimos/12?formato=json"
+        req = urllib.request.Request(bcb_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            bcb_data = json.loads(resp.read().decode("utf-8"))
+            if bcb_data and len(bcb_data) >= 6:
+                acum = 1.0
+                for m in bcb_data:
+                    acum *= (1.0 + float(m["valor"]) / 100.0)
+                cdi_ret = round((acum - 1.0) * 100.0, 2)
+    except Exception as e:
+        logger.warn("cdi_bcb_fetch_failed", error=str(e))
+        cdi_ret = 13.25
 
     spread_cdi = round(carteira_ret - cdi_ret, 2) if (carteira_ret is not None and cdi_ret is not None) else None
     spread_ibov = round(carteira_ret - ibov_ret, 2) if (carteira_ret is not None and ibov_ret is not None) else None
@@ -638,7 +662,7 @@ def get_real_benchmarks(snapshots: List[Dict[str, Any]]) -> Dict[str, Any]:
         "ifix_12m": ifix_ret,
         "spread_cdi": spread_cdi,
         "spread_ibov": spread_ibov,
-        "fonte": "Yahoo Finance (^BVSP, IFIX.SA) & B3 (Taxa DI)"
+        "fonte": "Yahoo Finance (^BVSP, IFIX.SA) & Banco Central do Brasil (SGS 4390)"
     }
     _benchmarks_cache = result
     _benchmarks_cache_time = now
@@ -651,7 +675,7 @@ async def get_benchmarks(request: Request):
         raise HTTPException(status_code=401, detail="Não autorizado")
     budget_repo = BudgetRepository(settings.sqlite_db_path)
     snapshots = budget_repo.get_portfolio_snapshots(12)
-    return get_real_benchmarks(snapshots)
+    return await asyncio.to_thread(get_real_benchmarks, snapshots)
 
 @app.get("/api/analytics/data")
 async def get_analytics_data(request: Request, months: int = 12):

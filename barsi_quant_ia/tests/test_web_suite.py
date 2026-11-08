@@ -41,8 +41,10 @@ def auth_client(monkeypatch, tmp_path):
     test_db = str(tmp_path / "test_suite.db")
     monkeypatch.setattr(settings, "sqlite_db_path", test_db)
 
-    # Bug 4 & T1: Reseta caches globais para isolamento estrito contra produção
+    # Bug 4, T1 & Issue 5: Reseta caches globais para isolamento estrito contra produção
     http_module._user_repo_cache = None
+    http_module._benchmarks_cache = None
+    http_module._benchmarks_cache_time = 0.0
     GSpreadAdapter.invalidate_cache()
 
     from barsi.adapters.history.user_repository import UserRepository
@@ -148,3 +150,25 @@ def test_build_real_portfolio_snapshots_with_price_history(tmp_path):
     # Snapshot final: 100*17.0 + 200*6.0 = 2900
     assert snapshots[-1]["patrimonio_total"] == 2900.0
     assert snapshots[-1]["data_snapshot"] == "2026-10-31"
+
+def test_admin_page_rbac_investidor_blocked(auth_client):
+    """Valida que usuários com role 'investidor' são bloqueados de acessar /admin e o link não aparece na sidebar."""
+    # 1. Usuário admin acessa normalmente
+    admin_res = auth_client.get("/admin")
+    assert admin_res.status_code == 200
+    assert "Admin & Usuários" in admin_res.text
+
+    # 2. Cria sessão com perfil 'investidor'
+    investidor_token = create_session_token(user_id=2, username="investidor_joao", role="investidor", secret_key=settings.secret_key)
+    investidor_client = TestClient(app)
+    investidor_client.cookies.set("barsi_session", investidor_token)
+
+    # Sidebar não deve exibir o link para /admin
+    home_res = investidor_client.get("/")
+    assert home_res.status_code == 200
+    assert "Admin & Usuários" not in home_res.text
+
+    # Tentativa de acesso direto a /admin deve ser bloqueada com redirecionamento
+    blocked_res = investidor_client.get("/admin", follow_redirects=False)
+    assert blocked_res.status_code == 303
+    assert "error=Acesso+restrito" in blocked_res.headers.get("location", "")

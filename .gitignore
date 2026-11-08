@@ -32,6 +32,8 @@ htmlcov/
 
 # Outros
 exclude/
+scratch/
+scratch_*.py
 
 # Graphify
 graphify-out/
