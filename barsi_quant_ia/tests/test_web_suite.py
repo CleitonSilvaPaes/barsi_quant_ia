@@ -2,9 +2,12 @@
 import pytest
 from fastapi.testclient import TestClient
 from barsi.api.http import app
+import barsi.api.http as http_module
 from barsi.infra.security import create_session_token
 from barsi.config import settings
 from barsi.adapters.factory import AdapterFactory
+from barsi.adapters.sheets.gspread_adapter import GSpreadAdapter
+from barsi.adapters.history.budget_repository import BudgetRepository
 from barsi.domain.models import Position, AcaoBarsi
 
 class MockSheetsAdapter:
@@ -37,6 +40,14 @@ def auth_client(monkeypatch, tmp_path):
     
     test_db = str(tmp_path / "test_suite.db")
     monkeypatch.setattr(settings, "sqlite_db_path", test_db)
+
+    # Bug 4 & T1: Reseta caches globais para isolamento estrito contra produção
+    http_module._user_repo_cache = None
+    GSpreadAdapter.invalidate_cache()
+
+    from barsi.adapters.history.user_repository import UserRepository
+    u_repo = UserRepository(test_db)
+    u_repo.create_user("admin_test", "pass123", "admin")
 
     client = TestClient(app)
     token = create_session_token(user_id=1, username="admin_test", role="admin", secret_key=settings.secret_key)
@@ -85,3 +96,55 @@ def test_analytics_data_api(auth_client):
     assert "dividendos" in data
     assert "Bancos" in data["setores"]
 
+def test_settings_test_telegram_endpoint(auth_client, monkeypatch):
+    """Bug 1: Valida que o endpoint de teste do Telegram usa notify assíncrono e não falha com AttributeError."""
+    class MockTelegramNotifier:
+        async def notify(self, title: str, body: str, level: str = "info") -> bool:
+            return True
+
+    monkeypatch.setattr(AdapterFactory, "create_notification_adapter", lambda cfg: MockTelegramNotifier())
+    res = auth_client.post("/api/settings/test/telegram")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["ok"] is True
+    assert "Telegram" in data["detail"]
+
+def test_analytics_benchmarks_endpoint(auth_client):
+    """Bug 3: Valida que o endpoint de benchmarks retorna dados estruturados sem campos hardcoded fictícios."""
+    res = auth_client.get("/api/analytics/benchmarks")
+    assert res.status_code == 200
+    data = res.json()
+    assert "cdi_12m" in data
+    assert "ibov_12m" in data
+    assert "fonte" in data
+    assert data["cdi_12m"] is not None
+
+def test_build_real_portfolio_snapshots_with_price_history(tmp_path):
+    """T3: Valida a construção da curva patrimonial real a partir de cotações históricas diárias no SQLite."""
+    test_db = str(tmp_path / "snap_test.db")
+    repo = BudgetRepository(test_db)
+    
+    pos = [
+        Position(ticker="BBAS3", row_index=10, qtd_antes=100, preco_atual=17.0, div_proj=2.0, status_barsi=AcaoBarsi.ACUMULAR, setor="Bancos"),
+        Position(ticker="SAPR4", row_index=11, qtd_antes=200, preco_atual=6.0, div_proj=0.5, status_barsi=AcaoBarsi.ACUMULAR, setor="Saneamento")
+    ]
+    repo.persist_positions(pos)
+    
+    dates_prices = [
+        ("2026-07-31", 15.0, 5.0),
+        ("2026-08-31", 16.0, 5.5),
+        ("2026-09-30", 16.5, 5.8),
+        ("2026-10-31", 17.0, 6.0)
+    ]
+    for dt, p_bbas, p_sapr in dates_prices:
+        repo.save_price_history("BBAS3", dt, p_bbas)
+        repo.save_price_history("SAPR4", dt, p_sapr)
+
+    snapshots = repo.build_real_portfolio_snapshots(limit_months=12)
+    assert len(snapshots) == 4
+    # Snapshot inicial: 100*15.0 + 200*5.0 = 2500
+    assert snapshots[0]["patrimonio_total"] == 2500.0
+    assert snapshots[0]["data_snapshot"] == "2026-07-31"
+    # Snapshot final: 100*17.0 + 200*6.0 = 2900
+    assert snapshots[-1]["patrimonio_total"] == 2900.0
+    assert snapshots[-1]["data_snapshot"] == "2026-10-31"

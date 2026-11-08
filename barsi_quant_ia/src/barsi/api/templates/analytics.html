@@ -1,3 +1,18 @@
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.5rem;">
+  <div>
+    <h2 style="margin: 0; font-size: 1.25rem; color: #fff;">📊 Inteligência e Performance da Carteira</h2>
+    <span style="font-size: 0.8rem; color: var(--text-muted);">Curva patrimonial, concentração setorial e comparativo relativo com o mercado</span>
+  </div>
+  <div style="display: flex; align-items: center; gap: 0.5rem;">
+    <label for="periodo-select" style="font-size: 0.85rem; color: var(--text-muted);">Período:</label>
+    <select id="periodo-select" class="tbl-input" style="width: auto; padding: 0.35rem 0.65rem;" onchange="carregarAnalytics()">
+      <option value="6">Últimos 6 Meses</option>
+      <option value="12" selected>Últimos 12 Meses</option>
+      <option value="24">Últimos 24 Meses</option>
+    </select>
+  </div>
+</div>
+
 <div class="grid-stats">
   <div class="stat-card">
     <h4>Patrimônio Total</h4>
@@ -7,24 +22,24 @@
   <div class="stat-card">
     <h4>Proventos Projetados / Ano</h4>
     <div class="val" id="an-proventos" style="color: var(--green);">R$ 0,00</div>
-    <div class="sub">Yield médio ponderado: ~11.8%</div>
+    <div class="sub" id="an-yield-sub">Yield projetado: calculando...</div>
   </div>
   <div class="stat-card">
     <h4>Spread vs CDI (12m)</h4>
-    <div class="val" style="color: var(--green);">+1,2 pp</div>
-    <div class="sub">Carteira: +12,4% | CDI: +11,2%</div>
+    <div class="val" id="an-spread-cdi-val" style="color: var(--green);">—</div>
+    <div class="sub" id="an-spread-cdi-sub">Carteira: — | CDI: —</div>
   </div>
   <div class="stat-card">
     <h4>Spread vs IBOV (12m)</h4>
-    <div class="val" style="color: var(--green);">+3,7 pp</div>
-    <div class="sub">Carteira: +12,4% | IBOV: +8,7%</div>
+    <div class="val" id="an-spread-ibov-val" style="color: var(--green);">—</div>
+    <div class="sub" id="an-spread-ibov-sub">Carteira: — | IBOV: —</div>
   </div>
 </div>
 
 <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem;">
   <!-- Gráfico 1: Curva de Evolução Patrimonial -->
   <div class="card" style="margin:0;">
-    <h3 style="color: var(--accent); font-size: 1.05rem; margin-bottom: 1rem;">📈 Curva de Evolução Patrimonial (Últimos 12 Meses)</h3>
+    <h3 style="color: var(--accent); font-size: 1.05rem; margin-bottom: 1rem;" id="title-equity-chart">📈 Curva de Evolução Patrimonial (Últimos 12 Meses)</h3>
     <div style="height: 300px; position: relative;">
       <canvas id="chart-equity"></canvas>
     </div>
@@ -51,7 +66,7 @@
 
   <!-- Tabela de Benchmarks -->
   <div class="card" style="margin:0;">
-    <h3 style="color: var(--accent); font-size: 1.05rem; margin-bottom: 1rem;">🏆 Comparativo de Retorno vs Benchmarks</h3>
+    <h3 style="color: var(--accent); font-size: 1.05rem; margin-bottom: 1rem;">🏆 Comparativo de Retorno vs Benchmarks Reais</h3>
     <table>
       <thead>
         <tr>
@@ -64,32 +79,32 @@
       <tbody>
         <tr>
           <td><strong>💼 Carteira Barsi Quant IA</strong></td>
-          <td style="text-align: right; font-weight:700; color:var(--accent);">+12,4%</td>
+          <td style="text-align: right; font-weight:700; color:var(--accent);" id="bm-carteira-ret">—</td>
           <td style="text-align: right;">—</td>
           <td style="text-align: center;"><span class="badge-acumular">PORTFÓLIO</span></td>
         </tr>
         <tr>
           <td>🏛️ CDI (Taxa Livre de Risco)</td>
-          <td style="text-align: right;">+11,2%</td>
-          <td style="text-align: right; color:var(--green); font-weight:600;">+1,2 pp</td>
-          <td style="text-align: center;"><span class="badge-acumular">SUPEROU</span></td>
+          <td style="text-align: right;" id="bm-cdi-ret">—</td>
+          <td style="text-align: right; font-weight:600;" id="bm-cdi-spread">—</td>
+          <td style="text-align: center;" id="bm-cdi-status">—</td>
         </tr>
         <tr>
           <td>🇧🇷 IBOVESPA (Bolsa Geral)</td>
-          <td style="text-align: right;">+8,7%</td>
-          <td style="text-align: right; color:var(--green); font-weight:600;">+3,7 pp</td>
-          <td style="text-align: center;"><span class="badge-acumular">SUPEROU</span></td>
+          <td style="text-align: right;" id="bm-ibov-ret">—</td>
+          <td style="text-align: right; font-weight:600;" id="bm-ibov-spread">—</td>
+          <td style="text-align: center;" id="bm-ibov-status">—</td>
         </tr>
         <tr>
           <td>🏢 IFIX (Fundos Imobiliários)</td>
-          <td style="text-align: right;">+6,3%</td>
-          <td style="text-align: right; color:var(--green); font-weight:600;">+6,1 pp</td>
-          <td style="text-align: center;"><span class="badge-acumular">SUPEROU</span></td>
+          <td style="text-align: right;" id="bm-ifix-ret">—</td>
+          <td style="text-align: right; font-weight:600;" id="bm-ifix-spread">—</td>
+          <td style="text-align: center;" id="bm-ifix-status">—</td>
         </tr>
       </tbody>
     </table>
     <div style="margin-top: 1rem; font-size: 0.8rem; color: var(--text-muted); line-height: 1.4;">
-      💡 <em>A estratégia previdenciária foca no acúmulo contínuo de ações pagadoras de dividendos com margem de segurança positiva, gerando um yield médio superior ao CDI.</em>
+      💡 <em id="bm-fonte-caption">Fontes de dados: Cotações oficiais Yahoo Finance e referência DI. Se o histórico da carteira estiver em formação, os spreads são apresentados conforme o histórico acumulado.</em>
     </div>
   </div>
 </div>
@@ -100,18 +115,129 @@
   let chartDividendos = null;
 
   async function carregarAnalytics() {
+    const meses = document.getElementById("periodo-select") ? document.getElementById("periodo-select").value : 12;
+    const titleEl = document.getElementById("title-equity-chart");
+    if (titleEl) titleEl.innerText = `📈 Curva de Evolução Patrimonial (Últimos ${meses} Meses)`;
+
     try {
-      const res = await fetch("/api/analytics/data");
+      const res = await fetch(`/api/analytics/data?months=${meses}`);
       const data = await res.json();
 
       document.getElementById("an-patrimonio").innerText = formatBRL(data.patrimonio_atual);
       document.getElementById("an-proventos").innerText = formatBRL(data.proventos_proj_ano);
 
+      // P1: Yield médio ponderado calculado dinamicamente
+      const yieldPond = data.patrimonio_atual > 0 ? ((data.proventos_proj_ano / data.patrimonio_atual) * 100).toFixed(1) : 0;
+      document.getElementById("an-yield-sub").innerText = `Yield projetado: ~${yieldPond}% a.a.`;
+
       renderEquityChart(data.snapshots || []);
       renderSetoresChart(data.setores || {});
       renderDividendosChart(data.dividendos || []);
+
+      // Carrega benchmarks reais
+      await carregarBenchmarks();
     } catch (err) {
       showToast("Erro ao carregar dados de analytics: " + err, "error");
+    }
+  }
+
+  async function carregarBenchmarks() {
+    try {
+      const res = await fetch("/api/analytics/benchmarks");
+      if (!res.ok) return;
+      const bm = await res.json();
+
+      const formatPct = (val) => (val !== null && val !== undefined) ? `${val >= 0 ? '+' : ''}${val.toFixed(1)}%` : '—';
+      const formatPP = (val) => (val !== null && val !== undefined) ? `${val >= 0 ? '+' : ''}${val.toFixed(1)} pp` : '—';
+
+      // Atualiza Carteira
+      const cartEl = document.getElementById("bm-carteira-ret");
+      if (cartEl) cartEl.innerText = formatPct(bm.carteira_12m);
+
+      // Atualiza CDI
+      const cdiRetEl = document.getElementById("bm-cdi-ret");
+      const cdiSpreadEl = document.getElementById("bm-cdi-spread");
+      const cdiStatusEl = document.getElementById("bm-cdi-status");
+      if (cdiRetEl) cdiRetEl.innerText = formatPct(bm.cdi_12m);
+      if (cdiSpreadEl) {
+        cdiSpreadEl.innerText = formatPP(bm.spread_cdi);
+        cdiSpreadEl.style.color = (bm.spread_cdi !== null && bm.spread_cdi >= 0) ? "var(--green)" : "var(--red)";
+      }
+      if (cdiStatusEl) {
+        if (bm.spread_cdi === null) {
+          cdiStatusEl.innerHTML = `<span style="color:var(--text-muted);">EM FORMAÇÃO</span>`;
+        } else if (bm.spread_cdi >= 0) {
+          cdiStatusEl.innerHTML = `<span class="badge-acumular">SUPEROU</span>`;
+        } else {
+          cdiStatusEl.innerHTML = `<span class="badge-aguardar">ABAIXO</span>`;
+        }
+      }
+
+      // Atualiza IBOV
+      const ibovRetEl = document.getElementById("bm-ibov-ret");
+      const ibovSpreadEl = document.getElementById("bm-ibov-spread");
+      const ibovStatusEl = document.getElementById("bm-ibov-status");
+      if (ibovRetEl) ibovRetEl.innerText = formatPct(bm.ibov_12m);
+      if (ibovSpreadEl) {
+        ibovSpreadEl.innerText = formatPP(bm.spread_ibov);
+        ibovSpreadEl.style.color = (bm.spread_ibov !== null && bm.spread_ibov >= 0) ? "var(--green)" : "var(--red)";
+      }
+      if (ibovStatusEl) {
+        if (bm.spread_ibov === null) {
+          ibovStatusEl.innerHTML = `<span style="color:var(--text-muted);">EM FORMAÇÃO</span>`;
+        } else if (bm.spread_ibov >= 0) {
+          ibovStatusEl.innerHTML = `<span class="badge-acumular">SUPEROU</span>`;
+        } else {
+          ibovStatusEl.innerHTML = `<span class="badge-aguardar">ABAIXO</span>`;
+        }
+      }
+
+      // Atualiza IFIX
+      const ifixRetEl = document.getElementById("bm-ifix-ret");
+      const ifixSpreadEl = document.getElementById("bm-ifix-spread");
+      const ifixStatusEl = document.getElementById("bm-ifix-status");
+      if (ifixRetEl) ifixRetEl.innerText = formatPct(bm.ifix_12m);
+      const spreadIfix = (bm.carteira_12m !== null && bm.ifix_12m !== null) ? (bm.carteira_12m - bm.ifix_12m) : null;
+      if (ifixSpreadEl) {
+        ifixSpreadEl.innerText = formatPP(spreadIfix);
+        ifixSpreadEl.style.color = (spreadIfix !== null && spreadIfix >= 0) ? "var(--green)" : "var(--red)";
+      }
+      if (ifixStatusEl) {
+        if (spreadIfix === null) {
+          ifixStatusEl.innerHTML = `<span style="color:var(--text-muted);">EM FORMAÇÃO</span>`;
+        } else if (spreadIfix >= 0) {
+          ifixStatusEl.innerHTML = `<span class="badge-acumular">SUPEROU</span>`;
+        } else {
+          ifixStatusEl.innerHTML = `<span class="badge-aguardar">ABAIXO</span>`;
+        }
+      }
+
+      // Atualiza Cards do topo
+      const cdiValCard = document.getElementById("an-spread-cdi-val");
+      const cdiSubCard = document.getElementById("an-spread-cdi-sub");
+      if (cdiValCard) {
+        cdiValCard.innerText = formatPP(bm.spread_cdi);
+        cdiValCard.style.color = (bm.spread_cdi !== null && bm.spread_cdi >= 0) ? "var(--green)" : (bm.spread_cdi !== null ? "var(--red)" : "var(--text-muted)");
+      }
+      if (cdiSubCard) {
+        cdiSubCard.innerText = `Carteira: ${formatPct(bm.carteira_12m)} | CDI: ${formatPct(bm.cdi_12m)}`;
+      }
+
+      const ibovValCard = document.getElementById("an-spread-ibov-val");
+      const ibovSubCard = document.getElementById("an-spread-ibov-sub");
+      if (ibovValCard) {
+        ibovValCard.innerText = formatPP(bm.spread_ibov);
+        ibovValCard.style.color = (bm.spread_ibov !== null && bm.spread_ibov >= 0) ? "var(--green)" : (bm.spread_ibov !== null ? "var(--red)" : "var(--text-muted)");
+      }
+      if (ibovSubCard) {
+        ibovSubCard.innerText = `Carteira: ${formatPct(bm.carteira_12m)} | IBOV: ${formatPct(bm.ibov_12m)}`;
+      }
+
+      if (bm.fonte && document.getElementById("bm-fonte-caption")) {
+        document.getElementById("bm-fonte-caption").innerText = `Fontes: ${bm.fonte}`;
+      }
+    } catch (e) {
+      console.warn("Falha ao obter benchmarks:", e);
     }
   }
 
@@ -145,31 +271,26 @@
         responsive: true,
         maintainAspectRatio: false,
         onClick: (evt, elements) => {
-          if (elements.length > 0) {
-            const idx = elements[0].index;
-            if (snapshots[idx] && snapshots[idx].setores && Object.keys(snapshots[idx].setores).length > 0) {
-              renderSetoresChart(snapshots[idx].setores);
-              const captionEl = document.getElementById('pie-caption');
-              if (captionEl) captionEl.innerText = `Concentração filtrada em ${snapshots[idx].data_snapshot} (R$ ${snapshots[idx].patrimonio_total.toLocaleString('pt-BR')})`;
-            }
-          }
-        },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: (ctx) => 'Patrimônio: R$ ' + ctx.raw.toLocaleString('pt-BR', { minimumFractionDigits: 2 })
-            }
+          if (!elements.length) return;
+          const idx = elements[0].index;
+          const snap = snapshots[idx];
+          if (snap) {
+            renderSetoresChart(snap.setores || {});
+            document.getElementById('pie-caption').innerText = `Visualizando posição em: ${snap.data_snapshot}`;
           }
         },
         scales: {
-          x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#94a3b8' } },
-          y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#94a3b8', callback: (v) => 'R$ ' + v.toLocaleString('pt-BR') } }
+          x: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } },
+          y: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8', callback: v => 'R$ ' + (v/1000).toFixed(0) + 'k' } }
+        },
+        plugins: {
+          legend: { display: false }
         }
       }
     });
   }
 
+  // P5: Paleta dinâmica de 12 cores sem repetição
   function renderSetoresChart(setores) {
     const ctx = document.getElementById('chart-setores').getContext('2d');
     if (chartSetores) chartSetores.destroy();
@@ -177,15 +298,19 @@
     const labels = Object.keys(setores);
     const values = Object.values(setores);
 
+    const palette = [
+      '#2563eb', '#16a34a', '#d97706', '#9333ea', '#06b6d4', '#e11d48',
+      '#f59e0b', '#10b981', '#6366f1', '#ec4899', '#8b5cf6', '#14b8a6'
+    ];
+    const bgColors = labels.map((_, idx) => palette[idx % palette.length]);
+
     chartSetores = new Chart(ctx, {
       type: 'doughnut',
       data: {
         labels: labels,
         datasets: [{
           data: values,
-          backgroundColor: [
-            '#2563eb', '#16a34a', '#d97706', '#9333ea', '#06b6d4', '#e11d48'
-          ],
+          backgroundColor: bgColors,
           borderColor: '#111827',
           borderWidth: 2
         }]
@@ -208,45 +333,33 @@
     if (chartDividendos) chartDividendos.destroy();
 
     const labels = dividendos.map(d => d.mes);
-    const realizado = dividendos.map(d => d.realizado);
-    const projetado = dividendos.map(d => d.projetado);
+    const real = dividendos.map(d => d.realizado);
+    const proj = dividendos.map(d => d.projetado);
 
     chartDividendos = new Chart(ctx, {
       type: 'bar',
       data: {
         labels: labels,
         datasets: [
-          {
-            label: 'Realizado (OFX)',
-            data: realizado,
-            backgroundColor: '#22c55e',
-            borderRadius: 4
-          },
-          {
-            label: 'Projetado (Barsi)',
-            data: projetado,
-            backgroundColor: '#475569',
-            borderRadius: 4
-          }
+          { label: 'Realizado', data: real, backgroundColor: '#10b981', borderRadius: 4 },
+          { label: 'Projetado', data: proj, backgroundColor: '#6366f1', borderRadius: 4 }
         ]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            position: 'top',
-            labels: { color: '#cbd5e1', font: { size: 11 } }
-          }
-        },
         scales: {
-          x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#94a3b8' } },
-          y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#94a3b8', callback: (v) => 'R$ ' + v } }
+          x: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } },
+          y: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8', callback: v => 'R$ ' + v } }
+        },
+        plugins: {
+          legend: { labels: { color: '#cbd5e1' } }
         }
       }
     });
   }
 
-  window.addEventListener("DOMContentLoaded", carregarAnalytics);
+  document.addEventListener("DOMContentLoaded", () => {
+    carregarAnalytics();
+  });
 </script>
-

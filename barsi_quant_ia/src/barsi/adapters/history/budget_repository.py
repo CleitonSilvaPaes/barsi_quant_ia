@@ -756,8 +756,8 @@ class BudgetRepository:
                 symbol = f"{t}.SA" if not t.endswith(".SA") else t
                 try:
                     stock = yf.Ticker(symbol)
-                    hist = stock.history(period="1y")
-                    if hist.empty:
+                    hist = stock.history(period="1y", timeout=15)
+                    if hist is None or hist.empty:
                         continue
                     clean_ticker = t.replace(".SA", "")
                     for dt, row in hist.iterrows():
@@ -776,11 +776,11 @@ class BudgetRepository:
                     logger.warn("yfinance_history_sync_error", ticker=t, error=str(e))
         return total_records
 
-    def build_real_portfolio_snapshots(self) -> List[Dict[str, Any]]:
-        """Gera a curva patrimonial real dos últimos 12 meses combinando cotas e preços reais do pregão."""
+    def build_real_portfolio_snapshots(self, limit_months: int = 12) -> List[Dict[str, Any]]:
+        """Gera a curva patrimonial real dos últimos N meses combinando cotas e preços reais do pregão."""
         positions = self.load_positions()
         if not positions:
-            return self.get_portfolio_snapshots(12)
+            return self.get_portfolio_snapshots(limit_months)
 
         soma_pat = sum((p.qtd_antes or 0) * (p.preco_atual or 0.0) for p in positions)
         soma_cotas = sum(p.qtd_antes or 0 for p in positions)
@@ -796,12 +796,15 @@ class BudgetRepository:
                 FROM price_history
                 GROUP BY ym
                 ORDER BY end_date ASC
-                LIMIT 12
-            """).fetchall()
+                LIMIT ?
+            """, (limit_months,)).fetchall()
 
             if not dates or len(dates) < 3:
                 self.seed_initial_snapshots_if_empty(round(soma_pat, 2), soma_cotas, setores_base)
-                return self.get_portfolio_snapshots(12)
+                return self.get_portfolio_snapshots(limit_months)
+
+            # Quando há histórico real suficiente (>= 3 meses), limpa snapshots anteriores para reconstrução canônica
+            c.execute("DELETE FROM portfolio_snapshots")
 
             for d in dates:
                 dt_str = d["end_date"]
@@ -821,19 +824,45 @@ class BudgetRepository:
                     month_setores[sec] = round(month_setores.get(sec, 0.0) + val, 2)
 
                 if soma_pat_m > 0:
-                    self.save_portfolio_snapshot(
+                    c.execute("""
+                        INSERT INTO portfolio_snapshots 
+                        (data_snapshot, patrimonio_total, cotas_totais, dividendos_mes, aporte_planejado, rentabilidade_mes, setores_json)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(data_snapshot) DO UPDATE SET
+                            patrimonio_total = excluded.patrimonio_total,
+                            cotas_totais = excluded.cotas_totais,
+                            dividendos_mes = excluded.dividendos_mes,
+                            aporte_planejado = excluded.aporte_planejado,
+                            rentabilidade_mes = excluded.rentabilidade_mes,
+                            setores_json = COALESCE(excluded.setores_json, portfolio_snapshots.setores_json),
+                            created_at = datetime('now')
+                    """, (
                         dt_str,
                         round(soma_pat_m, 2),
                         soma_cotas_m,
-                        dividendos_mes=round(soma_pat_m * 0.009, 2), # ~0.9% am
-                        aporte_planejado=1000.0,
-                        setores_json=json.dumps(month_setores, ensure_ascii=False)
-                    )
+                        round(soma_pat_m * 0.009, 2),
+                        1000.0,
+                        0.0,
+                        json.dumps(month_setores, ensure_ascii=False)
+                    ))
 
-            snaps = self.get_portfolio_snapshots(12)
-            if len(snaps) < 6:
-                self.seed_initial_snapshots_if_empty(round(soma_pat, 2), soma_cotas, setores_base)
-                snaps = self.get_portfolio_snapshots(12)
+            rows = c.execute("""
+                SELECT * FROM portfolio_snapshots 
+                ORDER BY data_snapshot ASC 
+                LIMIT ?
+            """, (limit_months,)).fetchall()
+
+            snaps = []
+            for r in rows:
+                item = dict(r)
+                if item.get("setores_json"):
+                    try:
+                        item["setores"] = json.loads(item["setores_json"])
+                    except Exception:
+                        item["setores"] = {}
+                else:
+                    item["setores"] = {}
+                snaps.append(item)
             return snaps
 
     # ------------------------------------------------------------------ #

@@ -2,6 +2,7 @@
 import asyncio
 import time
 import uuid
+from datetime import datetime
 import psutil
 from typing import List, Optional
 from barsi.ports.market import MarketDataPort
@@ -157,6 +158,15 @@ class SyncService:
 
         if not dry_run:
             await self.history.record_run(summary)
+            try:
+                from barsi.adapters.history.budget_repository import BudgetRepository
+                repo = BudgetRepository()
+                today_str = datetime.now().strftime("%Y-%m-%d")
+                for p in valid_positions:
+                    if p.preco_atual > 0:
+                        repo.save_price_history(p.ticker, today_str, p.preco_atual)
+            except Exception as e:
+                logger.warn("save_price_history_run_failed", error=str(e))
 
         logger.info(
             "run_completed",

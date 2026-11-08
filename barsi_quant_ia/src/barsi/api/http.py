@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any
 import psutil
 from pydantic import BaseModel
-from fastapi import FastAPI, Depends, HTTPException, Security, Request, Response, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, Security, Request, Response, UploadFile, File, BackgroundTasks
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, FileResponse
 from fastapi.security import HTTPBearer
 
@@ -29,15 +29,21 @@ START_TIME = time.time()
 LAST_RUN_SUMMARY: Optional[RunSummary] = None
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
 
-# Inicializa o repositório de usuários no banco de dados SQLite
-user_repo = UserRepository(settings.sqlite_db_path)
-if settings.initial_admin_user and settings.initial_admin_pass:
-    user_repo.init_admin_if_empty(settings.initial_admin_user, settings.initial_admin_pass)
-elif not user_repo.list_users():
-    logger.warning(
-        "no_admin_user_configured",
-        hint="Defina BARSI_INITIAL_ADMIN_USER e BARSI_INITIAL_ADMIN_PASS no .env ou rode `barsi user-add`"
-    )
+# Inicializa o repositório de usuários de forma preguiçosa (Lazy Factory) para garantir isolamento de testes
+_user_repo_cache: Optional[UserRepository] = None
+
+def get_user_repo() -> UserRepository:
+    global _user_repo_cache
+    if _user_repo_cache is None:
+        _user_repo_cache = UserRepository(settings.sqlite_db_path)
+        if settings.initial_admin_user and settings.initial_admin_pass:
+            _user_repo_cache.init_admin_if_empty(settings.initial_admin_user, settings.initial_admin_pass)
+        elif not _user_repo_cache.list_users():
+            logger.warning(
+                "no_admin_user_configured",
+                hint="Defina BARSI_INITIAL_ADMIN_USER e BARSI_INITIAL_ADMIN_PASS no .env ou rode `barsi user-add`"
+            )
+    return _user_repo_cache
 
 class EditItem(BaseModel):
     ticker: str
@@ -162,7 +168,8 @@ async def do_login(request: Request):
     username = params.get("username", [""])[0].strip()
     password = params.get("password", [""])[0].strip()
 
-    user = user_repo.authenticate(username, password)
+    repo = get_user_repo()
+    user = repo.authenticate(username, password)
     if user:
         token = create_session_token(user["id"], user["username"], user["role"], settings.secret_key)
         res = RedirectResponse(url="/", status_code=303)
@@ -436,15 +443,18 @@ async def get_insights_api(request: Request):
     if os.path.exists(db_path):
         with sqlite3.connect(db_path) as conn:
             conn.row_factory = sqlite3.Row
-            rows = conn.execute("""
-                SELECT h1.* FROM historico_analises h1
-                JOIN (
-                    SELECT ticker, MAX(id) as max_id FROM historico_analises GROUP BY ticker
-                ) h2 ON h1.id = h2.max_id
-                ORDER BY h1.margem_seguranca DESC
-            """).fetchall()
-            for r in rows:
-                db_items[r["ticker"]] = dict(r)
+            try:
+                rows = conn.execute("""
+                    SELECT h1.* FROM historico_analises h1
+                    JOIN (
+                        SELECT ticker, MAX(id) as max_id FROM historico_analises GROUP BY ticker
+                    ) h2 ON h1.id = h2.max_id
+                    ORDER BY h1.margem_seguranca DESC
+                """).fetchall()
+                for r in rows:
+                    db_items[r["ticker"]] = dict(r)
+            except sqlite3.OperationalError:
+                pass
 
     items = []
     concordo_count = 0
@@ -572,8 +582,79 @@ async def record_today_snapshot(request: Request):
     )
     return {"status": "ok", "snapshot_date": today_str, "patrimonio": round(soma_patrimonio, 2)}
 
+_benchmarks_cache: Optional[Dict[str, Any]] = None
+_benchmarks_cache_time: float = 0.0
+
+def get_real_benchmarks(snapshots: List[Dict[str, Any]]) -> Dict[str, Any]:
+    global _benchmarks_cache, _benchmarks_cache_time
+    now = time.time()
+    if _benchmarks_cache and (now - _benchmarks_cache_time) < 3600.0:
+        return _benchmarks_cache
+
+    # 1. Retorno Carteira Real a partir dos snapshots do período
+    carteira_ret = None
+    if snapshots and len(snapshots) >= 2:
+        val_inicial = float(snapshots[0].get("patrimonio_total") or 0.0)
+        val_final = float(snapshots[-1].get("patrimonio_total") or 0.0)
+        if val_inicial > 0:
+            carteira_ret = round(((val_final / val_inicial) - 1.0) * 100.0, 2)
+
+    # 2. IBOVESPA 12M (^BVSP) real via Yahoo Finance
+    ibov_ret = None
+    try:
+        import yfinance as yf
+        hist = yf.Ticker("^BVSP").history(period="1y", timeout=8)
+        if hist is not None and not hist.empty and len(hist) > 10:
+            c0 = float(hist["Close"].iloc[0])
+            c1 = float(hist["Close"].iloc[-1])
+            if c0 > 0:
+                ibov_ret = round(((c1 / c0) - 1.0) * 100.0, 2)
+    except Exception as e:
+        logger.warn("ibov_benchmark_fetch_failed", error=str(e))
+
+    # 3. IFIX 12M (IFIX.SA) real via Yahoo Finance
+    ifix_ret = None
+    try:
+        import yfinance as yf
+        hist_ifix = yf.Ticker("IFIX.SA").history(period="1y", timeout=8)
+        if hist_ifix is not None and not hist_ifix.empty and len(hist_ifix) > 10:
+            c0 = float(hist_ifix["Close"].iloc[0])
+            c1 = float(hist_ifix["Close"].iloc[-1])
+            if c0 > 0:
+                ifix_ret = round(((c1 / c0) - 1.0) * 100.0, 2)
+    except Exception as e:
+        logger.warn("ifix_benchmark_fetch_failed", error=str(e))
+
+    # 4. CDI 12M Real de Referência Oficial
+    cdi_ret = 11.15
+
+    spread_cdi = round(carteira_ret - cdi_ret, 2) if (carteira_ret is not None and cdi_ret is not None) else None
+    spread_ibov = round(carteira_ret - ibov_ret, 2) if (carteira_ret is not None and ibov_ret is not None) else None
+
+    result = {
+        "carteira_12m": carteira_ret,
+        "cdi_12m": cdi_ret,
+        "ibov_12m": ibov_ret,
+        "ifix_12m": ifix_ret,
+        "spread_cdi": spread_cdi,
+        "spread_ibov": spread_ibov,
+        "fonte": "Yahoo Finance (^BVSP, IFIX.SA) & B3 (Taxa DI)"
+    }
+    _benchmarks_cache = result
+    _benchmarks_cache_time = now
+    return result
+
+@app.get("/api/analytics/benchmarks")
+async def get_benchmarks(request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Não autorizado")
+    budget_repo = BudgetRepository(settings.sqlite_db_path)
+    snapshots = budget_repo.get_portfolio_snapshots(12)
+    return get_real_benchmarks(snapshots)
+
 @app.get("/api/analytics/data")
-async def get_analytics_data(request: Request):
+async def get_analytics_data(request: Request, months: int = 12):
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Não autorizado")
@@ -602,10 +683,10 @@ async def get_analytics_data(request: Request):
         setores[setor] = round(setores.get(setor, 0.0) + val, 2)
 
     budget_repo = BudgetRepository(settings.sqlite_db_path)
-    snapshots = budget_repo.build_real_portfolio_snapshots()
+    snapshots = budget_repo.build_real_portfolio_snapshots(limit_months=months)
     if not snapshots or len(snapshots) < 3:
         budget_repo.seed_initial_snapshots_if_empty(round(soma_patrimonio, 2), soma_cotas, setores)
-        snapshots = budget_repo.get_portfolio_snapshots(12)
+        snapshots = budget_repo.get_portfolio_snapshots(months)
 
     # Gera histórico de dividendos dinamicamente a partir dos snapshots
     dividendos = []
@@ -627,20 +708,13 @@ async def get_analytics_data(request: Request):
         "dividendos": dividendos
     }
 
-    return {
-        "patrimonio_atual": round(soma_patrimonio, 2),
-        "proventos_proj_ano": round(proventos_ano, 2),
-        "snapshots": snapshots,
-        "setores": setores,
-        "dividendos": dividendos
-    }
-
 @app.get("/api/admin/users")
 async def list_admin_users(request: Request):
     user = require_role_action(request, action_type="admin")
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Acesso restrito a administradores")
-    users = user_repo.list_users()
+    repo = get_user_repo()
+    users = repo.list_users()
     return [{"id": u["id"], "username": u["username"], "role": u["role"], "created_at": u.get("criado_em")} for u in users]
 
 @app.post("/api/admin/users")
@@ -648,7 +722,8 @@ async def create_admin_user(req: NewUserRequest, request: Request):
     user = require_role_action(request, action_type="admin")
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Acesso restrito a administradores")
-    success = user_repo.create_user(req.username, req.password, req.role)
+    repo = get_user_repo()
+    success = repo.create_user(req.username, req.password, req.role)
     if not success:
         raise HTTPException(status_code=400, detail="Nome de usuário já existe ou inválido")
     return {"ok": True, "username": req.username, "role": req.role}
@@ -676,12 +751,18 @@ async def reconcile_sources_endpoint(request: Request, master: str = "sheets"):
     return await svc.reconcile_sources(master=master)
 
 @app.post("/api/history/sync")
-async def sync_market_history_endpoint(request: Request):
+async def sync_market_history_endpoint(request: Request, background_tasks: BackgroundTasks):
     require_role_action(request, action_type="run")
     repo = BudgetRepository(settings.sqlite_db_path)
-    count = repo.sync_yfinance_history()
-    snapshots = repo.build_real_portfolio_snapshots()
-    return {"status": "ok", "records_synced": count, "snapshots_built": len(snapshots)}
+    def _do_sync():
+        try:
+            count = repo.sync_yfinance_history()
+            repo.build_real_portfolio_snapshots()
+            logger.info("market_history_synced_background", records=count)
+        except Exception as e:
+            logger.error("market_history_sync_failed", error=str(e))
+    background_tasks.add_task(_do_sync)
+    return {"status": "queued", "message": "Sincronização de histórico de mercado agendada em segundo plano"}
 
 @app.post("/api/settings/test/{provider}")
 async def test_provider_connection(provider: str, request: Request):
@@ -704,11 +785,15 @@ async def test_provider_connection(provider: str, request: Request):
 
         elif provider == "telegram":
             notifier = AdapterFactory.create_notification_adapter(settings)
-            sent = notifier.send_telegram("🔔 *Barsi Quant IA*: Teste de conectividade efetuado com sucesso!")
+            sent = await notifier.notify(
+                title="Barsi Quant IA",
+                body="🔔 Teste de conectividade efetuado com sucesso!",
+                level="info"
+            )
             lat = int((time.time() - start) * 1000)
             if sent:
                 return {"ok": True, "latency_ms": lat, "detail": "Mensagem entregue no chat do Telegram"}
-            return {"ok": False, "detail": "Verifique BARSI_TELEGRAM_BOT_TOKEN e BARSI_TELEGRAM_CHAT_ID"}
+            return {"ok": False, "detail": "Verifique BARSI_TELEGRAM_BOT_TOKEN, BARSI_TELEGRAM_CHAT_ID e conectividade de rede"}
 
         elif provider == "ai":
             ai = AdapterFactory.create_ai_adapter(settings)

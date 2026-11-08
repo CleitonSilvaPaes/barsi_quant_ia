@@ -22,11 +22,11 @@
 </div>
 
 <div class="actions-bar">
-  <div style="font-size: 0.9rem; color: var(--text-muted); display:flex; align-items:center; gap:0.5rem;">
+  <div style="font-size: 0.9rem; color: var(--text-muted); display:flex; align-items:center; gap:0.5rem; flex-wrap: wrap;">
     <span>Filtrar por decisão:</span>
-    <button class="btn btn-outline active-filter" onclick="filtrarCards('TODOS', this)">Todos</button>
-    <button class="btn btn-outline" onclick="filtrarCards('ACUMULAR', this)">🟢 ACUMULAR</button>
-    <button class="btn btn-outline" onclick="filtrarCards('AGUARDAR', this)">🟡 AGUARDAR</button>
+    <button class="btn btn-outline btn-filter active-filter" data-decisao="TODOS" onclick="filtrarCards('TODOS', this)">Todos</button>
+    <button class="btn btn-outline btn-filter" data-decisao="ACUMULAR" onclick="filtrarCards('ACUMULAR', this)">🟢 ACUMULAR</button>
+    <button class="btn btn-outline btn-filter" data-decisao="AGUARDAR" onclick="filtrarCards('AGUARDAR', this)">🟡 AGUARDAR</button>
   </div>
   <div style="margin-left: auto;">
     <button class="btn btn-primary" onclick="executarSync()">🚀 Rodar Nova Análise B3 & IA</button>
@@ -38,11 +38,16 @@
   <div style="color: var(--text-muted);">Carregando análises e diretrizes da IA...</div>
 </div>
 
+<!-- Controles de Paginação (P3) -->
+<div id="pagination-controls" style="display: flex; justify-content: center; align-items: center; gap: 1rem; margin-top: 1.5rem;"></div>
+
 <script>
   let insightsData = [];
   let filtroDecisao = 'TODOS';
   let pendingFeedback = {};
   let feedbackDebounceTimer = null;
+  const PAGE_SIZE = 9;
+  let currentPage = 0;
 
   async function carregarInsights() {
     try {
@@ -56,6 +61,15 @@
       document.getElementById("stat-acumular").innerText = data.acumular_count;
       document.getElementById("stat-aguardar").innerText = data.aguardar_count;
 
+      // P4: Restaura filtro persistido no localStorage
+      try {
+        const salvo = localStorage.getItem('insights_filter');
+        if (salvo && ['TODOS', 'ACUMULAR', 'AGUARDAR'].includes(salvo)) {
+          filtroDecisao = salvo;
+        }
+      } catch(e) {}
+      atualizarBotoesFiltro(filtroDecisao);
+
       renderizarCards();
     } catch (err) {
       document.getElementById("cards-container").innerHTML = `<div style="color:var(--red);">Erro ao carregar insights: ${err}</div>`;
@@ -64,13 +78,36 @@
 
   function filtrarCards(decisao, btnEl) {
     filtroDecisao = decisao;
-    document.querySelectorAll('.actions-bar .btn').forEach(b => b.style.borderColor = 'var(--border)');
-    if (btnEl) btnEl.style.borderColor = 'var(--accent)';
+    currentPage = 0;
+    try {
+      localStorage.setItem('insights_filter', decisao);
+    } catch(e) {}
+    atualizarBotoesFiltro(decisao);
     renderizarCards();
+  }
+
+  function atualizarBotoesFiltro(decisao) {
+    document.querySelectorAll('.actions-bar .btn-filter').forEach(b => {
+      const d = b.getAttribute('data-decisao');
+      if (d === decisao) {
+        b.style.borderColor = 'var(--accent)';
+        b.style.color = '#fff';
+      } else {
+        b.style.borderColor = 'var(--border)';
+        b.style.color = 'var(--text-muted)';
+      }
+    });
+  }
+
+  function mudarPagina(delta) {
+    currentPage += delta;
+    renderizarCards();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   function renderizarCards() {
     const container = document.getElementById("cards-container");
+    const paginationEl = document.getElementById("pagination-controls");
     container.innerHTML = "";
 
     const filtrados = insightsData.filter(item => {
@@ -80,10 +117,18 @@
 
     if (filtrados.length === 0) {
       container.innerHTML = `<div style="color:var(--text-muted); grid-column: 1/-1; text-align:center; padding:2rem;">Nenhum insight encontrado para este filtro.</div>`;
+      if (paginationEl) paginationEl.innerHTML = "";
       return;
     }
 
-    filtrados.forEach(item => {
+    const totalPages = Math.ceil(filtrados.length / PAGE_SIZE);
+    if (currentPage >= totalPages) currentPage = totalPages - 1;
+    if (currentPage < 0) currentPage = 0;
+
+    const start = currentPage * PAGE_SIZE;
+    const pageItems = filtrados.slice(start, start + PAGE_SIZE);
+
+    pageItems.forEach(item => {
       const isAcumular = item.acao_sugerida === "ACUMULAR";
       const badgeClass = isAcumular ? "badge-acumular" : "badge-aguardar";
       const margemColor = item.margem >= 0 ? "var(--green)" : "var(--red)";
@@ -156,6 +201,18 @@
 
       container.appendChild(card);
     });
+
+    if (paginationEl) {
+      if (totalPages > 1) {
+        paginationEl.innerHTML = `
+          <button class="btn btn-outline" onclick="mudarPagina(-1)" ${currentPage === 0 ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : ''}>◀ Anterior</button>
+          <span style="font-size: 0.85rem; color: var(--text-muted);">Página <strong>${currentPage + 1}</strong> de <strong>${totalPages}</strong> (${filtrados.length} análises)</span>
+          <button class="btn btn-outline" onclick="mudarPagina(1)" ${currentPage >= totalPages - 1 ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : ''}>Próxima ▶</button>
+        `;
+      } else {
+        paginationEl.innerHTML = "";
+      }
+    }
   }
 
   function enviarFeedback(ticker, voto) {
