@@ -211,9 +211,12 @@ async def do_logout():
 async def page_home(request: Request, error: Optional[str] = None):
     resp = render_page("home", request, "Cockpit Executivo & Radar B.E.S.T.", "home")
     if error and isinstance(resp, Response) and not isinstance(resp, RedirectResponse):
-        safe_err = html.escape(error)
         body_text = resp.body.decode("utf-8")
-        toast_injection = f"<script>document.addEventListener('DOMContentLoaded', () => {{ if (typeof showToast === 'function') showToast('{safe_err}', 'error'); }});</script>"
+        toast_injection = (
+            f"<script>document.addEventListener('DOMContentLoaded', () => {{"
+            f" if (typeof showToast === 'function') showToast({json.dumps(error, ensure_ascii=False)}, 'error');"
+            f"}});</script>"
+        )
         return HTMLResponse(body_text + toast_injection, status_code=resp.status_code)
     return resp
 
@@ -777,7 +780,7 @@ async def create_admin_user(req: NewUserRequest, request: Request):
 
 @app.get("/api/backup/download")
 async def download_backup_sqlite(request: Request):
-    require_role_action(request, action_type="read")
+    require_role_action(request, action_type="admin")
     db_p = settings.sqlite_db_path
     if not os.path.exists(db_p):
         raise HTTPException(status_code=404, detail="Banco de dados SQLite não encontrado")

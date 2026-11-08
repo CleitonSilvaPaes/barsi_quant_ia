@@ -172,3 +172,40 @@ def test_admin_page_rbac_investidor_blocked(auth_client):
     blocked_res = investidor_client.get("/admin", follow_redirects=False)
     assert blocked_res.status_code == 303
     assert "error=Acesso+restrito" in blocked_res.headers.get("location", "")
+
+def test_page_home_shows_error_toast_when_query_param(auth_client):
+    """Issue A & B: Valida injeção segura de toast via json.dumps inclusive com aspas e apóstrofos."""
+    res = auth_client.get("/?error=Acesso+restrito+a+administradores+d'água")
+    assert res.status_code == 200
+    assert "Acesso restrito a administradores d'água" in res.text
+    assert "document.addEventListener('DOMContentLoaded'" in res.text
+
+def test_page_home_no_toast_without_error(auth_client):
+    """Issue B: Valida que a home não injeta script toast sem parâmetro de erro."""
+    res = auth_client.get("/")
+    assert res.status_code == 200
+    assert "document.addEventListener('DOMContentLoaded'" not in res.text
+
+def test_backup_download_rbac_admin_only(auth_client, tmp_path):
+    """Issue C: Valida que baixar o backup SQLite é restrito exclusivamente ao perfil admin."""
+    # 1. Usuário admin consegue baixar o banco
+    res_admin = auth_client.get("/api/backup/download")
+    assert res_admin.status_code == 200
+    assert res_admin.headers["content-type"] == "application/octet-stream"
+
+    # 2. Usuário leitor recebe 403 Forbidden
+    leitor_token = create_session_token(user_id=3, username="leitor_maria", role="leitor", secret_key=settings.secret_key)
+    leitor_client = TestClient(app)
+    leitor_client.cookies.set("barsi_session", leitor_token)
+    res_leitor = leitor_client.get("/api/backup/download")
+    assert res_leitor.status_code == 403
+    assert "não possui permissão" in res_leitor.json()["detail"]
+
+    # 3. Usuário investidor também recebe 403 Forbidden
+    inv_token = create_session_token(user_id=2, username="inv_joao", role="investidor", secret_key=settings.secret_key)
+    inv_client = TestClient(app)
+    inv_client.cookies.set("barsi_session", inv_token)
+    res_inv = inv_client.get("/api/backup/download")
+    assert res_inv.status_code == 403
+    assert "não possui permissão" in res_inv.json()["detail"]
+
