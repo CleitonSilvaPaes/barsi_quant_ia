@@ -81,14 +81,14 @@ def extratos(
             typer.echo(f"   (+) Outras Entradas           : R$ {r.outras_entradas:>9.2f}")
         typer.echo(f"   ──> TOTAL ENTRADAS REALIZADAS : R$ {r.total_entradas:>9.2f}")
         
-        typer.echo(f"\n   💼 INVESTIMENTOS REALIZADOS (BARSI B.E.S.T.):")
+        typer.echo("\n   💼 INVESTIMENTOS REALIZADOS (BARSI B.E.S.T.):")
         typer.echo(f"       • Ações B.E.S.T. Total    : R$ {r.compras_acoes_barsi:>9.2f}")
         typer.echo(f"       • FIIs (Papel/Tijolo)     : R$ {r.compras_fiis:>9.2f}")
         typer.echo(f"       ──> TOTAL APORTADO B3     : R$ {r.total_investimentos:>9.2f}")
         for t, val in r.detalhes_ativos.items():
             typer.echo(f"           - {t:<6}                : R$ {val:>8.2f}")
         
-        typer.echo(f"\n   🛡️ SAÍDAS OBRIGATÓRIAS & COLCHÃO:")
+        typer.echo("\n   🛡️ SAÍDAS OBRIGATÓRIAS & COLCHÃO:")
         typer.echo(f"       • Fatura Nubank Fechada   : R$ {r.faturas_cartao:>9.2f}")
         typer.echo(f"       • Moradia & Família (Pix) : R$ {r.moradia_e_familia:>9.2f}")
         typer.echo(f"       • Tributos (DAS/Sefaz)    : R$ {r.tributos_e_taxas:>9.2f}")
@@ -264,7 +264,7 @@ def sync_tvbox(
             for xlsx_cand in xlsx_candidates:
                 if os.path.exists(xlsx_cand):
                     try:
-                        typer.echo(f"    - Sincronizando carteira Excel (.xlsx)...")
+                        typer.echo("    - Sincronizando carteira Excel (.xlsx)...")
                         scp.put(xlsx_cand, f"{remote_home}/carteira_barsi_quant_ia.xlsx")
                         break
                     except Exception as e:
@@ -611,7 +611,7 @@ def keywords_test(
         familiar_keywords=settings.familiar_keywords,
         trie=trie,
     )
-    typer.echo(f"\n🔍 TESTE DE CLASSIFICAÇÃO:")
+    typer.echo("\n🔍 TESTE DE CLASSIFICAÇÃO:")
     typer.echo(f"   Memo analisado : '{memo}'")
     typer.echo(f"   Valor / Tipo   : R$ {valor:.2f} ({tipo})")
     typer.echo(f"   [✔] Categoria  : {cat.value}")
@@ -698,7 +698,7 @@ def notify_get_chat_id():
                 content += f"\nBARSI_TELEGRAM_CHAT_ID={chat_id}\n"
             with open(env_path, "w", encoding="utf-8") as f:
                 f.write(content)
-            typer.echo(f"[✔] BARSI_TELEGRAM_CHAT_ID salvo com segurança no seu arquivo .env local!")
+            typer.echo("[✔] BARSI_TELEGRAM_CHAT_ID salvo com segurança no seu arquivo .env local!")
 
         # Envia mensagem de boas-vindas teste
         from barsi.adapters.notifications import TelegramNotifier
@@ -763,7 +763,7 @@ def train_dss_cli(
         output_path=output,
         use_system_data=use_system_data,
     )
-    typer.echo(f"[✔] Treinamento concluído com sucesso!")
+    typer.echo("[✔] Treinamento concluído com sucesso!")
     typer.echo(f"    - Exemplos de treino: {metrics['n_train']}, validação: {metrics['n_val']} (total: {metrics['total_examples']})")
     typer.echo(f"    - Acurácia na validação: {metrics['best_val_acc']:.1%}")
     typer.echo(f"    - Pesos salvos em: {output}")

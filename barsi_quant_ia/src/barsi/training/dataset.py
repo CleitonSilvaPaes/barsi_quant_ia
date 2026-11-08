@@ -72,3 +72,4 @@ def extract_training_data(db_path: str, min_examples: int = 3) -> Tuple[List[Lis
         )
 
     return X, y
+

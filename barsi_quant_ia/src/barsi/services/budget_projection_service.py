@@ -161,12 +161,12 @@ class BudgetProjectionService:
             if acoes > 0:
                 updates.append({"range": f"{c_let}31", "values": [[acoes]]})
             else:
-                updates.append({"range": f"{c_let}31", "values": [[f'=SUMIFS(Screener_BEST_Custodia!O10:O19; Screener_BEST_Custodia!B10:B19; "<>*FII*"; Screener_BEST_Custodia!P10:P19; "ACUMULAR")']]})
+                updates.append({"range": f"{c_let}31", "values": [['=SUMIFS(Screener_BEST_Custodia!O10:O19; Screener_BEST_Custodia!B10:B19; "<>*FII*"; Screener_BEST_Custodia!P10:P19; "ACUMULAR")']]})
 
             if fiis > 0:
                 updates.append({"range": f"{c_let}32", "values": [[fiis]]})
             else:
-                updates.append({"range": f"{c_let}32", "values": [[f'=SUMIFS(Screener_BEST_Custodia!O10:O19; Screener_BEST_Custodia!B10:B19; "*FII*"; Screener_BEST_Custodia!P10:P19; "ACUMULAR")']]})
+                updates.append({"range": f"{c_let}32", "values": [['=SUMIFS(Screener_BEST_Custodia!O10:O19; Screener_BEST_Custodia!B10:B19; "*FII*"; Screener_BEST_Custodia!P10:P19; "ACUMULAR")']]})
             updates.append({"range": f"{c_let}33", "values": [[f"=SUM({c_let}31:{c_let}32)"]]})
 
             # Gastos Variáveis (Linhas 36..40)

@@ -1,0 +1,151 @@
+name: Deploy to TV Box
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Ambiente"
+        required: true
+        default: "tvbox"
+        type: choice
+        options:
+          - tvbox
+      confirm:
+        description: "Digite DEPLOY (maiúsculo) para confirmar"
+        required: true
+        type: string
+
+concurrency:
+  group: deploy-tvbox
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: 🚀 Deploy (TV Box via Tailscale SSH)
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.confirm == 'DEPLOY')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ─────────────────────────────────────────────────────────
+      # 1. Entra no Tailnet (ephemeral)
+      # ─────────────────────────────────────────────────────────
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      # ─────────────────────────────────────────────────────────
+      # 2. Backup do SQLite ANTES de mexer em nada
+      # ─────────────────────────────────────────────────────────
+      - name: Backup SQLite (rollback safety)
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.TVBOX_HOST }}
+          username: ${{ secrets.TVBOX_USER }}
+          key: ${{ secrets.TVBOX_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/barsi_quant_ia || cd /home/${{ secrets.TVBOX_USER }}/barsi_quant_ia
+            BACKUP_NAME="memory/barsi_memory.db.bak.$(date +%Y%m%d_%H%M%S)"
+            cp memory/barsi_memory.db "$BACKUP_NAME"
+            echo "✅ Backup criado: $BACKUP_NAME"
+            ls -t memory/barsi_memory.db.bak.* 2>/dev/null | tail -n +8 | xargs rm -f || true
+
+      # ─────────────────────────────────────────────────────────
+      # 3. Sync do código fonte via rsync (delta transfer)
+      # ─────────────────────────────────────────────────────────
+      - name: Deploy code via rsync
+        uses: burnett01/rsync-deployments@7.0.1
+        with:
+          switches: -avz --delete --exclude='__pycache__' --exclude='*.pyc'
+          path: barsi_quant_ia/src/barsi/
+          remote_path: /opt/barsi_quant_ia/src/barsi/
+          remote_host: ${{ secrets.TVBOX_HOST }}
+          remote_user: ${{ secrets.TVBOX_USER }}
+          remote_key: ${{ secrets.TVBOX_SSH_KEY }}
+
+      # ─────────────────────────────────────────────────────────
+      # 4. Restart + health check
+      # ─────────────────────────────────────────────────────────
+      - name: Restart & Health Check
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.TVBOX_HOST }}
+          username: ${{ secrets.TVBOX_USER }}
+          key: ${{ secrets.TVBOX_SSH_KEY }}
+          script: |
+            set -e
+            echo "🔄 Reiniciando barsi-api.service..."
+            sudo systemctl restart barsi-api.service
+
+            echo "⏳ Aguardando 3s..."
+            sleep 3
+
+            echo "🏥 Health check..."
+            for i in 1 2 3 4 5; do
+              if curl -sf http://localhost:8000/health > /dev/null; then
+                echo "✅ Health check OK"
+                curl -s http://localhost:8000/health | python3 -m json.tool || true
+                exit 0
+              fi
+              echo "⏳ Tentativa $i/5 falhou, aguardando..."
+              sleep 2
+            done
+
+            echo "❌ Health check falhou após 5 tentativas"
+            sudo systemctl status barsi-api.service || true
+            sudo journalctl -u barsi-api.service -n 30 --no-pager || true
+            exit 1
+
+      # ─────────────────────────────────────────────────────────
+      # 5. Rollback em caso de falha
+      # ─────────────────────────────────────────────────────────
+      - name: Rollback on failure
+        if: failure()
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.TVBOX_HOST }}
+          username: ${{ secrets.TVBOX_USER }}
+          key: ${{ secrets.TVBOX_SSH_KEY }}
+          script: |
+            echo "🚨 Deploy falhou — iniciando rollback"
+            cd /opt/barsi_quant_ia || cd /home/${{ secrets.TVBOX_USER }}/barsi_quant_ia
+            LATEST_BACKUP=$(ls -t memory/barsi_memory.db.bak.* 2>/dev/null | head -1)
+            if [ -n "$LATEST_BACKUP" ]; then
+              cp "$LATEST_BACKUP" memory/barsi_memory.db
+              echo "✅ SQLite restaurado de: $LATEST_BACKUP"
+            fi
+            sudo systemctl restart barsi-api.service || true
+
+      # ─────────────────────────────────────────────────────────
+      # 6. Notificação Telegram
+      # ─────────────────────────────────────────────────────────
+      - name: Notify Telegram
+        if: always()
+        run: |
+          STATUS="${{ job.status }}"
+          if [ "$STATUS" = "success" ]; then
+            ICON="✅"
+            MSG="Deploy concluído"
+          else
+            ICON="❌"
+            MSG="Deploy FALHOU (rollback aplicado)"
+          fi
+
+          COMMIT_SHORT=$(echo "${{ github.sha }}" | cut -c1-7)
+          REF="${{ github.ref_name }}"
+
+          curl -s "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d "parse_mode=Markdown" \
+            -d "text=$ICON *$MSG*%0A📦 Ref: \`$REF\`%0A🔖 Commit: \`$COMMIT_SHORT\`%0A👤 Por: ${{ github.actor }}" || true

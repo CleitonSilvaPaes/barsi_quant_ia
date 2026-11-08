@@ -157,7 +157,7 @@ pytest tests/ -v --cov=barsi --cov-fail-under=40
 
 ## 🚀 Sincronização e Deploy na TV Box (ARM64)
 
-Para atualizar o servidor em execução na TV Box doméstica (`cleiton@192.168.100.72`):
+Para atualizar o servidor em execução na TV Box doméstica (`usuario@barsi-tvbox` ou IP da rede):
 
 ```bash
 python -m barsi sync-tvbox
