@@ -404,6 +404,23 @@ async def save_carteira_edits(req: SaveEditsRequest, request: Request):
             p.total_aporte = round(p.qtd_aporte * p.preco_atual, 2)
             p.feedback_usuario = item.feedback
             atualizar_posicao_quant(p, p.preco_atual, p.div_proj)
+        else:
+            p = Position(
+                ticker=item.ticker,
+                row_index=item.row_index if item.row_index and item.row_index >= 10 else 10 + len(positions),
+                div_proj=item.div_proj,
+                qtd_antes=max(0, item.qtd_antes or 0),
+                qtd_aporte=max(0, item.qtd_aporte or 0),
+                preco_teto=item.preco_teto or 0.0,
+                teto_manual=bool(item.teto_manual),
+                feedback_usuario=item.feedback
+            )
+            p.qtd_total = p.qtd_antes + p.qtd_aporte
+            p.valor_total = round(p.qtd_total * p.preco_atual, 2)
+            p.total_aporte = round(p.qtd_aporte * p.preco_atual, 2)
+            atualizar_posicao_quant(p, p.preco_atual, p.div_proj)
+            positions.append(p)
+            pos_map[p.ticker] = p
 
     # SQLite como FONTE DA VERDADE ÚNICA (Persistência atômica local em <5ms)
     budget_repo.save_positions(positions)

@@ -201,3 +201,23 @@ def test_sync_budget_manager_full_flow_with_two_months(tmp_path, monkeypatch):
 
     # Título linha 8
     assert data_map["A8"] == "CONCILIAÇÃO ORÇAMENTÁRIA DETALHADA (JANEIRO A FEVEREIRO 2026)"
+
+
+def test_budget_projection_service_col_idx_to_letter():
+    from barsi.services.budget_projection_service import BudgetProjectionService
+    assert BudgetProjectionService.col_idx_to_letter(1) == "A"
+    assert BudgetProjectionService.col_idx_to_letter(26) == "Z"
+    assert BudgetProjectionService.col_idx_to_letter(27) == "AA"
+    assert BudgetProjectionService.col_idx_to_letter(28) == "AB"
+
+
+def test_budget_projection_service_direct_sync_without_spreadsheet(tmp_path):
+    from barsi.services.budget_projection_service import BudgetProjectionService
+    from barsi.adapters.history.budget_repository import BudgetRepository
+    test_db = str(tmp_path / "budget_direct.db")
+    repo = BudgetRepository(test_db)
+    service = BudgetProjectionService(budget_repo=repo)
+    # Sem spreadsheet e sem adapter, deve retornar False graciosamente
+    res = service.sync_budget_manager({})
+    assert res is False
+
