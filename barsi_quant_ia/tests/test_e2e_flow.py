@@ -3,11 +3,11 @@
 Fluxo testado:
 1. Autenticação (Login) via formulário web e emissão de sessão (cookie JWT)
 2. Acesso à página da Carteira (/carteira)
-3. Edição inline e persistência instantânea de posições no SQLite (/api/carteira/save)
+3. Edição inline e persistência instantânea de posições no SQLite (/api/carteira)
 4. Exportação sob demanda para Excel (.xlsx) e validação da estrutura binária gerada
 5. Exportação sob demanda para Google Sheets (/api/export/sheets)
-6. Acesso aos Insights e envio de feedback em lote (/api/insights/feedback-batch)
-7. Consulta à API de Analytics (/api/analytics/data) para conferência de métricas consolidadas
+6. Acesso aos Insights e envio de feedback em lote (/api/insights/feedback/batch)
+7. Consulta à API de Carteira (/api/carteira) e Analytics (/api/analytics/data)
 """
 import os
 import openpyxl
@@ -31,6 +31,19 @@ def test_full_e2e_workflow(tmp_path, monkeypatch):
     user_repo = UserRepository(test_db)
     user_repo.init_admin_if_empty("admin_e2e", "SenhaSuperSegura123!")
 
+    # Seed com posições e cotações de mercado reais no SQLite (garante isolamento 100% de CI)
+    budget_repo = BudgetRepository(test_db)
+    budget_repo.save_positions([
+        Position(
+            ticker="BBAS3", empresa="Banco do Brasil S.A.", setor="Bancos",
+            row_index=10, preco_atual=17.13, div_proj=2.30, status_barsi=AcaoBarsi.ACUMULAR
+        ),
+        Position(
+            ticker="MXRF11", empresa="Maxi Renda FII", setor="FII - Papel",
+            row_index=11, preco_atual=8.80, div_proj=1.08, status_barsi=AcaoBarsi.ACUMULAR
+        ),
+    ])
+
     client = TestClient(app)
 
     # 2. Login via POST /login
@@ -53,6 +66,7 @@ def test_full_e2e_workflow(tmp_path, monkeypatch):
             {
                 "ticker": "BBAS3",
                 "row_index": 10,
+                "preco_atual": 17.13,
                 "div_proj": 2.50,
                 "qtd_antes": 100,
                 "qtd_aporte": 25,
@@ -63,6 +77,7 @@ def test_full_e2e_workflow(tmp_path, monkeypatch):
             {
                 "ticker": "MXRF11",
                 "row_index": 11,
+                "preco_atual": 8.80,
                 "div_proj": 1.15,
                 "qtd_antes": 400,
                 "qtd_aporte": 50,

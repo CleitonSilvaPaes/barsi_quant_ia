@@ -8,6 +8,7 @@ import gspread
 
 from barsi.ports.sheets import SheetsPort
 from barsi.domain.models import Position, AcaoBarsi, SimuladorOrder
+from barsi.services.budget_projection_service import BudgetProjectionService
 from barsi.infra.logging import logger
 
 class GSpreadAdapter(SheetsPort):
@@ -369,12 +370,10 @@ class GSpreadAdapter(SheetsPort):
 
     def _col_idx_to_letter(self, idx: int) -> str:
         """Converte índice numérico (1, 2, 3...) em letra de coluna Excel/Sheets (A, B, C...)."""
-        from barsi.services.budget_projection_service import BudgetProjectionService
         return BudgetProjectionService.col_idx_to_letter(idx)
 
     def sync_budget_manager(self, resumos: dict):
         """Sincroniza os valores de conciliação de extratos com a aba Budget_Manager_Fluxo delegando para o BudgetProjectionService."""
-        from barsi.services.budget_projection_service import BudgetProjectionService
         service = BudgetProjectionService(budget_repo=self.budget_repo, sheets_adapter=self)
         return service.sync_budget_manager(resumos)
 

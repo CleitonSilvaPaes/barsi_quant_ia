@@ -51,6 +51,7 @@ class EditItem(BaseModel):
     ticker: str
     row_index: int
     div_proj: float
+    preco_atual: Optional[float] = None
     qtd_antes: Optional[int] = None
     qtd_aporte: Optional[int] = None
     preco_teto: Optional[float] = None
@@ -391,6 +392,8 @@ async def save_carteira_edits(req: SaveEditsRequest, request: Request):
         if item.ticker in pos_map:
             p = pos_map[item.ticker]
             p.div_proj = item.div_proj
+            if item.preco_atual is not None and item.preco_atual > 0:
+                p.preco_atual = item.preco_atual
             if item.teto_manual is not None:
                 p.teto_manual = item.teto_manual
             if item.preco_teto is not None and item.preco_teto > 0:
@@ -405,9 +408,13 @@ async def save_carteira_edits(req: SaveEditsRequest, request: Request):
             p.feedback_usuario = item.feedback
             atualizar_posicao_quant(p, p.preco_atual, p.div_proj)
         else:
+            # Caso a posição não exista previamente, cria com preço informado ou 0.0
+            # (Se 0.0, será atualizado na próxima sincronização de mercado via /api/run)
+            preco = item.preco_atual if (item.preco_atual is not None and item.preco_atual > 0) else 0.0
             p = Position(
                 ticker=item.ticker,
                 row_index=item.row_index if item.row_index and item.row_index >= 10 else 10 + len(positions),
+                preco_atual=preco,
                 div_proj=item.div_proj,
                 qtd_antes=max(0, item.qtd_antes or 0),
                 qtd_aporte=max(0, item.qtd_aporte or 0),
