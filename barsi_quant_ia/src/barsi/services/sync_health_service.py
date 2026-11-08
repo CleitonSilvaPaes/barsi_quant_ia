@@ -148,6 +148,10 @@ class SyncHealthService:
         # 2. Persiste no SQLite
         try:
             repo = BudgetRepository(self.sqlite_db_path)
+            canonical_tickers = [p.ticker for p in canonical_positions]
+            with repo._conn() as c:
+                placeholders = ",".join("?" for _ in canonical_tickers)
+                c.execute(f"DELETE FROM positions WHERE ticker NOT IN ({placeholders})", tuple(canonical_tickers))
             repo.save_positions(canonical_positions)
             synced_targets.append("sqlite")
         except Exception as e:

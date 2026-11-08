@@ -27,7 +27,7 @@ class MockSheetsAdapter(SheetsPort):
     async def load_positions(self):
         return self.positions
 
-    async def update_positions(self, positions):
+    async def update_positions(self, positions, invalidate=True):
         self.positions = positions
         self.updated = True
 

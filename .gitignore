@@ -36,3 +36,11 @@ exclude/
 # Graphify
 graphify-out/
 
+
+# Repomix outputs (temporários, gerados localmente)
+repomix-output.xml
+repomix-*.xml
+incremental.xml
+recent.xml
+domain-tests.xml
+*.diff

@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import json
+import calendar
+from datetime import datetime, timedelta
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -83,6 +86,7 @@ INIT_BUDGET_SCHEMA_SQL = """
         margem_seguranca    REAL DEFAULT 0,
         feedback_usuario    TEXT DEFAULT '',
         insight_atual       TEXT DEFAULT '',
+        teto_manual         INTEGER DEFAULT 0,
         updated_at          TEXT DEFAULT (datetime('now'))
     );
 
@@ -116,6 +120,7 @@ INIT_BUDGET_SCHEMA_SQL = """
         dividendos_mes       REAL NOT NULL DEFAULT 0,
         aporte_planejado     REAL NOT NULL DEFAULT 0,
         rentabilidade_mes    REAL DEFAULT 0,
+        setores_json         TEXT DEFAULT '{}',
         created_at           TEXT NOT NULL DEFAULT (datetime('now')),
         UNIQUE(data_snapshot)
     );
@@ -151,6 +156,23 @@ INIT_BUDGET_SCHEMA_SQL = """
         UNIQUE(ticker, data_pregao)
     );
     CREATE INDEX IF NOT EXISTS idx_price_history_lookup ON price_history(ticker, data_pregao);
+
+    -- 11. Fila de Escrita Pendente no Google Sheets (Outbox Pattern)
+    CREATE TABLE IF NOT EXISTS pending_sheets_writes (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticker       TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+        retry_count  INTEGER DEFAULT 0
+    );
+
+    -- 12. Cache Persistente das Posições do Google Sheets em SQLite
+    CREATE TABLE IF NOT EXISTS sheets_positions_cache (
+        ticker       TEXT PRIMARY KEY,
+        payload_json TEXT NOT NULL,
+        expires_at   TEXT NOT NULL,
+        updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
 """
 
 DEFAULT_KEYWORDS: List[Tuple[str, str, str, int]] = [
@@ -259,6 +281,15 @@ class BudgetRepository:
     def _init_tables(self) -> None:
         with self._conn() as conn:
             conn.executescript(INIT_BUDGET_SCHEMA_SQL)
+            try:
+                cols = [r["name"] for r in conn.execute("PRAGMA table_info(portfolio_snapshots)").fetchall()]
+                if "setores_json" not in cols:
+                    conn.execute("ALTER TABLE portfolio_snapshots ADD COLUMN setores_json TEXT DEFAULT '{}'")
+                cols_pos = [r["name"] for r in conn.execute("PRAGMA table_info(positions)").fetchall()]
+                if "teto_manual" not in cols_pos:
+                    conn.execute("ALTER TABLE positions ADD COLUMN teto_manual INTEGER DEFAULT 0")
+            except Exception:
+                pass
         self.seed_default_keywords()
 
     def seed_default_keywords(self) -> int:
@@ -511,8 +542,8 @@ class BudgetRepository:
                     INSERT INTO positions (
                         ticker, empresa, setor, qtd_antes, qtd_aporte,
                         preco_atual, div_proj, preco_teto, margem_seguranca,
-                        feedback_usuario, insight_atual, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                        feedback_usuario, insight_atual, teto_manual, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                     ON CONFLICT(ticker) DO UPDATE SET
                         empresa = excluded.empresa,
                         setor = excluded.setor,
@@ -524,11 +555,12 @@ class BudgetRepository:
                         margem_seguranca = excluded.margem_seguranca,
                         feedback_usuario = excluded.feedback_usuario,
                         insight_atual = excluded.insight_atual,
+                        teto_manual = excluded.teto_manual,
                         updated_at = datetime('now')
                 """, (
                     p.ticker, p.empresa, p.setor, p.qtd_antes, p.qtd_aporte,
                     p.preco_atual, p.div_proj, p.preco_teto, p.margem_seguranca,
-                    p.feedback_usuario, p.insight_atual
+                    p.feedback_usuario, p.insight_atual, 1 if getattr(p, "teto_manual", False) else 0
                 ))
                 count += cur.rowcount
         return count
@@ -543,6 +575,7 @@ class BudgetRepository:
             rows = c.execute("SELECT * FROM positions ORDER BY margem_seguranca DESC").fetchall()
             positions = []
             for idx, r in enumerate(rows, start=10):
+                teto_man = bool(r["teto_manual"]) if "teto_manual" in r.keys() else False
                 positions.append(Position(
                     ticker=r["ticker"],
                     row_index=idx,
@@ -555,7 +588,8 @@ class BudgetRepository:
                     preco_teto=float(r["preco_teto"] or 0.0),
                     margem_seguranca=float(r["margem_seguranca"] or 0.0),
                     feedback_usuario=r["feedback_usuario"] or "",
-                    insight_atual=r["insight_atual"] or ""
+                    insight_atual=r["insight_atual"] or "",
+                    teto_manual=teto_man
                 ))
             return positions
 
@@ -582,54 +616,92 @@ class BudgetRepository:
         dividendos_mes: float = 0.0,
         aporte_planejado: float = 0.0,
         rentabilidade_mes: float = 0.0,
+        setores_json: Optional[str] = None
     ) -> None:
         """Salva ou atualiza o snapshot de patrimônio para uma data (YYYY-MM-DD)."""
         with self._conn() as c:
             c.execute("""
                 INSERT INTO portfolio_snapshots 
-                (data_snapshot, patrimonio_total, cotas_totais, dividendos_mes, aporte_planejado, rentabilidade_mes)
-                VALUES (?, ?, ?, ?, ?, ?)
+                (data_snapshot, patrimonio_total, cotas_totais, dividendos_mes, aporte_planejado, rentabilidade_mes, setores_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(data_snapshot) DO UPDATE SET
                     patrimonio_total = excluded.patrimonio_total,
                     cotas_totais = excluded.cotas_totais,
                     dividendos_mes = excluded.dividendos_mes,
                     aporte_planejado = excluded.aporte_planejado,
                     rentabilidade_mes = excluded.rentabilidade_mes,
+                    setores_json = COALESCE(excluded.setores_json, portfolio_snapshots.setores_json),
                     created_at = datetime('now')
-            """, (data_snapshot, patrimonio_total, cotas_totais, dividendos_mes, aporte_planejado, rentabilidade_mes))
+            """, (data_snapshot, patrimonio_total, cotas_totais, dividendos_mes, aporte_planejado, rentabilidade_mes, setores_json or '{}'))
 
     def get_portfolio_snapshots(self, limit_months: int = 12) -> List[Dict[str, Any]]:
         """Retorna histórico de snapshots ordenados por data."""
         with self._conn() as c:
             rows = c.execute("""
-                SELECT data_snapshot, patrimonio_total, cotas_totais, dividendos_mes, aporte_planejado, rentabilidade_mes
+                SELECT data_snapshot, patrimonio_total, cotas_totais, dividendos_mes, aporte_planejado, rentabilidade_mes, setores_json
                 FROM portfolio_snapshots
                 ORDER BY data_snapshot ASC
                 LIMIT ?
             """, (limit_months,)).fetchall()
-            return [dict(r) for r in rows]
+            result = []
+            for r in rows:
+                item = dict(r)
+                if item.get("setores_json"):
+                    try:
+                        item["setores"] = json.loads(item["setores_json"])
+                    except Exception:
+                        item["setores"] = {}
+                else:
+                    item["setores"] = {}
+                result.append(item)
+            return result
 
-    def seed_initial_snapshots_if_empty(self, current_patrimonio: float, current_cotas: int) -> None:
-        """Gera histórico inicial coerente dos últimos 6 meses caso a tabela esteja vazia."""
+    def seed_initial_snapshots_if_empty(
+        self,
+        current_patrimonio: float,
+        current_cotas: int,
+        setores_dict: Optional[Dict[str, float]] = None
+    ) -> None:
+        """Gera histórico inicial coerente dos últimos 6 meses com datas dinâmicas se a tabela tiver poucos registros."""
         with self._conn() as c:
             count = c.execute("SELECT COUNT(*) FROM portfolio_snapshots").fetchone()[0]
-            if count > 0 or current_patrimonio <= 0:
+            if count >= 6 or current_patrimonio <= 0:
                 return
-            # Projeção retroativa realista baseada em aportes médios de R$ 900
-            months = [
-                ("2026-06-30", round(current_patrimonio * 0.45, 2), int(current_cotas * 0.45), 24.50, 850.0),
-                ("2026-07-31", round(current_patrimonio * 0.55, 2), int(current_cotas * 0.55), 31.20, 900.0),
-                ("2026-08-31", round(current_patrimonio * 0.67, 2), int(current_cotas * 0.67), 38.80, 950.0),
-                ("2026-09-30", round(current_patrimonio * 0.78, 2), int(current_cotas * 0.78), 44.10, 920.0),
-                ("2026-10-31", round(current_patrimonio * 0.90, 2), int(current_cotas * 0.90), 48.70, 1000.0),
-                ("2026-11-08", current_patrimonio, current_cotas, 50.03, 989.45),
-            ]
-            for dt, pat, cotas, div, ap in months:
+            
+            hoje = datetime.now()
+            setores_base = setores_dict or {}
+            factors = [0.45, 0.55, 0.67, 0.78, 0.90, 1.0]
+            for i, factor in enumerate(factors):
+                months_ago = 5 - i
+                year = hoje.year
+                month = hoje.month - months_ago
+                while month <= 0:
+                    month += 12
+                    year -= 1
+                
+                if months_ago == 0:
+                    dt_str = hoje.strftime("%Y-%m-%d")
+                else:
+                    last_day = calendar.monthrange(year, month)[1]
+                    dt_str = f"{year:04d}-{month:02d}-{last_day:02d}"
+                
+                pat = round(current_patrimonio * factor, 2)
+                cotas = int(current_cotas * factor)
+                div = round(pat * 0.006, 2)
+                ap = round(800.0 + (i * 40.0), 2)
+                
+                month_setores = {k: round(v * factor, 2) for k, v in setores_base.items()} if setores_base else {}
+                sec_json = json.dumps(month_setores, ensure_ascii=False)
+                
                 c.execute("""
-                    INSERT OR IGNORE INTO portfolio_snapshots 
-                    (data_snapshot, patrimonio_total, cotas_totais, dividendos_mes, aporte_planejado)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (dt, pat, cotas, div, ap))
+                    INSERT INTO portfolio_snapshots 
+                    (data_snapshot, patrimonio_total, cotas_totais, dividendos_mes, aporte_planejado, rentabilidade_mes, setores_json)
+                    VALUES (?, ?, ?, ?, ?, 0.0, ?)
+                    ON CONFLICT(data_snapshot) DO UPDATE SET
+                        patrimonio_total = excluded.patrimonio_total,
+                        cotas_totais = excluded.cotas_totais,
+                        setores_json = COALESCE(excluded.setores_json, portfolio_snapshots.setores_json)
+                """, (dt_str, pat, cotas, div, ap, sec_json))
 
     def update_insight_feedback(self, ticker: str, feedback: str) -> None:
         """Atualiza o feedback do usuário na tabela positions e no último registro de historico_analises."""
@@ -710,6 +782,13 @@ class BudgetRepository:
         if not positions:
             return self.get_portfolio_snapshots(12)
 
+        soma_pat = sum((p.qtd_antes or 0) * (p.preco_atual or 0.0) for p in positions)
+        soma_cotas = sum(p.qtd_antes or 0 for p in positions)
+        setores_base = {}
+        for p in positions:
+            sec = p.setor or "B.E.S.T."
+            setores_base[sec] = round(setores_base.get(sec, 0.0) + (p.qtd_antes or 0) * (p.preco_atual or 0.0), 2)
+
         with self._conn() as c:
             # Obtém as datas de fechamento mensal presentes no price_history
             dates = c.execute("""
@@ -720,30 +799,148 @@ class BudgetRepository:
                 LIMIT 12
             """).fetchall()
 
-            if not dates:
-                # Se não tem histórico ainda, roda sync rápida
+            if not dates or len(dates) < 3:
+                self.seed_initial_snapshots_if_empty(round(soma_pat, 2), soma_cotas, setores_base)
                 return self.get_portfolio_snapshots(12)
 
-            snapshots = []
             for d in dates:
                 dt_str = d["end_date"]
-                soma_pat = 0.0
-                soma_cotas = 0
+                soma_pat_m = 0.0
+                soma_cotas_m = 0
+                month_setores = {}
                 for p in positions:
                     row_p = c.execute(
                         "SELECT preco_fechamento FROM price_history WHERE ticker = ? AND data_pregao <= ? ORDER BY data_pregao DESC LIMIT 1",
                         (p.ticker, dt_str)
                     ).fetchone()
                     preco = float(row_p["preco_fechamento"]) if row_p else p.preco_atual
-                    soma_pat += (p.qtd_antes or 0) * preco
-                    soma_cotas += (p.qtd_antes or 0)
+                    val = (p.qtd_antes or 0) * preco
+                    soma_pat_m += val
+                    soma_cotas_m += (p.qtd_antes or 0)
+                    sec = p.setor or "B.E.S.T."
+                    month_setores[sec] = round(month_setores.get(sec, 0.0) + val, 2)
 
-                if soma_pat > 0:
+                if soma_pat_m > 0:
                     self.save_portfolio_snapshot(
                         dt_str,
-                        round(soma_pat, 2),
-                        soma_cotas,
-                        dividendos_mes=round(soma_pat * 0.009, 2), # ~0.9% am
-                        aporte_planejado=1000.0
+                        round(soma_pat_m, 2),
+                        soma_cotas_m,
+                        dividendos_mes=round(soma_pat_m * 0.009, 2), # ~0.9% am
+                        aporte_planejado=1000.0,
+                        setores_json=json.dumps(month_setores, ensure_ascii=False)
                     )
-            return self.get_portfolio_snapshots(12)
+
+            snaps = self.get_portfolio_snapshots(12)
+            if len(snaps) < 6:
+                self.seed_initial_snapshots_if_empty(round(soma_pat, 2), soma_cotas, setores_base)
+                snaps = self.get_portfolio_snapshots(12)
+            return snaps
+
+    # ------------------------------------------------------------------ #
+    # Outbox Pattern: Writes pendentes para o Google Sheets
+    # ------------------------------------------------------------------ #
+    def record_pending_sheets_write(self, ticker: str, payload: Dict[str, Any]) -> int:
+        """Enfileira uma escrita para o Google Sheets quando a rede ou API estiver indisponível."""
+        payload_str = json.dumps(payload, ensure_ascii=False)
+        with self._conn() as c:
+            cur = c.execute("""
+                INSERT INTO pending_sheets_writes (ticker, payload_json)
+                VALUES (?, ?)
+            """, (ticker, payload_str))
+            logger.info("pending_sheets_write_recorded", ticker=ticker, write_id=cur.lastrowid)
+            return cur.lastrowid
+
+    def get_pending_sheets_writes(self) -> List[Dict[str, Any]]:
+        """Retorna todas as escritas pendentes para o Google Sheets."""
+        with self._conn() as c:
+            rows = c.execute("""
+                SELECT id, ticker, payload_json, created_at, retry_count
+                  FROM pending_sheets_writes
+                 ORDER BY id ASC
+            """).fetchall()
+            result = []
+            for r in rows:
+                item = dict(r)
+                try:
+                    item["payload"] = json.loads(item["payload_json"])
+                except Exception:
+                    item["payload"] = {}
+                result.append(item)
+            return result
+
+    def clear_pending_sheets_write(self, write_id: int) -> None:
+        """Remove escrita pendente após sucesso no espelhamento para o Sheets."""
+        with self._conn() as c:
+            c.execute("DELETE FROM pending_sheets_writes WHERE id = ?", (write_id,))
+
+    def increment_pending_sheets_retry(self, write_id: int) -> None:
+        """Incrementa contador de tentativas de escrita pendente."""
+        with self._conn() as c:
+            c.execute("UPDATE pending_sheets_writes SET retry_count = retry_count + 1 WHERE id = ?", (write_id,))
+
+    # ------------------------------------------------------------------ #
+    # Cache Persistente em SQLite das posições do Google Sheets
+    # ------------------------------------------------------------------ #
+    def save_sheets_positions_cache(self, positions: List[Position], ttl_seconds: int = 60) -> None:
+        """Salva posições do Sheets em cache SQLite com validade definida."""
+        expires_at = (datetime.now() + timedelta(seconds=ttl_seconds)).isoformat()
+        with self._conn() as c:
+            for p in positions:
+                data = {
+                    "ticker": p.ticker,
+                    "row_index": p.row_index,
+                    "empresa": p.empresa,
+                    "setor": p.setor,
+                    "qtd_antes": p.qtd_antes,
+                    "qtd_aporte": p.qtd_aporte,
+                    "preco_atual": p.preco_atual,
+                    "div_proj": p.div_proj,
+                    "preco_teto": p.preco_teto,
+                    "margem_seguranca": p.margem_seguranca,
+                    "feedback_usuario": p.feedback_usuario,
+                    "insight_atual": p.insight_atual
+                }
+                c.execute("""
+                    INSERT INTO sheets_positions_cache (ticker, payload_json, expires_at, updated_at)
+                    VALUES (?, ?, ?, datetime('now'))
+                    ON CONFLICT(ticker) DO UPDATE SET
+                        payload_json = excluded.payload_json,
+                        expires_at = excluded.expires_at,
+                        updated_at = datetime('now')
+                """, (p.ticker, json.dumps(data, ensure_ascii=False), expires_at))
+
+    def get_sheets_positions_cache(self) -> Tuple[Optional[List[Position]], bool]:
+        """
+        Retorna posições salvas no cache do Sheets em SQLite.
+        Retorno: (lista_posicoes, is_stale)
+        """
+        with self._conn() as c:
+            rows = c.execute("SELECT ticker, payload_json, expires_at FROM sheets_positions_cache").fetchall()
+            if not rows:
+                return None, True
+            
+            now_iso = datetime.now().isoformat()
+            is_stale = False
+            positions = []
+            for r in rows:
+                if r["expires_at"] < now_iso:
+                    is_stale = True
+                try:
+                    d = json.loads(r["payload_json"])
+                    positions.append(Position(
+                        ticker=d["ticker"],
+                        row_index=d.get("row_index", 10),
+                        empresa=d.get("empresa", ""),
+                        setor=d.get("setor", ""),
+                        qtd_antes=d.get("qtd_antes", 0),
+                        qtd_aporte=d.get("qtd_aporte", 0),
+                        preco_atual=float(d.get("preco_atual", 0.0)),
+                        div_proj=float(d.get("div_proj", 0.0)),
+                        preco_teto=float(d.get("preco_teto", 0.0)),
+                        margem_seguranca=float(d.get("margem_seguranca", 0.0)),
+                        feedback_usuario=d.get("feedback_usuario", ""),
+                        insight_atual=d.get("insight_atual", "")
+                    ))
+                except Exception:
+                    pass
+            return (positions if positions else None), is_stale

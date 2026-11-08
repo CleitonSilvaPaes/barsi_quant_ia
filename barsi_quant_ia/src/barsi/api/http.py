@@ -45,6 +45,8 @@ class EditItem(BaseModel):
     div_proj: float
     qtd_antes: Optional[int] = None
     qtd_aporte: Optional[int] = None
+    preco_teto: Optional[float] = None
+    teto_manual: Optional[bool] = None
     feedback: str = ""
 
 class SaveEditsRequest(BaseModel):
@@ -53,6 +55,13 @@ class SaveEditsRequest(BaseModel):
 class FeedbackRequest(BaseModel):
     ticker: str
     feedback: str
+
+class FeedbackBatchItem(BaseModel):
+    ticker: str
+    feedback: str
+
+class FeedbackBatchRequest(BaseModel):
+    items: List[FeedbackBatchItem]
 
 class NewUserRequest(BaseModel):
     username: str
@@ -271,17 +280,6 @@ async def get_home_summary(request: Request):
     taxa = round((concordos / validados * 100), 1) if validados > 0 else 100.0
     top_insights.sort(key=lambda x: x["margem"], reverse=True)
 
-    # Persiste snapshot atual no SQLite
-    budget_repo = BudgetRepository(settings.sqlite_db_path)
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    budget_repo.save_portfolio_snapshot(
-        today_str,
-        round(soma_patrimonio, 2),
-        soma_cotas,
-        round(proventos_ano / 12, 2),
-        round(soma_aporte, 2)
-    )
-
     return {
         "patrimonio_total": round(soma_patrimonio, 2),
         "cotas_totais": soma_cotas,
@@ -331,6 +329,7 @@ async def get_carteira(request: Request):
             "div_proj": round(p.div_proj, 2),
             "feedback": p.feedback_usuario,
             "insight_atual": p.insight_atual,
+            "teto_manual": getattr(p, "teto_manual", False),
             "is_readonly": is_leitor
         })
     data.sort(key=lambda x: x["margem"], reverse=True)
@@ -340,14 +339,25 @@ async def get_carteira(request: Request):
 async def save_carteira_edits(req: SaveEditsRequest, request: Request):
     require_role_action(request, action_type="edit")
     
-    sheets = AdapterFactory.create_sheets_adapter(settings)
-    positions = await sheets.load_positions()
+    budget_repo = BudgetRepository(settings.sqlite_db_path)
+    positions = budget_repo.load_positions()
+    if not positions:
+        try:
+            sheets = AdapterFactory.create_sheets_adapter(settings)
+            positions = await sheets.load_positions()
+        except Exception:
+            positions = []
+    
     pos_map = {p.ticker: p for p in positions}
 
     for item in req.items:
         if item.ticker in pos_map:
             p = pos_map[item.ticker]
             p.div_proj = item.div_proj
+            if item.teto_manual is not None:
+                p.teto_manual = item.teto_manual
+            if item.preco_teto is not None and item.preco_teto > 0:
+                p.preco_teto = item.preco_teto
             if item.qtd_antes is not None:
                 p.qtd_antes = max(0, item.qtd_antes)
             if item.qtd_aporte is not None:
@@ -358,16 +368,37 @@ async def save_carteira_edits(req: SaveEditsRequest, request: Request):
             p.feedback_usuario = item.feedback
             atualizar_posicao_quant(p, p.preco_atual, p.div_proj)
 
-    await sheets.update_positions(positions)
-    
-    # Atualiza posições no repositório SQLite para persistência edge local
-    try:
-        budget_repo = BudgetRepository(settings.sqlite_db_path)
-        budget_repo.save_positions(positions)
-    except Exception as e:
-        logger.warn("sqlite_positions_save_warning", error=str(e))
+    # 1. P0 — SQLite como FONTE DA VERDADE (Persistência atômica local em <10ms)
+    budget_repo.save_positions(positions)
 
-    return {"status": "ok", "updated_count": len(req.items)}
+    # 2. Espelhamento no Excel (.xlsx) local
+    try:
+        from barsi.adapters.sheets.xlsx_adapter import XLSXAdapter
+        xlsx_path = os.path.join(os.path.dirname(__file__), "../../../carteira_barsi_quant_ia.xlsx")
+        if not os.path.exists(xlsx_path):
+            xlsx_path = "carteira_barsi_quant_ia.xlsx"
+        if os.path.exists(xlsx_path):
+            xlsx = XLSXAdapter(xlsx_path)
+            await xlsx.update_positions(positions)
+    except Exception as e:
+        logger.warn("local_xlsx_mirror_error", error=str(e))
+
+    # 3. Espelhamento no Google Sheets (Best-effort com Outbox Pattern)
+    synced_to_sheets = False
+    try:
+        sheets = AdapterFactory.create_sheets_adapter(settings)
+        await sheets.update_positions(positions, invalidate=True)
+        synced_to_sheets = True
+    except Exception as e:
+        logger.warn("sheets_save_failed_queued_to_outbox", error=str(e))
+        for item in req.items:
+            budget_repo.record_pending_sheets_write(item.ticker, item.model_dump())
+
+    return {
+        "status": "ok",
+        "synced_to_sheets": synced_to_sheets,
+        "updated_count": len(req.items)
+    }
 
 @app.get("/api/simulador")
 async def get_simulador(request: Request):
@@ -462,23 +493,84 @@ async def get_insights_api(request: Request):
         "items": items
     }
 
-@app.post("/api/insights/feedback")
-async def save_insight_feedback(req: FeedbackRequest, request: Request):
+@app.post("/api/insights/feedback/batch")
+async def save_insight_feedback_batch(req: FeedbackBatchRequest, request: Request):
     require_role_action(request, action_type="edit")
-    budget_repo = BudgetRepository(settings.sqlite_db_path)
-    budget_repo.update_insight_feedback(req.ticker, req.feedback)
+    if not req.items:
+        return {"ok": True, "count": 0, "synced_to_sheets": True}
 
+    budget_repo = BudgetRepository(settings.sqlite_db_path)
+    # 1. Atualização atômica no SQLite
+    for it in req.items:
+        budget_repo.update_insight_feedback(it.ticker, it.feedback)
+
+    # 2. Atualização em batch no Google Sheets (1 única requisição batch)
+    synced_to_sheets = False
     try:
         sheets = AdapterFactory.create_sheets_adapter(settings)
         positions = await sheets.load_positions()
-        pos = next((p for p in positions if p.ticker == req.ticker), None)
-        if pos:
-            pos.feedback_usuario = req.feedback
-            await sheets.update_positions([pos])
+        pos_map = {p.ticker: p for p in positions}
+        updated_positions = []
+        for it in req.items:
+            if it.ticker in pos_map:
+                pos = pos_map[it.ticker]
+                pos.feedback_usuario = it.feedback
+                updated_positions.append(pos)
+        if updated_positions:
+            await sheets.update_positions(updated_positions, invalidate=(len(updated_positions) > 1))
+            synced_to_sheets = True
+            logger.info("google_sheets_batch_updated", count=len(updated_positions))
     except Exception as e:
-        logger.warn("sheets_feedback_sync_warning", error=str(e))
+        logger.warn("sheets_batch_feedback_sync_warning", error=str(e))
+        for it in req.items:
+            budget_repo.record_pending_sheets_write(it.ticker, {"feedback": it.feedback})
 
-    return {"ok": True, "ticker": req.ticker, "feedback": req.feedback}
+    return {"ok": True, "count": len(req.items), "synced_to_sheets": synced_to_sheets}
+
+@app.post("/api/insights/feedback")
+async def save_insight_feedback(req: FeedbackRequest, request: Request):
+    batch_req = FeedbackBatchRequest(items=[FeedbackBatchItem(ticker=req.ticker, feedback=req.feedback)])
+    res = await save_insight_feedback_batch(batch_req, request)
+    return {
+        "ok": res.get("ok", True),
+        "ticker": req.ticker,
+        "feedback": req.feedback,
+        "synced_to_sheets": res.get("synced_to_sheets", False)
+    }
+
+@app.post("/api/snapshot/today")
+async def record_today_snapshot(request: Request):
+    require_role_action(request, action_type="edit")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    positions = repo.load_positions()
+    if not positions:
+        try:
+            sheets = AdapterFactory.create_sheets_adapter(settings)
+            positions = await sheets.load_positions()
+        except Exception:
+            positions = []
+
+    soma_patrimonio = sum((p.qtd_antes or 0) * (p.preco_atual or 0.0) for p in positions)
+    soma_cotas = sum(p.qtd_antes or 0 for p in positions)
+    soma_aporte = sum((p.qtd_aporte or 0) * (p.preco_atual or 0.0) for p in positions)
+    proventos_ano = sum(((p.qtd_antes or 0) + (p.qtd_aporte or 0)) * (p.div_proj or 0.0) for p in positions)
+    setores = {}
+    for p in positions:
+        sec = p.setor or "B.E.S.T."
+        val = (p.qtd_antes or 0) * (p.preco_atual or 0.0)
+        setores[sec] = round(setores.get(sec, 0.0) + val, 2)
+
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    import json
+    repo.save_portfolio_snapshot(
+        today_str,
+        round(soma_patrimonio, 2),
+        soma_cotas,
+        dividendos_mes=round(proventos_ano / 12, 2),
+        aporte_planejado=round(soma_aporte, 2),
+        setores_json=json.dumps(setores, ensure_ascii=False)
+    )
+    return {"status": "ok", "snapshot_date": today_str, "patrimonio": round(soma_patrimonio, 2)}
 
 @app.get("/api/analytics/data")
 async def get_analytics_data(request: Request):
@@ -511,18 +603,29 @@ async def get_analytics_data(request: Request):
 
     budget_repo = BudgetRepository(settings.sqlite_db_path)
     snapshots = budget_repo.build_real_portfolio_snapshots()
-    if not snapshots:
-        budget_repo.seed_initial_snapshots_if_empty(round(soma_patrimonio, 2), soma_cotas)
+    if not snapshots or len(snapshots) < 3:
+        budget_repo.seed_initial_snapshots_if_empty(round(soma_patrimonio, 2), soma_cotas, setores)
         snapshots = budget_repo.get_portfolio_snapshots(12)
 
-    dividendos = [
-        {"mes": "Jun/26", "realizado": 24.50, "projetado": 35.00},
-        {"mes": "Jul/26", "realizado": 31.20, "projetado": 38.00},
-        {"mes": "Ago/26", "realizado": 38.80, "projetado": 42.00},
-        {"mes": "Set/26", "realizado": 44.10, "projetado": 45.00},
-        {"mes": "Out/26", "realizado": 48.70, "projetado": 48.00},
-        {"mes": "Nov/26", "realizado": 50.03, "projetado": 55.00},
-    ]
+    # Gera histórico de dividendos dinamicamente a partir dos snapshots
+    dividendos = []
+    for s in (snapshots[-6:] if len(snapshots) >= 6 else snapshots):
+        ym_parts = s["data_snapshot"].split("-")
+        mes_str = f"{ym_parts[1]}/{ym_parts[0][2:]}" if len(ym_parts) >= 2 else s["data_snapshot"]
+        div_real = s.get("dividendos_mes", 0.0)
+        dividendos.append({
+            "mes": mes_str,
+            "realizado": round(div_real, 2),
+            "projetado": round(div_real * 1.15, 2)
+        })
+
+    return {
+        "patrimonio_atual": round(soma_patrimonio, 2),
+        "proventos_proj_ano": round(proventos_ano, 2),
+        "snapshots": snapshots,
+        "setores": setores,
+        "dividendos": dividendos
+    }
 
     return {
         "patrimonio_atual": round(soma_patrimonio, 2),
@@ -617,9 +720,52 @@ async def test_provider_connection(provider: str, request: Request):
     except Exception as e:
         return {"ok": False, "detail": str(e)}
 
+async def flush_pending_sheets_writes() -> int:
+    """Tenta descarregar escritas pendentes na fila Outbox para o Google Sheets."""
+    repo = BudgetRepository(settings.sqlite_db_path)
+    pending = repo.get_pending_sheets_writes()
+    if not pending:
+        return 0
+
+    try:
+        sheets = AdapterFactory.create_sheets_adapter(settings)
+        positions = await sheets.load_positions()
+        pos_map = {p.ticker: p for p in positions}
+        updated = []
+        flushed_ids = []
+
+        for item in pending:
+            t = item["ticker"]
+            payload = item.get("payload", {})
+            if t in pos_map:
+                p = pos_map[t]
+                if "qtd_antes" in payload and payload["qtd_antes"] is not None:
+                    p.qtd_antes = max(0, payload["qtd_antes"])
+                if "qtd_aporte" in payload and payload["qtd_aporte"] is not None:
+                    p.qtd_aporte = max(0, payload["qtd_aporte"])
+                if "div_proj" in payload and payload["div_proj"] is not None:
+                    p.div_proj = payload["div_proj"]
+                if "feedback" in payload and payload["feedback"] is not None:
+                    p.feedback_usuario = payload["feedback"]
+                updated.append(p)
+                flushed_ids.append(item["id"])
+
+        if updated:
+            await sheets.update_positions(updated, invalidate=True)
+            for wid in flushed_ids:
+                repo.clear_pending_sheets_write(wid)
+            logger.info("pending_sheets_flushed_successfully", count=len(updated))
+            return len(updated)
+    except Exception as e:
+        logger.warn("flush_pending_sheets_writes_error", error=str(e))
+        for item in pending:
+            repo.increment_pending_sheets_retry(item["id"])
+    return 0
+
 @app.post("/api/run")
 async def trigger_run_web(request: Request):
     require_role_action(request, action_type="run")
+    await flush_pending_sheets_writes()
     global LAST_RUN_SUMMARY
     service = get_sync_service()
     summary = await service.execute_run()

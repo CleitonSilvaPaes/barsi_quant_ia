@@ -32,7 +32,8 @@
 
   <!-- Gráfico 3: Concentração por Setor -->
   <div class="card" style="margin:0;">
-    <h3 style="color: var(--accent); font-size: 1.05rem; margin-bottom: 1rem;">🥧 Concentração por Setor</h3>
+    <h3 style="color: var(--accent); font-size: 1.05rem; margin-bottom: 0.35rem;">🥧 Concentração por Setor</h3>
+    <div id="pie-caption" style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.8rem;">Visualizando carteira atual (clique em qualquer ponto da curva para filtrar)</div>
     <div style="height: 300px; position: relative;">
       <canvas id="chart-setores"></canvas>
     </div>
@@ -143,6 +144,16 @@
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        onClick: (evt, elements) => {
+          if (elements.length > 0) {
+            const idx = elements[0].index;
+            if (snapshots[idx] && snapshots[idx].setores && Object.keys(snapshots[idx].setores).length > 0) {
+              renderSetoresChart(snapshots[idx].setores);
+              const captionEl = document.getElementById('pie-caption');
+              if (captionEl) captionEl.innerText = `Concentração filtrada em ${snapshots[idx].data_snapshot} (R$ ${snapshots[idx].patrimonio_total.toLocaleString('pt-BR')})`;
+            }
+          }
+        },
         plugins: {
           legend: { display: false },
           tooltip: {

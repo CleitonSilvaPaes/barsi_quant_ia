@@ -60,6 +60,8 @@ class XLSXAdapter(SheetsPort):
                     val_tot = float(ws.cell(row=row, column=13).value or (qtd_total * preco))
                     tot_ap = float(ws.cell(row=row, column=15).value or (qtd_aporte * preco))
                     status_str = str(ws.cell(row=row, column=16).value or "AGUARDAR").strip()
+                    val_q = str(ws.cell(row=row, column=17).value or "").strip().upper()
+                    teto_manual = val_q in ["SIM", "TRUE", "1", "S"]
 
                     positions.append(Position(
                         ticker=str(ticker).strip().upper(),
@@ -76,7 +78,8 @@ class XLSXAdapter(SheetsPort):
                         dy=dy,
                         valor_total=val_tot,
                         total_aporte=tot_ap,
-                        status_barsi=AcaoBarsi.ACUMULAR if "ACUMULAR" in status_str else AcaoBarsi.AGUARDAR
+                        status_barsi=AcaoBarsi.ACUMULAR if "ACUMULAR" in status_str else AcaoBarsi.AGUARDAR,
+                        teto_manual=teto_manual
                     ))
                 wb.close()
                 return positions
@@ -154,7 +157,7 @@ class XLSXAdapter(SheetsPort):
 
         return await asyncio.to_thread(_load_sim)
 
-    async def update_positions(self, positions: List[Position]) -> None:
+    async def update_positions(self, positions: List[Position], invalidate: bool = True) -> None:
         def _update():
             if not os.path.exists(self.file_path):
                 return
@@ -175,6 +178,7 @@ class XLSXAdapter(SheetsPort):
                     ws[f"M{r}"] = round(qtd_tot * p.preco_atual, 2)
                     ws[f"O{r}"] = round(p.qtd_aporte * p.preco_atual, 2)
                     ws[f"P{r}"] = p.status_barsi.value
+                    ws[f"Q{r}"] = "SIM" if getattr(p, "teto_manual", False) else "NÃO"
             elif "Dashboard Barsi" in sheet_names:
                 ws = wb["Dashboard Barsi"]
                 for p in positions:

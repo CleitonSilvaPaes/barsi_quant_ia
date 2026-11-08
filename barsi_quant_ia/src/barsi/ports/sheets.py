@@ -8,7 +8,7 @@ class SheetsPort(Protocol):
         """Lê os ativos cadastrados no portfólio."""
         ...
 
-    async def update_positions(self, positions: List[Position]) -> None:
+    async def update_positions(self, positions: List[Position], invalidate: bool = True) -> None:
         """Persiste preços, margens, status e insights atualizados."""
         ...
 

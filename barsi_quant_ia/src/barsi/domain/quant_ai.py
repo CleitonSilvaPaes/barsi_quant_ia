@@ -87,6 +87,7 @@ class StatisticalBarsiEngine:
         "SANEAMENTO": {"mu": 14.0, "sigma": 10.0, "perenidade": 0.99},
         "SEGUROS": {"mu": 15.0, "sigma": 14.0, "perenidade": 0.92},
         "TELECOM": {"mu": 8.0, "sigma": 11.0, "perenidade": 0.90},
+        "FII": {"mu": 20.0, "sigma": 10.0, "perenidade": 0.85},
         "OUTROS": {"mu": 5.0, "sigma": 18.0, "perenidade": 0.70}
     }
 
@@ -95,7 +96,7 @@ class StatisticalBarsiEngine:
         t = ticker.upper()
         if any(b in t for b in ["BBAS", "ITUB", "BBDC", "SANB"]):
             return "BANCOS"
-        elif any(e in t for e in ["CMIG", "CPLE", "EGIE", "TAEE", "TRPL"]):
+        elif any(e in t for e in ["CMIG", "CPLE", "EGIE", "TAEE", "TRPL", "ALUP"]):
             return "ENERGIA"
         elif any(s in t for s in ["SAPR", "SBSP", "CSMG"]):
             return "SANEAMENTO"
@@ -103,6 +104,8 @@ class StatisticalBarsiEngine:
             return "SEGUROS"
         elif any(tel in t for tel in ["VIVT", "TIMS"]):
             return "TELECOM"
+        elif t.endswith("11"):
+            return "FII"
         return "OUTROS"
 
     @classmethod

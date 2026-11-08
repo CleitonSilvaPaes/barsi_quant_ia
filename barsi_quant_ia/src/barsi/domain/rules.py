@@ -2,16 +2,50 @@
 from barsi.domain.models import Position, AcaoBarsi, InsightResult
 from typing import Tuple
 
-YIELD_MINIMO_BARSI = 0.06  # 6% ao ano em proventos
+YIELD_MINIMO_BARSI = 0.06        # Ações perenes B.E.S.T. (Bancos, Energia, Saneamento, Seguros, Telecom)
+YIELD_MINIMO_FII_TIJOLO = 0.08   # FIIs de tijolo / logístico / shoppings (HGLG11, KNRI11, XPLG11)
+YIELD_MINIMO_FII_PAPEL = 0.10    # FIIs de papel / CRI / Recebíveis (MXRF11, KNCR11, HGCR11)
+YIELD_MINIMO_FII_FOF = 0.09      # Fundos de fundos / híbridos (BCFF11, XPML11)
 
-def calcular_preco_teto(div_proj: float, preco_atual: float) -> float:
+def is_fii(ticker: str, setor: str = "") -> bool:
+    """Verifica se o ticker é um Fundo Imobiliário (FII), excluindo units de ações B.E.S.T."""
+    t = ticker.upper()
+    s = setor.upper()
+    if "FII" in s:
+        return True
+    unit_stocks = ["TAEE", "SANB", "SAPR", "ALUP", "CPLE", "KLBN", "BPAC", "SULA"]
+    if any(u in t for u in unit_stocks):
+        return False
+    return t.endswith("11")
+
+def _yield_target_para(ticker: str, setor: str = "") -> float:
+    """Retorna a taxa de corte / hurdle yield para cálculo do Preço Teto por classe de ativo."""
+    if not is_fii(ticker, setor):
+        return YIELD_MINIMO_BARSI
+    setor_l = setor.lower()
+    if any(k in setor_l for k in ["papel", "cri", "receb", "híbrid", "hibrid"]):
+        return YIELD_MINIMO_FII_PAPEL
+    if any(k in setor_l for k in ["fof", "fundo de fundo"]):
+        return YIELD_MINIMO_FII_FOF
+    return YIELD_MINIMO_FII_TIJOLO
+
+def calcular_preco_teto(
+    div_proj: float,
+    preco_atual: float,
+    ticker: str = "",
+    setor: str = ""
+) -> float:
     """
-    Calcula o Preço Teto Barsi baseado no dividendo por ação (DPA) projetado.
-    Fórmula: Teto = DPA / 0.06
+    Calcula o Preço Teto Barsi calibrado pela classe do ativo:
+    - Ações B.E.S.T.: DPA / 0.06 (Hurdle 6% de empresas perenes que reinvestem lucros)
+    - FII de Tijolo: DPA / 0.08 (Hurdle 8%)
+    - FII de FoF: DPA / 0.09 (Hurdle 9%)
+    - FII de Papel: DPA / 0.10 (Hurdle 10% de recebíveis com payout 95%+)
     Se o dividendo não estiver informado, adota fallback conservador de 1.3x o preço atual.
     """
     if div_proj and div_proj > 0:
-        return round(div_proj / YIELD_MINIMO_BARSI, 2)
+        yield_target = _yield_target_para(ticker, setor)
+        return round(div_proj / yield_target, 2)
     return round(preco_atual * 1.3, 2) if preco_atual > 0 else 0.0
 
 def calcular_margem_seguranca(preco_teto: float, preco_atual: float) -> float:
@@ -41,7 +75,15 @@ def atualizar_posicao_quant(posicao: Position, preco_novo: float, div_proj: floa
     if div_proj is not None and div_proj > 0:
         posicao.div_proj = div_proj
 
-    posicao.preco_teto = calcular_preco_teto(posicao.div_proj, posicao.preco_atual)
+    # Se teto_manual estiver ativo e com valor positivo, preserva o teto estipulado pelo usuário
+    if not getattr(posicao, "teto_manual", False) or posicao.preco_teto <= 0:
+        posicao.preco_teto = calcular_preco_teto(
+            posicao.div_proj,
+            posicao.preco_atual,
+            ticker=posicao.ticker,
+            setor=posicao.setor
+        )
+
     posicao.margem_seguranca = calcular_margem_seguranca(posicao.preco_teto, posicao.preco_atual)
     posicao.status_barsi = determinar_acao_barsi(posicao.margem_seguranca)
     return posicao

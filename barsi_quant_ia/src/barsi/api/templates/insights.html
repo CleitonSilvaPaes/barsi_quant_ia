@@ -41,6 +41,8 @@
 <script>
   let insightsData = [];
   let filtroDecisao = 'TODOS';
+  let pendingFeedback = {};
+  let feedbackDebounceTimer = null;
 
   async function carregarInsights() {
     try {
@@ -156,27 +158,64 @@
     });
   }
 
-  async function enviarFeedback(ticker, voto) {
+  function enviarFeedback(ticker, voto) {
+    // 1. Atualização Otimista na Interface
+    pendingFeedback[ticker] = voto;
+    const item = insightsData.find(i => i.ticker === ticker);
+    if (item) {
+      item.feedback_usuario = voto;
+      renderizarCards();
+    }
+    showToast(`Gravado ${voto} para ${ticker} (salvando em lote...)`);
+
+    // 2. Debounce de 2000ms para envio consolidado em batch
+    if (feedbackDebounceTimer) clearTimeout(feedbackDebounceTimer);
+    feedbackDebounceTimer = setTimeout(enviarBatchFeedback, 2000);
+  }
+
+  async function enviarBatchFeedback() {
+    const tickers = Object.keys(pendingFeedback);
+    if (tickers.length === 0) return;
+
+    const payload = {
+      items: tickers.map(t => ({ ticker: t, feedback: pendingFeedback[t] }))
+    };
+    pendingFeedback = {};
+
     try {
-      const res = await fetch("/api/insights/feedback", {
+      const res = await fetch("/api/insights/feedback/batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticker: ticker, feedback: voto })
+        body: JSON.stringify(payload)
       });
       const out = await res.json();
-      showToast(`Feedback gravado para ${ticker}: ${voto}! O agente aprendeu.`);
-      carregarInsights();
+      showToast(`✓ ${out.count} feedback(s) sincronizados com sucesso no SQLite e Sheets!`, "success");
     } catch (err) {
-      showToast("Erro ao gravar feedback: " + err, "error");
+      showToast("Erro ao sincronizar feedbacks em lote: " + err, "error");
     }
   }
 
-  async function enviarCustomFeedback(ticker) {
+  function enviarCustomFeedback(ticker) {
     const input = document.getElementById(`custom-fb-${ticker}`);
     const texto = (input.value || "").trim();
     if (!texto) return;
-    await enviarFeedback(ticker, texto);
+    enviarFeedback(ticker, texto);
   }
+
+  window.addEventListener("beforeunload", () => {
+    const tickers = Object.keys(pendingFeedback);
+    if (tickers.length > 0) {
+      const payload = {
+        items: tickers.map(t => ({ ticker: t, feedback: pendingFeedback[t] }))
+      };
+      fetch("/api/insights/feedback/batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        keepalive: true
+      });
+    }
+  });
 
   async function executarSync() {
     try {

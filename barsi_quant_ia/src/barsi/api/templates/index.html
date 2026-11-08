@@ -211,27 +211,31 @@
 
     input.tbl-input {
       background: #0f172a;
-      border: 1px solid #475569;
+      border: 1px solid #334155;
       color: #fff;
       padding: 0.35rem 0.45rem;
       border-radius: 4px;
       box-sizing: border-box;
       font-size: 0.85rem;
+      transition: border-color 0.2s, background-color 0.2s;
+    }
+
+    input.tbl-input:hover:not(:disabled) {
+      border-color: #64748b;
     }
 
     input.tbl-input:focus {
       border-color: var(--accent);
       outline: none;
+      background: #1e293b;
     }
 
-    input.input-qtd {
-      width: 65px;
+    input.input-qtd, input.input-aporte {
+      width: 75px;
       text-align: right;
-    }
-
-    input.input-aporte {
-      width: 65px;
-      text-align: right;
+      font-weight: 600;
+      color: #38bdf8;
+      cursor: text;
     }
 
     input.input-dpa {
@@ -443,10 +447,10 @@
                 <div><span class="pill-sector">${p.setor || 'B.E.S.T.'}</span> <span style="font-size: 0.75rem; color: var(--text-muted);">${p.empresa || ''}</span></div>
               </td>
               <td style="text-align: right;">
-                <input type="number" class="tbl-input input-qtd" value="${qtdAtual}" min="0" ${readOnlyAttr} oninput="recalcularTabela()" title="Edite sua custódia atual de ${p.ticker}" />
+                <input type="number" step="1" class="tbl-input input-qtd" value="${qtdAtual}" min="0" ${readOnlyAttr} oninput="recalcularTabela()" title="Edite sua custódia atual de ${p.ticker}" />
               </td>
               <td style="text-align: right;">
-                <input type="number" class="tbl-input input-aporte" value="${qtdAporte}" min="0" ${readOnlyAttr} oninput="recalcularTabela()" title="Edite o aporte programado para ${p.ticker}" />
+                <input type="number" step="1" class="tbl-input input-aporte" value="${qtdAporte}" min="0" ${readOnlyAttr} oninput="recalcularTabela()" title="Edite o aporte programado para ${p.ticker}" />
               </td>
               <td style="text-align: right; font-weight: 600; color: #94a3b8;" class="cell-qtd-total">${qtdTotal}</td>
               <td style="text-align: right;">R$ ${preco.toFixed(2)}</td>

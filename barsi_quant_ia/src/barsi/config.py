@@ -3,6 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, field_validator
 from typing import Literal, Union, Any, List
 import os
+import secrets
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -18,7 +19,7 @@ class Settings(BaseSettings):
     api_port: int = 8000
     api_host: str = "0.0.0.0"
     api_bearer_token: str = Field(default_factory=lambda: os.getenv("BARSI_API_BEARER_TOKEN", ""))
-    secret_key: str = Field(default_factory=lambda: os.getenv("BARSI_SECRET_KEY", "barsi_hmac_secret_key_secure_2026"))
+    secret_key: str = Field(default_factory=lambda: os.getenv("BARSI_SECRET_KEY") or secrets.token_urlsafe(32))
     initial_admin_user: str = Field(default_factory=lambda: os.getenv("BARSI_INITIAL_ADMIN_USER", ""))
     initial_admin_pass: str = Field(default_factory=lambda: os.getenv("BARSI_INITIAL_ADMIN_PASS", ""))
     titular_nomes: Union[List[str], str] = Field(default_factory=list)
@@ -33,16 +34,17 @@ class Settings(BaseSettings):
             return [str(x).strip().upper() for x in v if str(x).strip()]
         return []
 
-    # Conexão TV Box SSH (Zero credenciais hardcoded)
+    # Conexão TV Box SSH (Zero credenciais ou caminhos de usuário hardcoded)
     tvbox_ip: str = Field(default_factory=lambda: os.getenv("BARSI_TVBOX_IP", ""))
     tvbox_user: str = Field(default_factory=lambda: os.getenv("BARSI_TVBOX_USER", ""))
     tvbox_pass: str = Field(default_factory=lambda: os.getenv("BARSI_TVBOX_PASS", ""))
-    tvbox_home: str = Field(default_factory=lambda: os.getenv("BARSI_TVBOX_HOME", "/home/cleiton/barsi_quant_ia"))
+    tvbox_home: str = Field(default_factory=lambda: os.getenv("BARSI_TVBOX_HOME", os.path.expanduser("~/barsi_quant_ia")))
 
     # Restrições de Concorrência e Hardware (TV Box)
     max_concurrency: int = 3
     cache_dir: str = "./cache"
     sqlite_db_path: str = "./memory/barsi_memory.db"
+    sheets_cache_ttl_sec: float = Field(default_factory=lambda: float(os.getenv("BARSI_SHEETS_CACHE_TTL_SEC", "60.0")))
 
     # Providers
     market_provider: Literal["yfinance", "brapi", "cached"] = "yfinance"

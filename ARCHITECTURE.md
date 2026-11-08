@@ -163,3 +163,21 @@ grep -rE "(BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|password\s*=\s*['\"][^'\"]{8,})
   --include="*.py" --include="*.env*" --include="*.sh" .
 ```
 
+---
+
+## 9. Fluxo de Dados, Caches e Resiliência (Outbox Pattern)
+
+O pipeline segue estritamente o princípio de que o **SQLite local é a Fonte da Verdade**:
+
+### 9.1 Fluxo de Escrita (Order of Writes)
+1. **SQLite (WAL):** Gravação atômica prioritária (<10ms) na tabela `positions`.
+2. **Excel Local (`.xlsx`):** Espelhamento rápido do arquivo de planilha local.
+3. **Google Sheets (Nuvem):** Espelhamento *best-effort*. Se ocorrer erro de rede ou rate limit HTTP 429 (`Quota exceeded`), a gravação é enfileirada na tabela `pending_sheets_writes` (Outbox Pattern) e reprocessada no próximo `/api/run` ou timer diário.
+
+### 9.2 Estratégia de Caches
+* **`GSpreadAdapter` (Memória + SQLite):** TTL configurável via `BARSI_SHEETS_CACHE_TTL_SEC` (padrão 60s). Updates parciais (ex: validação de feedback de 1 ativo) **não invalidam** o cache completo. Além disso, as posições são espelhadas na tabela `sheets_positions_cache`, garantindo recuperação instantânea (stale-while-revalidate) caso a API do Google Sheets fique inacessível.
+* **`CachedMarketAdapter` (Diskcache):** Cotações da B3 com TTL de 5 minutos durante o pregão (09:00–18:00) e 12 horas fora do pregão em `./cache`.
+* **Batch de Feedbacks (RLHF):** Frontend debounced em 2000ms e consolidado via `POST /api/insights/feedback/batch`, reduzindo chamadas avulsas para 1 única transação e 1 única requisição em lote.
+* **Curva Histórica e Setores:** Snapshots gravados em `portfolio_snapshots` com decomposição setorial em `setores_json` para interação drill-down nos gráficos analíticos.
+
+

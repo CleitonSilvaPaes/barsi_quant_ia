@@ -49,3 +49,34 @@ def test_gerar_insight_deterministico():
     assert "ACUMULAR" in res.insight
     assert res.fallback_used is True
 
+def test_calcular_preco_teto_fii_e_units():
+    # MXRF11: FII de papel -> Hurdle 10% -> 1.08 / 0.10 = R$ 10.80
+    assert calcular_preco_teto(1.08, 8.80, ticker="MXRF11", setor="FII - Papel") == 10.80
+
+    # HGLG11: FII de tijolo -> Hurdle 8% -> 13.20 / 0.08 = R$ 165.00
+    assert calcular_preco_teto(13.20, 160.0, ticker="HGLG11", setor="FII - Tijolo") == 165.00
+
+    # TAEE11: Unit de Energia B.E.S.T. -> Hurdle 6% -> 2.70 / 0.06 = R$ 45.00
+    assert calcular_preco_teto(2.70, 36.0, ticker="TAEE11", setor="Energia") == 45.00
+
+    # BBAS3: Ação Banco B.E.S.T. -> Hurdle 6% -> 2.30 / 0.06 = R$ 38.33
+    assert calcular_preco_teto(2.30, 17.13, ticker="BBAS3", setor="Bancos") == 38.33
+
+def test_atualizar_posicao_quant_teto_manual():
+    # Posição com teto manual estipulado pelo usuário
+    pos = Position(
+        ticker="MXRF11",
+        row_index=13,
+        preco_atual=8.80,
+        div_proj=1.08,
+        preco_teto=11.50,
+        teto_manual=True
+    )
+    atualizada = atualizar_posicao_quant(pos, preco_novo=9.00)
+    # Deve preservar o teto manual de 11.50 e não recomputar para 10.80
+    assert atualizada.preco_teto == 11.50
+    # Margem deve ser calculada sobre o teto manual: ((11.50 - 9.00) / 9.00) * 100 = 27.78%
+    assert atualizada.margem_seguranca == 27.78
+    assert atualizada.status_barsi == AcaoBarsi.ACUMULAR
+
+

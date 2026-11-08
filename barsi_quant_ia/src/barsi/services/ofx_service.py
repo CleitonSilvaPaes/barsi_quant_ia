@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from barsi.config import settings
 from barsi.domain.models import Categoria
+from barsi.domain.rules import is_fii
 from barsi.infra.logging import logger
 
 _OFX_TRN_RE = re.compile(
@@ -419,7 +420,7 @@ class OFXParserService:
                         if t.ticker_relacionado:
                             tk = t.ticker_relacionado
                             res.detalhes_ativos[tk] = round(res.detalhes_ativos.get(tk, 0.0) + valor_efetivo, 2)
-                            if tk.startswith("MXRF") or "11" in tk:
+                            if is_fii(tk):
                                 res.compras_fiis = round(res.compras_fiis + valor_efetivo, 2)
                             else:
                                 res.compras_acoes_barsi = round(res.compras_acoes_barsi + valor_efetivo, 2)

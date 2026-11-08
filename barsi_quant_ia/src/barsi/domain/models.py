@@ -42,6 +42,7 @@ class Position(BaseModel):
     status_barsi: AcaoBarsi = AcaoBarsi.AGUARDAR
     feedback_usuario: str = ""
     insight_atual: str = ""
+    teto_manual: bool = False
 
 class SimuladorOrder(BaseModel):
     rank: int

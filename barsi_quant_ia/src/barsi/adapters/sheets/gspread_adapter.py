@@ -15,7 +15,7 @@ class GSpreadAdapter(SheetsPort):
     _positions_cache_time: float = 0.0
     _sim_orders_cache: Optional[List[SimuladorOrder]] = None
     _sim_orders_cache_time: float = 0.0
-    _CACHE_TTL: float = 60.0  # 60s TTL para evitar erro [429] Quota exceeded do Google Sheets
+    _CACHE_TTL: float = 60.0  # Default TTL (configurável via BARSI_SHEETS_CACHE_TTL_SEC)
 
     @classmethod
     def invalidate_cache(cls):
@@ -28,6 +28,7 @@ class GSpreadAdapter(SheetsPort):
         self.credentials_path = credentials_path
         self.spreadsheet_id = spreadsheet_id
         self.sqlite_db_path = sqlite_db_path
+        self.cache_ttl = float(os.getenv("BARSI_SHEETS_CACHE_TTL_SEC", "60.0"))
         from barsi.adapters.history.budget_repository import BudgetRepository
         self.budget_repo = BudgetRepository(sqlite_db_path)
 
@@ -55,8 +56,15 @@ class GSpreadAdapter(SheetsPort):
 
     async def load_positions(self) -> List[Position]:
         now = time.time()
-        if GSpreadAdapter._positions_cache and (now - GSpreadAdapter._positions_cache_time < GSpreadAdapter._CACHE_TTL):
-            return GSpreadAdapter._positions_cache
+        ttl = self.cache_ttl
+        if GSpreadAdapter._positions_cache:
+            elapsed = now - GSpreadAdapter._positions_cache_time
+            if elapsed < ttl:
+                ttl_rem = round(ttl - elapsed, 1)
+                logger.info("sheets_cache", hit=True, ttl_remaining=ttl_rem)
+                return GSpreadAdapter._positions_cache
+
+        logger.info("sheets_cache", hit=False, ttl_remaining=0.0)
 
         def _load():
             try:
@@ -66,12 +74,22 @@ class GSpreadAdapter(SheetsPort):
                 logger.warn("sheets_connect_error_fallback", error=str(e))
                 if GSpreadAdapter._positions_cache:
                     return GSpreadAdapter._positions_cache
+                # Consulta cache persistente em SQLite
+                cached_positions, is_stale = self.budget_repo.get_sheets_positions_cache()
+                if cached_positions:
+                    if is_stale:
+                        logger.warning("sheets_cache_stale", hint="Usando cache SQLite persistente do Google Sheets")
+                    else:
+                        logger.info("sheets_cache_sqlite_hit", count=len(cached_positions))
+                    GSpreadAdapter._positions_cache = cached_positions
+                    GSpreadAdapter._positions_cache_time = time.time()
+                    return cached_positions
                 return self.budget_repo.load_positions()
 
             # Cenário 1: Planilha Pro B.E.S.T. ('Screener_BEST_Custodia')
             if "Screener_BEST_Custodia" in worksheet_titles:
                 ws = sh.worksheet("Screener_BEST_Custodia")
-                rows = ws.get("A10:P19")
+                rows = ws.get("A10:Q19")
 
                 # Mapeia feedbacks do usuário gravados na aba de IA
                 feedbacks_map = {}
@@ -130,6 +148,9 @@ class GSpreadAdapter(SheetsPort):
                     total_aporte = self._parse_currency(r[14] if len(r) > 14 else None)
 
                     fb = feedbacks_map.get(ticker, "")
+                    teto_manual = False
+                    if len(r) > 16 and r[16]:
+                        teto_manual = str(r[16]).strip().upper() in ["SIM", "TRUE", "1", "S"]
 
                     positions.append(Position(
                         ticker=ticker,
@@ -146,10 +167,15 @@ class GSpreadAdapter(SheetsPort):
                         dy=dy,
                         valor_total=valor_total,
                         total_aporte=total_aporte,
-                        feedback_usuario=fb
+                        feedback_usuario=fb,
+                        teto_manual=teto_manual
                     ))
                 GSpreadAdapter._positions_cache = positions
                 GSpreadAdapter._positions_cache_time = time.time()
+                try:
+                    self.budget_repo.save_sheets_positions_cache(positions, ttl_seconds=int(self.cache_ttl))
+                except Exception as e:
+                    logger.warn("sheets_save_cache_sqlite_error", error=str(e))
                 return positions
 
             # Cenário 2: Layout Legado ('Dashboard Barsi')
@@ -172,6 +198,10 @@ class GSpreadAdapter(SheetsPort):
                 ))
             GSpreadAdapter._positions_cache = positions
             GSpreadAdapter._positions_cache_time = time.time()
+            try:
+                self.budget_repo.save_sheets_positions_cache(positions, ttl_seconds=int(self.cache_ttl))
+            except Exception as e:
+                logger.warn("sheets_save_cache_sqlite_error", error=str(e))
             return positions
 
         return await asyncio.to_thread(_load)
@@ -248,8 +278,17 @@ class GSpreadAdapter(SheetsPort):
 
         return await asyncio.to_thread(_load_sim)
 
-    async def update_positions(self, positions: List[Position]) -> None:
-        GSpreadAdapter.invalidate_cache()
+    async def update_positions(self, positions: List[Position], invalidate: bool = True) -> None:
+        if len(positions) == 1 and not invalidate:
+            # Update parcial (ex: feedback individual): atualiza em memória sem invalidar o cache completo
+            if GSpreadAdapter._positions_cache:
+                for updated_p in positions:
+                    for idx, cur_p in enumerate(GSpreadAdapter._positions_cache):
+                        if cur_p.ticker == updated_p.ticker:
+                            GSpreadAdapter._positions_cache[idx] = updated_p
+        elif len(positions) >= 2 or invalidate:
+            GSpreadAdapter.invalidate_cache()
+
         def _update():
             sh = self._get_client_and_spreadsheet()
             worksheet_titles = [w.title for w in sh.worksheets()]
@@ -283,6 +322,9 @@ class GSpreadAdapter(SheetsPort):
                     updates.append({"range": f"O{row}", "values": [[f"R$ {tot_ap:.2f}".replace(".", ",")]]})
                     # Col P: Status Recomendação Barsi
                     updates.append({"range": f"P{row}", "values": [[p.status_barsi.value]]})
+                    # Col Q: Teto Manual ("SIM" ou "NÃO")
+                    teto_val = "SIM" if getattr(p, "teto_manual", False) else "NÃO"
+                    updates.append({"range": f"Q{row}", "values": [[teto_val]]})
                 ws.batch_update(updates)
 
                 # Se houver a aba de IA, registra o log e os feedbacks
@@ -566,6 +608,7 @@ class GSpreadAdapter(SheetsPort):
                     ws[f"M{r}"] = round(qtd_tot * p.preco_atual, 2)
                     ws[f"O{r}"] = round(p.qtd_aporte * p.preco_atual, 2)
                     ws[f"P{r}"] = p.status_barsi.value
+                    ws[f"Q{r}"] = "SIM" if getattr(p, "teto_manual", False) else "NÃO"
 
                 if "IA_2B_Insights_Retroalimentacao" in sheet_names:
                     ws_ia = wb["IA_2B_Insights_Retroalimentacao"]
