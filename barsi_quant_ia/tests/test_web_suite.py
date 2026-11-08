@@ -300,4 +300,32 @@ def test_export_xlsx_empty_db_returns_400(auth_client, tmp_path, monkeypatch):
     assert res.status_code == 400
     assert "Nenhuma posição no SQLite para exportar" in res.json()["detail"]
 
+def test_save_carteira_updates_preco_atual_when_provided(auth_client, tmp_path, monkeypatch):
+    """Valida atualização de preco_atual e validação Pydantic de preco >= 0."""
+    repo = BudgetRepository(settings.sqlite_db_path)
+    repo.save_positions([
+        Position(ticker="BBAS3", row_index=10, preco_atual=10.0, div_proj=2.0)
+    ])
+
+    # 1. Atualização com preco_atual válido
+    payload = {
+        "items": [
+            {"ticker": "BBAS3", "row_index": 10, "div_proj": 2.5, "preco_atual": 18.50}
+        ]
+    }
+    res = auth_client.post("/api/carteira", json=payload)
+    assert res.status_code == 200
+    updated = {p.ticker: p for p in repo.load_positions()}
+    assert updated["BBAS3"].preco_atual == 18.50
+
+    # 2. Rejeição de preco negativo via Pydantic ge=0 (HTTP 422)
+    invalid_payload = {
+        "items": [
+            {"ticker": "BBAS3", "row_index": 10, "div_proj": 2.5, "preco_atual": -5.0}
+        ]
+    }
+    invalid_res = auth_client.post("/api/carteira", json=invalid_payload)
+    assert invalid_res.status_code == 422
+
+
 

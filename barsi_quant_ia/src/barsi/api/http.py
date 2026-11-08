@@ -8,7 +8,7 @@ import urllib.parse
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 import psutil
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from fastapi import FastAPI, Depends, HTTPException, Security, Request, Response, UploadFile, File, BackgroundTasks
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, FileResponse
 from fastapi.security import HTTPBearer
@@ -51,10 +51,10 @@ class EditItem(BaseModel):
     ticker: str
     row_index: int
     div_proj: float
-    preco_atual: Optional[float] = None
-    qtd_antes: Optional[int] = None
-    qtd_aporte: Optional[int] = None
-    preco_teto: Optional[float] = None
+    preco_atual: Optional[float] = Field(default=None, ge=0)
+    qtd_antes: Optional[int] = Field(default=None, ge=0)
+    qtd_aporte: Optional[int] = Field(default=None, ge=0)
+    preco_teto: Optional[float] = Field(default=None, ge=0)
     teto_manual: Optional[bool] = None
     feedback: str = ""
 

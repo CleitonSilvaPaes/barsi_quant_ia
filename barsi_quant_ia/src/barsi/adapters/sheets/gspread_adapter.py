@@ -352,7 +352,6 @@ class GSpreadAdapter(SheetsPort):
                     ws_ia.update(range_name="A11:M20", values=log_rows)
 
                 logger.info("google_sheets_pro_updated", count=len(positions))
-                self._sync_to_local_xlsx(positions)
                 return
 
             # Cenário 2: Layout Legado
@@ -376,67 +375,4 @@ class GSpreadAdapter(SheetsPort):
         """Sincroniza os valores de conciliação de extratos com a aba Budget_Manager_Fluxo delegando para o BudgetProjectionService."""
         service = BudgetProjectionService(budget_repo=self.budget_repo, sheets_adapter=self)
         return service.sync_budget_manager(resumos)
-
-    def _sync_to_local_xlsx(self, positions: List[Position], file_path: str = "carteira_barsi_quant_ia.xlsx"):
-        """Atualiza a planilha Excel local (.xlsx) mantendo paridade 100% com o Google Sheets."""
-        candidate_paths = [
-            file_path,
-            os.path.join("barsi_quant_ia", file_path),
-            os.path.join(os.path.dirname(__file__), "../../../carteira_barsi_quant_ia.xlsx"),
-            os.path.join(os.path.dirname(__file__), "../../../barsi_quant_ia/carteira_barsi_quant_ia.xlsx"),
-        ]
-        target_path = None
-        for cp in candidate_paths:
-            if os.path.exists(cp):
-                target_path = cp
-                break
-        
-        if not target_path:
-            return
-
-        try:
-            import openpyxl
-            wb = openpyxl.load_workbook(target_path)
-            sheet_names = wb.sheetnames
-
-            # Cenário 1: Layout Pro B.E.S.T.
-            if "Screener_BEST_Custodia" in sheet_names:
-                ws = wb["Screener_BEST_Custodia"]
-                for p in positions:
-                    r = p.row_index
-                    qtd_tot = p.qtd_antes + p.qtd_aporte
-                    ws[f"D{r}"] = p.qtd_antes
-                    ws[f"E{r}"] = p.qtd_aporte
-                    ws[f"F{r}"] = qtd_tot
-                    ws[f"H{r}"] = round(p.preco_atual, 2)
-                    ws[f"I{r}"] = round(p.div_proj, 2)
-                    ws[f"J{r}"] = round(p.preco_teto, 2)
-                    ws[f"K{r}"] = round(p.margem_seguranca / 100.0, 4)
-                    ws[f"M{r}"] = round(qtd_tot * p.preco_atual, 2)
-                    ws[f"O{r}"] = round(p.qtd_aporte * p.preco_atual, 2)
-                    ws[f"P{r}"] = p.status_barsi.value
-                    ws[f"Q{r}"] = "SIM" if getattr(p, "teto_manual", False) else "NÃO"
-
-                if "IA_2B_Insights_Retroalimentacao" in sheet_names:
-                    ws_ia = wb["IA_2B_Insights_Retroalimentacao"]
-                    for idx, p in enumerate(positions, start=11):
-                        ws_ia[f"H{idx}"] = p.insight_atual or f"Score B.E.S.T. Margem {p.margem_seguranca:.1f}%"
-                        ws_ia[f"I{idx}"] = p.status_barsi.value
-                        ws_ia[f"J{idx}"] = p.qtd_aporte if p.qtd_aporte > 0 else "N/A"
-                        ws_ia[f"L{idx}"] = p.feedback_usuario
-
-            elif "Dashboard Barsi" in sheet_names:
-                ws = wb["Dashboard Barsi"]
-                for p in positions:
-                    r = p.row_index
-                    ws[f"D{r}"] = round(p.preco_atual, 2)
-                    ws[f"F{r}"] = round(p.div_proj, 2)
-                    ws[f"I{r}"] = p.status_barsi.value
-                    ws[f"L{r}"] = p.insight_atual
-            
-            wb.save(target_path)
-            wb.close()
-            logger.info("local_xlsx_mirrored_successfully", path=target_path)
-        except Exception as exc:
-            logger.warn("local_xlsx_mirror_failed", error=str(exc))
 
