@@ -576,17 +576,23 @@ class BudgetRepository:
             positions = []
             for idx, r in enumerate(rows, start=10):
                 teto_man = bool(r["teto_manual"]) if "teto_manual" in r.keys() else False
+                q_antes = r["qtd_antes"] or 0
+                q_aporte = r["qtd_aporte"] or 0
+                p_atual = float(r["preco_atual"] or 0.0)
                 positions.append(Position(
                     ticker=r["ticker"],
                     row_index=idx,
                     empresa=r["empresa"] or "",
                     setor=r["setor"] or "",
-                    qtd_antes=r["qtd_antes"] or 0,
-                    qtd_aporte=r["qtd_aporte"] or 0,
-                    preco_atual=float(r["preco_atual"] or 0.0),
+                    qtd_antes=q_antes,
+                    qtd_aporte=q_aporte,
+                    qtd_total=q_antes + q_aporte,
+                    preco_atual=p_atual,
                     div_proj=float(r["div_proj"] or 0.0),
                     preco_teto=float(r["preco_teto"] or 0.0),
                     margem_seguranca=float(r["margem_seguranca"] or 0.0),
+                    valor_total=round((q_antes + q_aporte) * p_atual, 2),
+                    total_aporte=round(q_aporte * p_atual, 2),
                     feedback_usuario=r["feedback_usuario"] or "",
                     insight_atual=r["insight_atual"] or "",
                     teto_manual=teto_man

@@ -248,12 +248,21 @@ def test_save_carteira_endpoint_persists_qtd_antes(tmp_path, monkeypatch):
     assert res.json()["status"] == "ok"
     assert res.json()["updated_count"] == 1
 
-    # Valida que o mock_sheets recebeu a posição atualizada com qtd_antes=37
-    bbas3 = next(p for p in mock_sheets.positions if p.ticker == "BBAS3")
+    # Valida que o SQLite (Fonte da Verdade) recebeu a posição atualizada com qtd_antes=37
+    from barsi.adapters.history.budget_repository import BudgetRepository
+    repo = BudgetRepository(settings.sqlite_db_path)
+    positions = repo.load_positions()
+    bbas3 = next(p for p in positions if p.ticker == "BBAS3")
     assert bbas3.qtd_antes == 37
     assert bbas3.qtd_aporte == 18
     assert bbas3.qtd_total == 55
     assert bbas3.div_proj == 2.50
+
+    # Valida exportação sob demanda para o Google Sheets
+    export_res = client.post("/api/export/sheets")
+    assert export_res.status_code == 200
+    bbas3_sheets = next(p for p in mock_sheets.positions if p.ticker == "BBAS3")
+    assert bbas3_sheets.qtd_antes == 37
 
 
 

@@ -236,3 +236,52 @@ def test_backup_download_rbac_admin_only(auth_client, tmp_path):
     assert res_inv.status_code == 403
     assert "não possui permissão" in res_inv.json()["detail"]
 
+def test_export_sheets_endpoint(auth_client):
+    """Caminho B: Valida exportação sob demanda do SQLite para o Google Sheets."""
+    repo = BudgetRepository(settings.sqlite_db_path)
+    repo.save_positions([
+        Position(ticker="BBAS3", row_index=10, preco_atual=17.13, div_proj=2.30, status_barsi=AcaoBarsi.ACUMULAR)
+    ])
+    res = auth_client.post("/api/export/sheets")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["ok"] is True
+    assert "exportados com sucesso" in data["message"]
+
+def test_export_sheets_rbac_leitor_blocked(auth_client):
+    """Caminho B: Leitor não tem permissão para exportar/sobrescrever o Sheets."""
+    leitor_token = create_session_token(user_id=3, username="leitor_export", role="leitor", secret_key=settings.secret_key)
+    leitor_client = TestClient(app)
+    leitor_client.cookies.set("barsi_session", leitor_token)
+    res = leitor_client.post("/api/export/sheets")
+    assert res.status_code == 403
+    assert "não possui permissão" in res.json()["detail"]
+
+def test_export_xlsx_endpoint(auth_client, tmp_path, monkeypatch):
+    """Caminho B: Valida exportação sob demanda em formato Excel (.xlsx)."""
+    import os
+    repo = BudgetRepository(settings.sqlite_db_path)
+    repo.save_positions([
+        Position(ticker="BBAS3", row_index=10, preco_atual=17.13, div_proj=2.30, status_barsi=AcaoBarsi.ACUMULAR)
+    ])
+
+    test_xlsx = str(tmp_path / "carteira_barsi_quant_ia.xlsx")
+    with open(test_xlsx, "wb") as f:
+        f.write(b"fake_xlsx_content")
+
+    class FakeXLSXAdapter:
+        def __init__(self, path):
+            self.path = path
+        async def update_positions(self, positions):
+            pass
+
+    monkeypatch.setattr("barsi.adapters.sheets.xlsx_adapter.XLSXAdapter", FakeXLSXAdapter)
+    
+    # Redireciona o path do endpoint para o test_xlsx
+    monkeypatch.setattr("os.path.exists", lambda p: True)
+
+    res = auth_client.get("/api/export/xlsx")
+    assert res.status_code == 200
+    assert "spreadsheetml" in res.headers["content-type"]
+
+

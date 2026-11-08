@@ -20,7 +20,6 @@ from barsi.adapters.history.budget_repository import BudgetRepository
 from barsi.infra.security import create_session_token, decode_session_token
 from barsi.services.sync_service import SyncService
 from barsi.services.ofx_service import OFXParserService
-from barsi.services.sync_health_service import SyncHealthService
 from barsi.domain.models import RunSummary, Position, SimuladorOrder
 from barsi.domain.rules import atualizar_posicao_quant
 from barsi.infra.logging import logger
@@ -93,6 +92,22 @@ def get_sync_service() -> SyncService:
         notifier=notifier,
         max_concurrency=settings.max_concurrency
     )
+
+async def get_canonical_positions() -> List[Position]:
+    """Obtém as posições canônicas do SQLite (fonte da verdade).
+    Caso o SQLite esteja vazio (primeiro boot ou banco novo), busca seed do Google Sheets."""
+    budget_repo = BudgetRepository(settings.sqlite_db_path)
+    positions = budget_repo.load_positions()
+    if not positions:
+        try:
+            sheets = AdapterFactory.create_sheets_adapter(settings)
+            positions = await sheets.load_positions()
+            if positions:
+                budget_repo.save_positions(positions)
+                logger.info("sqlite_seeded_from_sheets", count=len(positions))
+        except Exception as e:
+            logger.warning("sheets_initial_seed_failed", error=str(e))
+    return positions
 
 def get_current_user(request: Request) -> Optional[Dict[str, Any]]:
     """Extrai e valida o token de sessão criptografado via HMAC-SHA256."""
@@ -268,13 +283,7 @@ async def get_home_summary(request: Request):
     if not user:
         raise HTTPException(status_code=401, detail="Não autorizado")
 
-    try:
-        sheets = AdapterFactory.create_sheets_adapter(settings)
-        positions = await sheets.load_positions()
-    except Exception as e:
-        logger.warning("api_home_summary_fallback_sqlite", error=str(e))
-        budget_repo = BudgetRepository(settings.sqlite_db_path)
-        positions = budget_repo.load_positions()
+    positions = await get_canonical_positions()
 
     soma_patrimonio = 0.0
     soma_cotas = 0
@@ -339,13 +348,7 @@ async def get_carteira(request: Request):
     if not user:
         raise HTTPException(status_code=401, detail="Não autorizado")
     
-    try:
-        sheets = AdapterFactory.create_sheets_adapter(settings)
-        positions = await sheets.load_positions()
-    except Exception as e:
-        logger.warning("api_carteira_fallback_sqlite", error=str(e))
-        budget_repo = BudgetRepository(settings.sqlite_db_path)
-        positions = budget_repo.load_positions()
+    positions = await get_canonical_positions()
     
     data = []
     is_leitor = (user.get("role") == "leitor")
@@ -381,14 +384,7 @@ async def save_carteira_edits(req: SaveEditsRequest, request: Request):
     require_role_action(request, action_type="edit")
     
     budget_repo = BudgetRepository(settings.sqlite_db_path)
-    positions = budget_repo.load_positions()
-    if not positions:
-        try:
-            sheets = AdapterFactory.create_sheets_adapter(settings)
-            positions = await sheets.load_positions()
-        except Exception:
-            positions = []
-    
+    positions = await get_canonical_positions()
     pos_map = {p.ticker: p for p in positions}
 
     for item in req.items:
@@ -409,35 +405,11 @@ async def save_carteira_edits(req: SaveEditsRequest, request: Request):
             p.feedback_usuario = item.feedback
             atualizar_posicao_quant(p, p.preco_atual, p.div_proj)
 
-    # 1. P0 — SQLite como FONTE DA VERDADE (Persistência atômica local em <10ms)
+    # SQLite como FONTE DA VERDADE ÚNICA (Persistência atômica local em <5ms)
     budget_repo.save_positions(positions)
-
-    # 2. Espelhamento no Excel (.xlsx) local
-    try:
-        from barsi.adapters.sheets.xlsx_adapter import XLSXAdapter
-        xlsx_path = os.path.join(os.path.dirname(__file__), "../../../carteira_barsi_quant_ia.xlsx")
-        if not os.path.exists(xlsx_path):
-            xlsx_path = "carteira_barsi_quant_ia.xlsx"
-        if os.path.exists(xlsx_path):
-            xlsx = XLSXAdapter(xlsx_path)
-            await xlsx.update_positions(positions)
-    except Exception as e:
-        logger.warn("local_xlsx_mirror_error", error=str(e))
-
-    # 3. Espelhamento no Google Sheets (Best-effort com Outbox Pattern)
-    synced_to_sheets = False
-    try:
-        sheets = AdapterFactory.create_sheets_adapter(settings)
-        await sheets.update_positions(positions, invalidate=True)
-        synced_to_sheets = True
-    except Exception as e:
-        logger.warn("sheets_save_failed_queued_to_outbox", error=str(e))
-        for item in req.items:
-            budget_repo.record_pending_sheets_write(item.ticker, item.model_dump())
 
     return {
         "status": "ok",
-        "synced_to_sheets": synced_to_sheets,
         "updated_count": len(req.items)
     }
 
@@ -463,13 +435,7 @@ async def get_insights_api(request: Request):
     if not user:
         raise HTTPException(status_code=401, detail="Não autorizado")
 
-    try:
-        sheets = AdapterFactory.create_sheets_adapter(settings)
-        positions = await sheets.load_positions()
-    except Exception as e:
-        logger.warning("api_insights_fallback_sqlite", error=str(e))
-        budget_repo = BudgetRepository(settings.sqlite_db_path)
-        positions = budget_repo.load_positions()
+    positions = await get_canonical_positions()
 
     import sqlite3
     db_path = settings.sqlite_db_path
@@ -541,35 +507,13 @@ async def get_insights_api(request: Request):
 async def save_insight_feedback_batch(req: FeedbackBatchRequest, request: Request):
     require_role_action(request, action_type="edit")
     if not req.items:
-        return {"ok": True, "count": 0, "synced_to_sheets": True}
+        return {"ok": True, "count": 0}
 
     budget_repo = BudgetRepository(settings.sqlite_db_path)
-    # 1. Atualização atômica no SQLite
     for it in req.items:
         budget_repo.update_insight_feedback(it.ticker, it.feedback)
 
-    # 2. Atualização em batch no Google Sheets (1 única requisição batch)
-    synced_to_sheets = False
-    try:
-        sheets = AdapterFactory.create_sheets_adapter(settings)
-        positions = await sheets.load_positions()
-        pos_map = {p.ticker: p for p in positions}
-        updated_positions = []
-        for it in req.items:
-            if it.ticker in pos_map:
-                pos = pos_map[it.ticker]
-                pos.feedback_usuario = it.feedback
-                updated_positions.append(pos)
-        if updated_positions:
-            await sheets.update_positions(updated_positions, invalidate=(len(updated_positions) > 1))
-            synced_to_sheets = True
-            logger.info("google_sheets_batch_updated", count=len(updated_positions))
-    except Exception as e:
-        logger.warn("sheets_batch_feedback_sync_warning", error=str(e))
-        for it in req.items:
-            budget_repo.record_pending_sheets_write(it.ticker, {"feedback": it.feedback})
-
-    return {"ok": True, "count": len(req.items), "synced_to_sheets": synced_to_sheets}
+    return {"ok": True, "count": len(req.items)}
 
 @app.post("/api/insights/feedback")
 async def save_insight_feedback(req: FeedbackRequest, request: Request):
@@ -578,21 +522,14 @@ async def save_insight_feedback(req: FeedbackRequest, request: Request):
     return {
         "ok": res.get("ok", True),
         "ticker": req.ticker,
-        "feedback": req.feedback,
-        "synced_to_sheets": res.get("synced_to_sheets", False)
+        "feedback": req.feedback
     }
 
 @app.post("/api/snapshot/today")
 async def record_today_snapshot(request: Request):
     require_role_action(request, action_type="edit")
     repo = BudgetRepository(settings.sqlite_db_path)
-    positions = repo.load_positions()
-    if not positions:
-        try:
-            sheets = AdapterFactory.create_sheets_adapter(settings)
-            positions = await sheets.load_positions()
-        except Exception:
-            positions = []
+    positions = await get_canonical_positions()
 
     soma_patrimonio = sum((p.qtd_antes or 0) * (p.preco_atual or 0.0) for p in positions)
     soma_cotas = sum(p.qtd_antes or 0 for p in positions)
@@ -708,13 +645,7 @@ async def get_analytics_data(request: Request, months: int = 12):
     if not user:
         raise HTTPException(status_code=401, detail="Não autorizado")
 
-    try:
-        sheets = AdapterFactory.create_sheets_adapter(settings)
-        positions = await sheets.load_positions()
-    except Exception as e:
-        logger.warning("api_analytics_fallback_sqlite", error=str(e))
-        budget_repo = BudgetRepository(settings.sqlite_db_path)
-        positions = budget_repo.load_positions()
+    positions = await get_canonical_positions()
 
     soma_patrimonio = 0.0
     soma_cotas = 0
@@ -785,19 +716,38 @@ async def download_backup_sqlite(request: Request):
         raise HTTPException(status_code=404, detail="Banco de dados SQLite não encontrado")
     return FileResponse(db_p, filename="barsi_memory.db", media_type="application/octet-stream")
 
-@app.get("/api/health/sync")
-async def check_sync_health(request: Request):
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Não autorizado")
-    svc = SyncHealthService(settings)
-    return await svc.audit_sources()
-
-@app.post("/api/health/sync/reconcile")
-async def reconcile_sources_endpoint(request: Request, master: str = "sheets"):
+@app.post("/api/export/sheets")
+async def export_to_sheets(request: Request):
+    """Exporta unidirecionalmente as posições e métricas do SQLite para o Google Sheets."""
     require_role_action(request, action_type="edit")
-    svc = SyncHealthService(settings)
-    return await svc.reconcile_sources(master=master)
+    repo = BudgetRepository(settings.sqlite_db_path)
+    positions = repo.load_positions()
+    if not positions:
+        raise HTTPException(status_code=400, detail="Nenhuma posição no SQLite para exportar.")
+    try:
+        sheets = AdapterFactory.create_sheets_adapter(settings)
+        await sheets.update_positions(positions, invalidate=True)
+        return {"ok": True, "message": f"{len(positions)} ativos exportados com sucesso para o Google Sheets!", "count": len(positions)}
+    except Exception as e:
+        logger.error("export_sheets_failed", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Erro ao exportar para o Google Sheets: {str(e)}")
+
+@app.get("/api/export/xlsx")
+async def export_xlsx(request: Request):
+    """Exporta as posições do SQLite para planilha Excel local (.xlsx) para download."""
+    require_role_action(request, action_type="read")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    positions = repo.load_positions()
+    if not positions:
+        raise HTTPException(status_code=400, detail="Nenhuma posição no SQLite para exportar.")
+    
+    from barsi.adapters.sheets.xlsx_adapter import XLSXAdapter
+    xlsx_path = os.path.join(os.path.dirname(__file__), "../../../carteira_barsi_quant_ia.xlsx")
+    if not os.path.exists(xlsx_path):
+        xlsx_path = "carteira_barsi_quant_ia.xlsx"
+    adapter = XLSXAdapter(xlsx_path)
+    await adapter.update_positions(positions)
+    return FileResponse(xlsx_path, filename="carteira_barsi_quant_ia.xlsx", media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 @app.post("/api/history/sync")
 async def sync_market_history_endpoint(request: Request, background_tasks: BackgroundTasks):
@@ -854,52 +804,9 @@ async def test_provider_connection(provider: str, request: Request):
     except Exception as e:
         return {"ok": False, "detail": str(e)}
 
-async def flush_pending_sheets_writes() -> int:
-    """Tenta descarregar escritas pendentes na fila Outbox para o Google Sheets."""
-    repo = BudgetRepository(settings.sqlite_db_path)
-    pending = repo.get_pending_sheets_writes()
-    if not pending:
-        return 0
-
-    try:
-        sheets = AdapterFactory.create_sheets_adapter(settings)
-        positions = await sheets.load_positions()
-        pos_map = {p.ticker: p for p in positions}
-        updated = []
-        flushed_ids = []
-
-        for item in pending:
-            t = item["ticker"]
-            payload = item.get("payload", {})
-            if t in pos_map:
-                p = pos_map[t]
-                if "qtd_antes" in payload and payload["qtd_antes"] is not None:
-                    p.qtd_antes = max(0, payload["qtd_antes"])
-                if "qtd_aporte" in payload and payload["qtd_aporte"] is not None:
-                    p.qtd_aporte = max(0, payload["qtd_aporte"])
-                if "div_proj" in payload and payload["div_proj"] is not None:
-                    p.div_proj = payload["div_proj"]
-                if "feedback" in payload and payload["feedback"] is not None:
-                    p.feedback_usuario = payload["feedback"]
-                updated.append(p)
-                flushed_ids.append(item["id"])
-
-        if updated:
-            await sheets.update_positions(updated, invalidate=True)
-            for wid in flushed_ids:
-                repo.clear_pending_sheets_write(wid)
-            logger.info("pending_sheets_flushed_successfully", count=len(updated))
-            return len(updated)
-    except Exception as e:
-        logger.warn("flush_pending_sheets_writes_error", error=str(e))
-        for item in pending:
-            repo.increment_pending_sheets_retry(item["id"])
-    return 0
-
 @app.post("/api/run")
 async def trigger_run_web(request: Request):
     require_role_action(request, action_type="run")
-    await flush_pending_sheets_writes()
     global LAST_RUN_SUMMARY
     service = get_sync_service()
     summary = await service.execute_run()

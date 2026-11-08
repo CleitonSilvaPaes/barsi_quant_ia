@@ -48,3 +48,9 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["src"]
 
+[tool.coverage.run]
+omit = [
+    "src/barsi/__main__.py",
+]
+
+

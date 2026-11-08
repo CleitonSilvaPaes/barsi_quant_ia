@@ -22,8 +22,10 @@
 </div>
 
 <div class="actions-bar">
-  <button class="btn btn-green" onclick="salvarAlteracoes()">💾 Salvar Edições (Sheets & Excel)</button>
+  <button class="btn btn-green" onclick="salvarAlteracoes()">💾 Salvar Edições</button>
   <button class="btn btn-primary" onclick="executarSync()">🚀 Sincronizar Cotações B3</button>
+  <button class="btn btn-outline" onclick="exportarSheets()">📤 Exportar Sheets</button>
+  <button class="btn btn-outline" onclick="exportarXlsx()">📥 Baixar Excel</button>
   <button class="btn btn-outline" onclick="carregarCarteira()">🔄 Recarregar</button>
 
   <div style="margin-left: auto; display: flex; gap: 0.5rem; flex-wrap: wrap;">
@@ -279,11 +281,31 @@
         body: JSON.stringify({ items })
       });
       const out = await res.json();
-      showToast("Edições salvas com sucesso no Google Sheets e Excel local!");
+      showToast("Edições salvas com sucesso na base de dados!");
       carregarCarteira();
     } catch (err) {
       showToast("Erro ao salvar alterações: " + err, "error");
     }
+  }
+
+  async function exportarSheets() {
+    try {
+      showToast("Exportando dados para o Google Sheets...");
+      const res = await fetch("/api/export/sheets", { method: "POST" });
+      const out = await res.json();
+      if (res.ok) {
+        showToast(out.message || "Exportação concluída com sucesso!");
+      } else {
+        showToast("Falha na exportação: " + (out.detail || res.statusText), "error");
+      }
+    } catch (err) {
+      showToast("Erro na exportação para o Sheets: " + err, "error");
+    }
+  }
+
+  function exportarXlsx() {
+    showToast("Baixando planilha Excel...");
+    window.location.href = "/api/export/xlsx";
   }
 
   function abrirDrawer(ticker) {

@@ -54,15 +54,19 @@ def test_insights_batch_feedback_calls_sheets_once(tmp_path, monkeypatch):
     data = res.json()
     assert data["ok"] is True
     assert data["count"] == 5
-    assert data["synced_to_sheets"] is True
 
-    # Valida que o Sheets recebeu EXATAMENTE 1 chamada em batch (e não 5 chamadas individuais!)
-    assert spy_sheets.update_call_count == 1
-    assert len(spy_sheets.updated_positions) == 5
+    # Valida que o salvamento é desacoplado do Sheets no hot path
+    assert spy_sheets.update_call_count == 0
 
     # Valida que todos os 5 foram atualizados no SQLite
     sqlite_positions = {p.ticker: p for p in repo.load_positions()}
     for i in range(1, 6):
         expected_fb = "CONCORDO" if i in [1, 3, 4] else "DISCORDO"
         assert sqlite_positions[f"TICK{i}"].feedback_usuario == expected_fb
+
+    # Valida exportação sob demanda posterior consolidada em 1 única chamada
+    export_res = client.post("/api/export/sheets")
+    assert export_res.status_code == 200
+    assert spy_sheets.update_call_count == 1
+    assert len(spy_sheets.updated_positions) == 5
 

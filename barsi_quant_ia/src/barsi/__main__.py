@@ -710,38 +710,33 @@ def notify_get_chat_id():
     except Exception as exc:
         typer.echo(f"[!] Erro ao consultar API do Telegram: {exc}\n")
 
-@app.command("audit-sources")
-def audit_sources_cli(
-    reconcile: bool = typer.Option(False, "--reconcile", help="Força reconciliação e paridade 100% entre as 3 fontes"),
-    master: str = typer.Option("sheets", "--master", help="Fonte master para reconciliação: sheets | sqlite | xlsx")
-):
-    """Audita a integridade e paridade entre Google Sheets, Excel local (.xlsx) e SQLite."""
-    from barsi.services.sync_health_service import SyncHealthService
-    svc = SyncHealthService(settings)
-    report = asyncio.run(svc.audit_sources())
-    
-    typer.echo("\n" + "="*60)
-    typer.echo("📊 AUDITORIA DE FONTES DE DADOS (Sheets ↔ XLSX ↔ SQLite)")
-    typer.echo("="*60)
-    for src, info in report["sources"].items():
-        status_ico = "✔" if info["available"] else "✖"
-        typer.echo(f"  [{status_ico}] {src.upper():7}: {info['count']} ativos encontrados" + (f" (Erro: {info['error']})" if info['error'] else ""))
+@app.command("export-sheets")
+def export_sheets_cli():
+    """Exporta unidirecionalmente as posições e métricas do SQLite para o Google Sheets."""
+    from barsi.adapters.history.budget_repository import BudgetRepository
+    from barsi.adapters.factory import AdapterFactory
+    repo = BudgetRepository(settings.sqlite_db_path)
+    positions = repo.load_positions()
+    if not positions:
+        typer.echo("[!] Nenhuma posição encontrada no banco SQLite local.")
+        return
+    sheets = AdapterFactory.create_sheets_adapter(settings)
+    asyncio.run(sheets.update_positions(positions, invalidate=True))
+    typer.echo(f"[✔] {len(positions)} ativos exportados com sucesso para o Google Sheets!")
 
-    if report["in_sync"]:
-        typer.echo("\n[✔] PARIDADE CONFIRMADA: As 3 fontes possuem dados 100% idênticos!\n")
-    else:
-        typer.echo(f"\n[!] DIVERGÊNCIA DETECTADA em {len(report['divergences'])} ativo(s):")
-        for d in report["divergences"]:
-            typer.echo(f"  - {d['ticker']}:")
-            for diff in d["divergences"]:
-                typer.echo(f"      {diff['field']}: Sheets={diff['values'].get('sheets')}, XLSX={diff['values'].get('xlsx')}, SQLite={diff['values'].get('sqlite')}")
-
-    if reconcile:
-        rec_res = asyncio.run(svc.reconcile_sources(master=master))
-        if rec_res.get("ok"):
-            typer.echo(f"\n[✔] RECONCILIAÇÃO CONCLUÍDA! {rec_res['positions_count']} posições sincronizadas usando '{master.upper()}'.\n")
-        else:
-            typer.echo(f"\n[!] Falha na reconciliação: {rec_res.get('detail')}\n")
+@app.command("export-xlsx")
+def export_xlsx_cli(dest: str = "carteira_barsi_quant_ia.xlsx"):
+    """Exporta as posições do SQLite para planilha Excel local (.xlsx)."""
+    from barsi.adapters.history.budget_repository import BudgetRepository
+    from barsi.adapters.sheets.xlsx_adapter import XLSXAdapter
+    repo = BudgetRepository(settings.sqlite_db_path)
+    positions = repo.load_positions()
+    if not positions:
+        typer.echo("[!] Nenhuma posição encontrada no banco SQLite local.")
+        return
+    adapter = XLSXAdapter(dest)
+    asyncio.run(adapter.update_positions(positions))
+    typer.echo(f"[✔] {len(positions)} ativos exportados para '{dest}' com sucesso!")
 
 @app.command("history-sync")
 def history_sync_cli():
