@@ -549,12 +549,7 @@ async def save_insight_feedback(req: FeedbackRequest, request: Request):
         "feedback": req.feedback
     }
 
-@app.post("/api/snapshot/today")
-async def record_today_snapshot(request: Request):
-    require_role_action(request, action_type="edit")
-    repo = BudgetRepository(settings.sqlite_db_path)
-    positions = await get_canonical_positions()
-
+def _record_snapshot_logic(positions: List[Position], repo: BudgetRepository) -> Dict[str, Any]:
     soma_patrimonio = sum((p.qtd_antes or 0) * (p.preco_atual or 0.0) for p in positions)
     soma_cotas = sum(p.qtd_antes or 0 for p in positions)
     soma_aporte = sum((p.qtd_aporte or 0) * (p.preco_atual or 0.0) for p in positions)
@@ -566,7 +561,6 @@ async def record_today_snapshot(request: Request):
         setores[sec] = round(setores.get(sec, 0.0) + val, 2)
 
     today_str = datetime.now().strftime("%Y-%m-%d")
-    import json
     repo.save_portfolio_snapshot(
         today_str,
         round(soma_patrimonio, 2),
@@ -576,6 +570,13 @@ async def record_today_snapshot(request: Request):
         setores_json=json.dumps(setores, ensure_ascii=False)
     )
     return {"status": "ok", "snapshot_date": today_str, "patrimonio": round(soma_patrimonio, 2)}
+
+@app.post("/api/snapshot/today")
+async def record_today_snapshot(request: Request):
+    require_role_action(request, action_type="edit")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    positions = await get_canonical_positions()
+    return _record_snapshot_logic(positions, repo)
 
 _benchmarks_cache: Optional[Dict[str, Any]] = None
 _benchmarks_cache_time: float = 0.0
@@ -862,6 +863,15 @@ async def trigger_run_web(request: Request):
     service = get_sync_service()
     summary = await service.execute_run()
     LAST_RUN_SUMMARY = summary
+
+    # Registra snapshot patrimonial consolidado do dia ao finalizar execução
+    try:
+        repo = BudgetRepository(settings.sqlite_db_path)
+        positions = await get_canonical_positions()
+        _record_snapshot_logic(positions, repo)
+    except Exception as exc:
+        logger.warning("run_snapshot_save_failed", error=str(exc))
+
     return summary.model_dump()
 
 @app.post("/api/extratos")

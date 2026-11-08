@@ -8,7 +8,8 @@ from barsi.config import settings
 from barsi.adapters.factory import AdapterFactory
 from barsi.adapters.sheets.gspread_adapter import GSpreadAdapter
 from barsi.adapters.history.budget_repository import BudgetRepository
-from barsi.domain.models import Position, AcaoBarsi
+from barsi.domain.models import Position, AcaoBarsi, RunSummary
+from barsi.services.sync_service import SyncService
 
 class MockSheetsAdapter:
     def __init__(self):
@@ -326,6 +327,47 @@ def test_save_carteira_updates_preco_atual_when_provided(auth_client, tmp_path, 
     }
     invalid_res = auth_client.post("/api/carteira", json=invalid_payload)
     assert invalid_res.status_code == 422
+
+
+def test_snapshot_today_endpoint(auth_client):
+    """Valida gravação do snapshot do dia via endpoint dedicado."""
+    repo = BudgetRepository(settings.sqlite_db_path)
+    repo.save_positions([
+        Position(ticker="BBAS3", row_index=10, preco_atual=10.0, div_proj=2.0, qtd_antes=100)
+    ])
+    res = auth_client.post("/api/snapshot/today")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ok"
+    assert data["patrimonio"] == 1000.0
+
+    snapshots = repo.get_portfolio_snapshots(1)
+    assert len(snapshots) >= 1
+    assert snapshots[-1]["patrimonio_total"] == 1000.0
+
+
+def test_api_run_creates_snapshot(auth_client, monkeypatch):
+    """Valida que /api/run grava snapshot diário automaticamente ao concluir execução."""
+    repo = BudgetRepository(settings.sqlite_db_path)
+    repo.save_positions([
+        Position(ticker="TAEE11", row_index=12, preco_atual=35.0, div_proj=3.5, qtd_antes=100)
+    ])
+
+    async def mock_execute_run(self):
+        return RunSummary(run_id="mock_run_999", tickers_analyzed=1, positions_updated=1, duration_ms=100)
+
+    monkeypatch.setattr(SyncService, "execute_run", mock_execute_run)
+
+    res = auth_client.post("/api/run")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["run_id"] == "mock_run_999"
+    assert data["positions_updated"] == 1
+
+    snapshots = repo.get_portfolio_snapshots(1)
+    assert len(snapshots) >= 1
+    assert snapshots[-1]["patrimonio_total"] == 3500.0
+
 
 
 

@@ -246,7 +246,7 @@
         body: JSON.stringify(payload)
       });
       const out = await res.json();
-      showToast(`✓ ${out.count} feedback(s) sincronizados com sucesso no SQLite e Sheets!`, "success");
+      showToast(`✓ ${out.count} feedback(s) salvos com sucesso no SQLite!`, "success");
     } catch (err) {
       showToast("Erro ao sincronizar feedbacks em lote: " + err, "error");
     }
