@@ -171,7 +171,7 @@ def test_dss_reload_endpoint(monkeypatch, tmp_path):
     from barsi.adapters.history.user_repository import UserRepository
     repo = UserRepository(test_db)
     repo.create_user("admin_user", "pass123", "admin")
-    repo.create_user("viewer_user", "pass123", "viewer")
+    repo.create_user("leitor_user", "pass123", "leitor")
 
     client = TestClient(app)
 
@@ -179,8 +179,8 @@ def test_dss_reload_endpoint(monkeypatch, tmp_path):
     r1 = client.post("/api/dss/reload")
     assert r1.status_code in (401, 403, 303)
 
-    # 2. Login como viewer -> 403 proibido
-    client.post("/login", data={"username": "viewer_user", "password": "pass123"})
+    # 2. Login como leitor -> 403 proibido
+    client.post("/login", data={"username": "leitor_user", "password": "pass123"})
     r2 = client.post("/api/dss/reload")
     assert r2.status_code == 403
 

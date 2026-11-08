@@ -45,7 +45,7 @@ if ! command -v cloudflared &> /dev/null; then
 fi
 
 # 5. Criar ambiente virtual Python e instalar pacote
-APP_DIR="/opt/barsi_quant_ia"
+APP_DIR="${BARSI_TVBOX_HOME:-/home/$USER/barsi_quant_ia}"
 echo "[5/6] Configurando aplicação em $APP_DIR..."
 sudo mkdir -p "$APP_DIR"
 sudo chown -R "$USER:$USER" "$APP_DIR"
@@ -68,11 +68,11 @@ After=network.target
 [Service]
 Type=simple
 User=${USER_NAME}
-WorkingDirectory=/opt/barsi_quant_ia
-ExecStart=/opt/barsi_quant_ia/.venv/bin/python -m barsi api --port 8000
+WorkingDirectory=${APP_DIR}
+ExecStart=${APP_DIR}/.venv/bin/python -m barsi api --port 8000
 Restart=always
 RestartSec=10
-EnvironmentFile=/opt/barsi_quant_ia/.env
+EnvironmentFile=${APP_DIR}/.env
 MemoryMax=250M
 
 [Install]
