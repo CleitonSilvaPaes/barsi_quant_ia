@@ -1,7 +1,10 @@
 """API HTTP & Painel Web Interativo com Sidebar, Roteamento Modular e Perfis (RBAC)."""
 import os
 import time
+import json
 import asyncio
+import html
+import urllib.request
 import urllib.parse
 from datetime import datetime
 from typing import List, Optional, Dict, Any
@@ -100,12 +103,25 @@ def get_current_user(request: Request) -> Optional[Dict[str, Any]]:
     return decode_session_token(token, settings.secret_key)
 
 def require_role_action(request: Request, action_type: str = "edit") -> Dict[str, Any]:
-    """Valida se o usuário autenticado possui o perfil adequado (RBAC)."""
+    """RBAC centralizado. Valida permissões pelo papel do usuário sem regras dispersas."""
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Não autenticado. Faça login primeiro.")
-    if user.get("role") == "leitor" and action_type in ["edit", "run", "sync", "admin"]:
-        raise HTTPException(status_code=403, detail="Perfil de Leitor: Apenas visualização permitida.")
+    
+    role = user.get("role", "leitor").lower()
+    allowed_by_action = {
+        "read":  {"admin", "investidor", "leitor"},
+        "edit":  {"admin", "investidor"},
+        "run":   {"admin", "investidor"},
+        "sync":  {"admin", "investidor"},
+        "admin": {"admin"},
+    }
+    allowed_roles = allowed_by_action.get(action_type, {"admin"})
+    if role not in allowed_roles:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Perfil '{role}' não possui permissão para a ação '{action_type}'."
+        )
     return user
 
 def render_page(template_name: str, request: Request, page_title: str, active_nav: str) -> Response:
@@ -192,8 +208,14 @@ async def do_logout():
 # ----------------- ROTAS DAS PÁGINAS DEDICADAS -----------------
 
 @app.get("/", response_class=HTMLResponse)
-async def page_home(request: Request):
-    return render_page("home", request, "Cockpit Executivo & Radar B.E.S.T.", "home")
+async def page_home(request: Request, error: Optional[str] = None):
+    resp = render_page("home", request, "Cockpit Executivo & Radar B.E.S.T.", "home")
+    if error and isinstance(resp, Response) and not isinstance(resp, RedirectResponse):
+        safe_err = html.escape(error)
+        body_text = resp.body.decode("utf-8")
+        toast_injection = f"<script>document.addEventListener('DOMContentLoaded', () => {{ if (typeof showToast === 'function') showToast('{safe_err}', 'error'); }});</script>"
+        return HTMLResponse(body_text + toast_injection, status_code=resp.status_code)
+    return resp
 
 @app.get("/carteira", response_class=HTMLResponse)
 async def page_carteira(request: Request):
@@ -638,19 +660,20 @@ def get_real_benchmarks(snapshots: List[Dict[str, Any]]) -> Dict[str, Any]:
     # 4. CDI 12M Real acumulado via Banco Central do Brasil (SGS Série 4390)
     cdi_ret = None
     try:
-        import urllib.request, json
         bcb_url = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.4390/dados/ultimos/12?formato=json"
         req = urllib.request.Request(bcb_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
         with urllib.request.urlopen(req, timeout=5) as resp:
             bcb_data = json.loads(resp.read().decode("utf-8"))
-            if bcb_data and len(bcb_data) >= 6:
+            if bcb_data and len(bcb_data) >= 11:
                 acum = 1.0
-                for m in bcb_data:
+                for m in bcb_data[-12:]:
                     acum *= (1.0 + float(m["valor"]) / 100.0)
                 cdi_ret = round((acum - 1.0) * 100.0, 2)
+            else:
+                logger.warn("cdi_bcb_insufficient_data", count=len(bcb_data) if bcb_data else 0)
     except Exception as e:
         logger.warn("cdi_bcb_fetch_failed", error=str(e))
-        cdi_ret = 13.25
+        cdi_ret = None
 
     spread_cdi = round(carteira_ret - cdi_ret, 2) if (carteira_ret is not None and cdi_ret is not None) else None
     spread_ibov = round(carteira_ret - ibov_ret, 2) if (carteira_ret is not None and ibov_ret is not None) else None
