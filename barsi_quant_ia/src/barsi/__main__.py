@@ -563,6 +563,64 @@ def notify_test(
     else:
         typer.echo("[❌] Falha no envio. Verifique as credenciais no .env e a conectividade de rede.\n")
 
+@notify_app.command("get-chat-id")
+def notify_get_chat_id():
+    """Consulta os updates do bot do Telegram para capturar o chat_id e salvar no .env."""
+    import os
+    import httpx
+    import re
+    token = settings.telegram_bot_token
+    if not token:
+        typer.echo("[!] BARSI_TELEGRAM_BOT_TOKEN não configurado no .env.")
+        return
+
+    url = f"https://api.telegram.org/bot{token}/getUpdates"
+    typer.echo("\n[+] Consultando mensagens enviadas ao seu bot no Telegram...")
+    try:
+        resp = httpx.get(url, timeout=10.0)
+        data = resp.json()
+        results = data.get("result", [])
+        if not results:
+            typer.echo("\n[!] Nenhuma mensagem encontrada ainda!")
+            typer.echo("    1. Abra o link do seu bot: https://t.me/barsi_quant_meualerta_bot")
+            typer.echo("    2. Clique em 'Começar' ou envie '/start'")
+            typer.echo("    3. Execute este comando novamente: python -m barsi notify get-chat-id\n")
+            return
+
+        last_update = results[-1]
+        msg = last_update.get("message") or last_update.get("channel_post") or {}
+        chat = msg.get("chat", {})
+        chat_id = str(chat.get("id"))
+
+        if not chat_id or chat_id == "None":
+            typer.echo("[!] Não foi possível identificar o chat_id no retorno da API.\n")
+            return
+
+        typer.echo(f"[✔] Chat identificado com sucesso! ID: {chat_id}")
+
+        # Atualiza ou insere BARSI_TELEGRAM_CHAT_ID no .env
+        env_path = ".env" if os.path.exists(".env") else "barsi_quant_ia/.env"
+        if os.path.exists(env_path):
+            with open(env_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            if "BARSI_TELEGRAM_CHAT_ID=" in content:
+                content = re.sub(r"BARSI_TELEGRAM_CHAT_ID=.*", f"BARSI_TELEGRAM_CHAT_ID={chat_id}", content)
+            else:
+                content += f"\nBARSI_TELEGRAM_CHAT_ID={chat_id}\n"
+            with open(env_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            typer.echo(f"[✔] BARSI_TELEGRAM_CHAT_ID salvo com segurança no seu arquivo .env local!")
+
+        # Envia mensagem de boas-vindas teste
+        from barsi.adapters.notifications import TelegramNotifier
+        import asyncio
+        notifier = TelegramNotifier(bot_token=token, chat_id=chat_id)
+        typer.echo("[+] Enviando alerta de confirmação para o seu Telegram...")
+        asyncio.run(notifier.notify("Barsi Quant IA Conectado!", "Seu bot de alertas proativos está 100% configurado e ativo.", level="success"))
+        typer.echo("[✔] Alerta de teste entregue no seu Telegram!\n")
+    except Exception as exc:
+        typer.echo(f"[!] Erro ao consultar API do Telegram: {exc}\n")
+
 if __name__ == "__main__":
     app()
 
