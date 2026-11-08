@@ -83,9 +83,10 @@ def test_dividend_sustainability_scorer_untrained(tmp_path):
 
 
 def test_train_full_pipeline_execution(tmp_path):
-    """Executa o pipeline completo de treinamento e verifica as métricas de validação."""
+    """Executa o pipeline completo de treinamento e verifica métricas de validação e backup _prev.json."""
     from barsi.training.train_dss import train_full_pipeline
     output_file = str(tmp_path / "trained_weights.json")
+    backup_file = str(tmp_path / "trained_weights_prev.json")
 
     metrics = train_full_pipeline(
         db_path=None,
@@ -96,4 +97,14 @@ def test_train_full_pipeline_execution(tmp_path):
     assert metrics["n_val"] >= 1
     assert "best_val_acc" in metrics
     assert os.path.exists(output_file)
+    assert not os.path.exists(backup_file)
+
+    # Segunda execução deve criar backup _prev.json
+    metrics2 = train_full_pipeline(
+        db_path=None,
+        output_path=output_file,
+        use_system_data=False
+    )
+    assert os.path.exists(output_file)
+    assert os.path.exists(backup_file)
 

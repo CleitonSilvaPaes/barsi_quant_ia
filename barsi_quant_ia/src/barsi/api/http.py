@@ -193,14 +193,18 @@ LOGIN_RATE_LIMIT_MAX = 5
 LOGIN_RATE_LIMIT_WINDOW = 60.0  # Janela de 60 segundos
 
 def _get_client_ip(request: Request) -> str:
-    """Extrai IP real considerando proxies reversos (Cloudflare Tunnel, Nginx, etc.)."""
-    cf_ip = request.headers.get("CF-Connecting-IP")
-    if cf_ip:
-        return cf_ip.strip()
-    xff = request.headers.get("X-Forwarded-For", "")
-    if xff:
-        return xff.split(",")[0].strip()
-    return request.client.host if request.client else "127.0.0.1"
+    """Extrai IP real considerando proxies reversos (Cloudflare Tunnel, Nginx, etc.).
+    Só confia em headers de proxy se a conexão originar de loopback ou testclient.
+    """
+    real_ip = request.client.host if request.client else "127.0.0.1"
+    if real_ip in ("127.0.0.1", "::1", "localhost", "testclient"):
+        cf_ip = request.headers.get("CF-Connecting-IP")
+        if cf_ip:
+            return cf_ip.strip()
+        xff = request.headers.get("X-Forwarded-For", "")
+        if xff:
+            return xff.split(",")[0].strip()
+    return real_ip
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(error: Optional[str] = None):
@@ -779,6 +783,14 @@ async def download_backup_sqlite(request: Request):
     if not os.path.exists(db_p):
         raise HTTPException(status_code=404, detail="Banco de dados SQLite não encontrado")
     return FileResponse(db_p, filename="barsi_memory.db", media_type="application/octet-stream")
+
+@app.post("/api/dss/reload")
+async def reload_dss(request: Request):
+    """Recarrega os pesos do modelo DividendSustainabilityScorer em tempo de execução."""
+    require_role_action(request, action_type="admin")
+    from barsi.domain.quant_ai import DividendSustainabilityScorer
+    DividendSustainabilityScorer.reload()
+    return {"ok": True, "message": "Pesos DSS recarregados com sucesso"}
 
 @app.post("/api/export/sheets")
 async def export_to_sheets(request: Request):

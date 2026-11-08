@@ -138,4 +138,58 @@ def test_login_rate_limiting_cloudflare_ip(clean_login_attempts, monkeypatch, tm
     assert "Usu" in legit.headers["location"]
 
 
+def test_client_ip_ignores_spoofing_from_untrusted_lan():
+    """Garante que _get_client_ip rejeita headers spoofados vindos de hosts fora do loopback/túnel."""
+    from barsi.api.http import _get_client_ip
+    from unittest.mock import MagicMock
+
+    # Request vindo de host não local na LAN (ex: 10.0.0.50)
+    req_lan = MagicMock()
+    req_lan.client.host = "10.0.0.50"
+    req_lan.headers = {"CF-Connecting-IP": "203.0.113.1", "X-Forwarded-For": "198.51.100.2"}
+    assert _get_client_ip(req_lan) == "10.0.0.50"
+
+    # Request vindo de localhost (túnel Cloudflare)
+    req_local = MagicMock()
+    req_local.client.host = "127.0.0.1"
+    req_local.headers = {"CF-Connecting-IP": "203.0.113.1"}
+    assert _get_client_ip(req_local) == "203.0.113.1"
+
+
+def test_dss_reload_endpoint(monkeypatch, tmp_path):
+    """Garante que o endpoint /api/dss/reload requer permissão de admin e recarrega os pesos."""
+    from fastapi.testclient import TestClient
+    from barsi.api.http import app
+    import barsi.api.http as http_module
+    from barsi.config import settings
+    from barsi.infra.security import hash_password
+
+    test_db = str(tmp_path / "test_reload.db")
+    monkeypatch.setattr(settings, "sqlite_db_path", test_db)
+    http_module._user_repo_cache = None
+
+    from barsi.adapters.history.user_repository import UserRepository
+    repo = UserRepository(test_db)
+    repo.create_user("admin_user", "pass123", "admin")
+    repo.create_user("viewer_user", "pass123", "viewer")
+
+    client = TestClient(app)
+
+    # 1. Sem login -> redireciona/rejeita
+    r1 = client.post("/api/dss/reload")
+    assert r1.status_code in (401, 403, 303)
+
+    # 2. Login como viewer -> 403 proibido
+    client.post("/login", data={"username": "viewer_user", "password": "pass123"})
+    r2 = client.post("/api/dss/reload")
+    assert r2.status_code == 403
+
+    # 3. Login como admin -> 200 OK
+    client.post("/login", data={"username": "admin_user", "password": "pass123"})
+    r3 = client.post("/api/dss/reload")
+    assert r3.status_code == 200
+    assert r3.json()["ok"] is True
+
+
+
 

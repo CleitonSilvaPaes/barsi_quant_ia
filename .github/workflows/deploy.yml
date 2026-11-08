@@ -45,9 +45,9 @@ jobs:
           tags: tag:ci
 
       # ─────────────────────────────────────────────────────────
-      # 2. Backup do SQLite ANTES de mexer em nada
+      # 2. Backup do código e SQLite ANTES de mexer em qualquer arquivo
       # ─────────────────────────────────────────────────────────
-      - name: Backup SQLite (rollback safety)
+      - name: Backup code and SQLite (rollback safety)
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.TVBOX_HOST }}
@@ -55,11 +55,18 @@ jobs:
           key: ${{ secrets.TVBOX_SSH_KEY }}
           script: |
             set -e
-            cd /opt/barsi_quant_ia || cd /home/${{ secrets.TVBOX_USER }}/barsi_quant_ia
+            cd /home/${{ secrets.TVBOX_USER }}/barsi_quant_ia 2>/dev/null || cd /opt/barsi_quant_ia
+
+            # 1. Backup do SQLite
             BACKUP_NAME="memory/barsi_memory.db.bak.$(date +%Y%m%d_%H%M%S)"
             cp memory/barsi_memory.db "$BACKUP_NAME"
-            echo "✅ Backup criado: $BACKUP_NAME"
+            echo "✅ Backup SQLite criado: $BACKUP_NAME"
             ls -t memory/barsi_memory.db.bak.* 2>/dev/null | tail -n +8 | xargs rm -f || true
+
+            # 2. Backup do Código anterior (Rollback completo)
+            rm -rf /tmp/barsi_code_prev
+            cp -r src/barsi /tmp/barsi_code_prev
+            echo "✅ Código anterior preservado em /tmp/barsi_code_prev"
 
       # ─────────────────────────────────────────────────────────
       # 3. Sync do código fonte via rsync (delta transfer)
@@ -69,7 +76,7 @@ jobs:
         with:
           switches: -avz --delete --exclude='__pycache__' --exclude='*.pyc'
           path: barsi_quant_ia/src/barsi/
-          remote_path: /opt/barsi_quant_ia/src/barsi/
+          remote_path: /home/${{ secrets.TVBOX_USER }}/barsi_quant_ia/src/barsi/
           remote_host: ${{ secrets.TVBOX_HOST }}
           remote_user: ${{ secrets.TVBOX_USER }}
           remote_key: ${{ secrets.TVBOX_SSH_KEY }}
@@ -108,7 +115,7 @@ jobs:
             exit 1
 
       # ─────────────────────────────────────────────────────────
-      # 5. Rollback em caso de falha
+      # 5. Rollback total em caso de falha (Código + Banco)
       # ─────────────────────────────────────────────────────────
       - name: Rollback on failure
         if: failure()
@@ -118,13 +125,26 @@ jobs:
           username: ${{ secrets.TVBOX_USER }}
           key: ${{ secrets.TVBOX_SSH_KEY }}
           script: |
-            echo "🚨 Deploy falhou — iniciando rollback"
-            cd /opt/barsi_quant_ia || cd /home/${{ secrets.TVBOX_USER }}/barsi_quant_ia
+            echo "🚨 Deploy falhou — iniciando rollback total do código e banco"
+            cd /home/${{ secrets.TVBOX_USER }}/barsi_quant_ia 2>/dev/null || cd /opt/barsi_quant_ia
+
+            # 1. Restaura CÓDIGO anterior
+            if [ -d /tmp/barsi_code_prev ]; then
+              rm -rf src/barsi
+              cp -r /tmp/barsi_code_prev src/barsi
+              echo "✅ Código anterior restaurado com sucesso de /tmp/barsi_code_prev"
+            else
+              echo "⚠️ /tmp/barsi_code_prev não encontrado — pulando rollback de código"
+            fi
+
+            # 2. Restaura BANCO SQLite anterior
             LATEST_BACKUP=$(ls -t memory/barsi_memory.db.bak.* 2>/dev/null | head -1)
             if [ -n "$LATEST_BACKUP" ]; then
               cp "$LATEST_BACKUP" memory/barsi_memory.db
-              echo "✅ SQLite restaurado de: $LATEST_BACKUP"
+              echo "✅ SQLite restaurado com sucesso de: $LATEST_BACKUP"
             fi
+
+            echo "🔄 Reiniciando serviço barsi-api.service com estado restaurado..."
             sudo systemctl restart barsi-api.service || true
 
       # ─────────────────────────────────────────────────────────

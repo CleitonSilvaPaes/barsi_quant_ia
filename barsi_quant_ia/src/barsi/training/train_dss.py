@@ -28,52 +28,6 @@ BASE_TRAINING_DATA: List[Tuple[List[float], float]] = [
 ]
 
 
-def train(
-    X: List[List[float]],
-    y: List[float],
-    n_hidden: int = 6,
-    epochs: int = 3000,
-    lr: float = 0.08,
-    seed: int = 42,
-) -> TinyMLP:
-    """Gradient descent com log-loss e backpropagation analítica pura."""
-    random.seed(seed)
-    n_in = len(X[0])
-    model = TinyMLP(n_inputs=n_in, n_hidden=n_hidden)
-
-    # Inicialização Xavier com ruído gaussiano
-    model.W1 = [[random.gauss(0, 0.3) for _ in range(n_hidden)] for _ in range(n_in)]
-    model.b1 = [random.gauss(0, 0.1) for _ in range(n_hidden)]
-    model.W2 = [random.gauss(0, 0.3) for _ in range(n_hidden)]
-    model.b2 = random.gauss(0, 0.1)
-
-    for _ in range(epochs):
-        for xi, yi in zip(X, y):
-            # 1. Forward pass
-            hidden = [
-                math.tanh(model.b1[j] + sum(model.W1[i][j] * xi[i] for i in range(n_in)))
-                for j in range(n_hidden)
-            ]
-            z_out = model.b2 + sum(model.W2[j] * hidden[j] for j in range(n_hidden))
-            pred = (
-                1.0 / (1.0 + math.exp(-z_out))
-                if z_out >= 0
-                else math.exp(z_out) / (1.0 + math.exp(z_out))
-            )
-
-            # 2. Backpropagation
-            err = pred - yi
-            for j in range(n_hidden):
-                grad_h = err * model.W2[j] * (1.0 - hidden[j] ** 2)
-                model.W2[j] -= lr * err * hidden[j]
-                for i in range(n_in):
-                    model.W1[i][j] -= lr * grad_h * xi[i]
-                model.b1[j] -= lr * grad_h
-            model.b2 -= lr * err
-
-    return model
-
-
 def train_dynamic(
     X: List[List[float]],
     y: List[float],

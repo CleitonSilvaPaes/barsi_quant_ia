@@ -767,6 +767,7 @@ def train_dss_cli(
     typer.echo(f"    - Exemplos de treino: {metrics['n_train']}, validação: {metrics['n_val']} (total: {metrics['total_examples']})")
     typer.echo(f"    - Acurácia na validação: {metrics['best_val_acc']:.1%}")
     typer.echo(f"    - Pesos salvos em: {output}")
+    typer.echo("💡 Servidor em execução? Recarregue via: sudo systemctl restart barsi-api.service ou POST /api/dss/reload")
 
 if __name__ == "__main__":
     app()
