@@ -27,7 +27,10 @@ class WhatsAppCallMeBotNotifier(NotificationsPort):
     """
 
     def __init__(self, phone: str, api_key: str, timeout_sec: float = 10.0):
-        self.phone = phone.replace("+", "").replace("-", "").replace(" ", "").strip()
+        clean_phone = phone.replace("+", "").replace("-", "").replace(" ", "").replace("(", "").replace(")", "").strip()
+        if clean_phone.startswith("550") and len(clean_phone) >= 13:
+            clean_phone = "55" + clean_phone[3:]
+        self.phone = clean_phone
         self.api_key = api_key.strip()
         self.timeout_sec = timeout_sec
         self.base_url = "https://api.callmebot.com/whatsapp.php"
@@ -81,7 +84,10 @@ class WhatsAppEvolutionNotifier(NotificationsPort):
         self.base_url = base_url.rstrip("/")
         self.instance = instance.strip()
         self.api_key = api_key.strip()
-        self.recipient = recipient.replace("+", "").replace("-", "").replace(" ", "").strip()
+        clean_recipient = recipient.replace("+", "").replace("-", "").replace(" ", "").replace("(", "").replace(")", "").strip()
+        if clean_recipient.startswith("550") and len(clean_recipient) >= 13:
+            clean_recipient = "55" + clean_recipient[3:]
+        self.recipient = clean_recipient
         self.timeout_sec = timeout_sec
 
     async def notify(self, title: str, body: str, level: str = "info") -> bool:

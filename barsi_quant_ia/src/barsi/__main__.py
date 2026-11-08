@@ -536,6 +536,33 @@ def keywords_test(
     else:
         typer.echo(f"   [!] Nenhuma palavra-chave coincidente encontrada.\n")
 
+notify_app = typer.Typer(help="Envio e teste de notificações proativas (Telegram e WhatsApp)")
+app.add_typer(notify_app, name="notify")
+
+@notify_app.command("test")
+def notify_test(
+    title: str = typer.Option("Teste de Notificação Barsi", "--title", help="Título do alerta"),
+    message: str = typer.Option("Alerta de teste enviado pelo Sistema Barsi Quant IA.", "--msg", help="Corpo da mensagem"),
+    level: str = typer.Option("info", "--level", help="Nível: info | alert | warn | success"),
+):
+    """Envia uma mensagem de teste para os canais de notificação configurados no .env."""
+    import asyncio
+    from barsi.adapters.factory import AdapterFactory
+    from barsi.adapters.notifications import NoOpNotifier
+
+    notifier = AdapterFactory.create_notification_adapter(settings)
+    if isinstance(notifier, NoOpNotifier):
+        typer.echo("\n[!] Nenhum canal de notificação está habilitado ou configurado no .env.")
+        typer.echo("    Habilite BARSI_TELEGRAM_ALERTS_ENABLED=true ou BARSI_WHATSAPP_ALERTS_ENABLED=true.\n")
+        return
+
+    typer.echo(f"\n[+] Disparando notificação de teste ({level.upper()})...")
+    ok = asyncio.run(notifier.notify(title=title, body=message, level=level))
+    if ok:
+        typer.echo("[✔] Notificação entregue com sucesso aos canais configurados!\n")
+    else:
+        typer.echo("[❌] Falha no envio. Verifique as credenciais no .env e a conectividade de rede.\n")
+
 if __name__ == "__main__":
     app()
 
