@@ -111,8 +111,19 @@ def test_settings_test_telegram_endpoint(auth_client, monkeypatch):
     assert data["ok"] is True
     assert "Telegram" in data["detail"]
 
-def test_analytics_benchmarks_endpoint(auth_client):
-    """Bug 3: Valida que o endpoint de benchmarks retorna dados estruturados sem campos hardcoded fictícios."""
+def test_analytics_benchmarks_endpoint(auth_client, monkeypatch):
+    """Bug 3 & Anti-flaky: Valida cálculo do CDI via mock da API do BCB sem dependência de rede externa."""
+    import json
+    fake_bcb_data = [
+        {"data": f"01/{i:02d}/2025", "valor": "0.95"} for i in range(1, 13)
+    ]
+    class FakeBcbResponse:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def read(self): return json.dumps(fake_bcb_data).encode("utf-8")
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda *args, **kwargs: FakeBcbResponse())
+
     res = auth_client.get("/api/analytics/benchmarks")
     assert res.status_code == 200
     data = res.json()
@@ -120,6 +131,22 @@ def test_analytics_benchmarks_endpoint(auth_client):
     assert "ibov_12m" in data
     assert "fonte" in data
     assert data["cdi_12m"] is not None
+    # 1.0095^12 - 1 = ~12.01%
+    assert 11.5 <= data["cdi_12m"] <= 12.5
+
+def test_analytics_benchmarks_offline_fallback(auth_client, monkeypatch):
+    """Valida resiliência quando a API do BCB falha: cdi_12m assume None sem quebrar a rota."""
+    def fake_failing_urlopen(*args, **kwargs):
+        raise ConnectionResetError("Conexão com BCB recusada ou sem rede")
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_failing_urlopen)
+
+    res = auth_client.get("/api/analytics/benchmarks")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["cdi_12m"] is None
+    assert "spread_cdi" in data
+    assert data["spread_cdi"] is None
 
 def test_build_real_portfolio_snapshots_with_price_history(tmp_path):
     """T3: Valida a construção da curva patrimonial real a partir de cotações históricas diárias no SQLite."""
@@ -177,7 +204,7 @@ def test_page_home_shows_error_toast_when_query_param(auth_client):
     """Issue A & B: Valida injeção segura de toast via json.dumps inclusive com aspas e apóstrofos."""
     res = auth_client.get("/?error=Acesso+restrito+a+administradores+d'água")
     assert res.status_code == 200
-    assert "Acesso restrito a administradores d'água" in res.text
+    assert 'showToast("Acesso restrito a administradores d\'água", \'error\')' in res.text
     assert "document.addEventListener('DOMContentLoaded'" in res.text
 
 def test_page_home_no_toast_without_error(auth_client):

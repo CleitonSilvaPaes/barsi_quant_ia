@@ -3,7 +3,6 @@ import os
 import time
 import json
 import asyncio
-import html
 import urllib.request
 import urllib.parse
 from datetime import datetime
