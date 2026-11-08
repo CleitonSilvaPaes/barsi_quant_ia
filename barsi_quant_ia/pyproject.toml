@@ -8,7 +8,7 @@ version = "1.0.0"
 description = "Sistema Previdenciário Barsi - Agente Quantitativo Resiliente para Edge/SBC e Cloudflare"
 readme = "README.md"
 requires-python = ">=3.11"
-authors = [{ name = "Cleiton Paes", email = "cleiton.p@aluno.ifsc.edu.br" }]
+authors = [{ name = "Barsi Quant Developer", email = "dev@barsi-quant.local" }]
 dependencies = [
     "pydantic>=2.7.0",
     "pydantic-settings>=2.2.0",

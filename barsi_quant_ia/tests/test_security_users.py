@@ -20,12 +20,12 @@ def test_password_hashing_and_verification():
 
 def test_session_token_signature_and_expiration():
     secret = "chave_secreta_de_teste_123456"
-    token = create_session_token(user_id=1, username="cleiton", role="admin", secret_key=secret, expires_in_sec=60)
+    token = create_session_token(user_id=1, username="admin_user", role="admin", secret_key=secret, expires_in_sec=60)
     
     # Decodifica token válido
     data = decode_session_token(token, secret)
     assert data is not None
-    assert data["user"] == "cleiton"
+    assert data["user"] == "admin_user"
     assert data["role"] == "admin"
     
     # Assinatura corrompida deve ser rejeitada
@@ -38,7 +38,7 @@ def test_user_repository_sqlite_crud():
         repo = UserRepository(db_path)
         
         # 1. Cria admin
-        ok1 = repo.create_user("cleiton", "senha123", role="admin")
+        ok1 = repo.create_user("admin_user", "senha123", role="admin")
         assert ok1 is True
         
         # 2. Cria leitor
@@ -46,17 +46,17 @@ def test_user_repository_sqlite_crud():
         assert ok2 is True
         
         # 3. Usuário duplicado é rejeitado
-        ok_dup = repo.create_user("cleiton", "outrasenha", role="admin")
+        ok_dup = repo.create_user("admin_user", "outrasenha", role="admin")
         assert ok_dup is False
         
         # 4. Autenticação bem sucedida
-        user_auth = repo.authenticate("cleiton", "senha123")
+        user_auth = repo.authenticate("admin_user", "senha123")
         assert user_auth is not None
-        assert user_auth["username"] == "cleiton"
+        assert user_auth["username"] == "admin_user"
         assert user_auth["role"] == "admin"
         assert "password_hash" in user_auth
         
         # 5. Autenticação com senha errada falha
-        assert repo.authenticate("cleiton", "senha_errada") is None
+        assert repo.authenticate("admin_user", "senha_errada") is None
         assert repo.authenticate("usuario_inexistente", "qualquer") is None
 

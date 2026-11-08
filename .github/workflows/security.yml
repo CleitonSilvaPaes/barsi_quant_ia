@@ -1,0 +1,72 @@
+name: Security & Quality Guard
+
+on:
+  push:
+    branches: [ main, master, dev ]
+  pull_request:
+    branches: [ main, master, dev ]
+
+jobs:
+  pii-and-secrets-check:
+    name: Audit PII & Private IP Guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run Zero-PII & Zero-Credentials Guard
+        run: |
+          python -c "
+          import base64, subprocess, sys
+
+          b64_patterns = [
+              'MTkyXC4xNjhcLlxkK1wuXGQr',  # 192.168.\d+.\d+
+              'Y2xlaXRvbg==',              # personal identifiers
+              'cGFlcw==',
+              'bml6aWVsbWE='
+          ]
+          patterns = [base64.b64decode(b).decode('utf-8') for b in b64_patterns]
+
+          errors = []
+          for p in patterns:
+              res = subprocess.run(['git', 'grep', '-inE', p], capture_output=True, text=True)
+              if res.returncode == 0 and res.stdout.strip():
+                  for line in res.stdout.splitlines():
+                      if not line.startswith('.github/workflows/security.yml'):
+                          errors.append(line)
+
+          if errors:
+              print('❌ SECURITY GUARD DETECTED FORBIDDEN PII OR DOMESTIC IP:')
+              for err in errors:
+                  print(f'   {err}')
+              sys.exit(1)
+
+          print('✅ ZERO PII & ZERO DOMESTIC IP: All git tracked files are clean.')
+          "
+
+  pytest-suite:
+    name: Run Pytest Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e barsi_quant_ia/
+          pip install pytest pytest-asyncio respx
+
+      - name: Run Pytest
+        run: |
+          pytest barsi_quant_ia/tests/ -v

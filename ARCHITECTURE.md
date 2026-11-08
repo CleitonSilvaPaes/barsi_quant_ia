@@ -154,8 +154,8 @@ O sistema processa PII (Personally Identifiable Information) de três fontes:
 
 ### Checklist de auditoria antes de commitar
 ```bash
-# Detecta nomes reais no staging
-grep -rE "(CLEITON|NIZIELMA|SOLANGE|192\.168)" --include="*.py" --include="*.md" \
+# Detecta nomes reais ou IPs privados no staging
+grep -rE "(TITULAR_REAL|FAMILIAR_REAL|192\.168|10\.0\.)" --include="*.py" --include="*.md" \
   --include="*.env*" --include="*.sh" .
 
 # Detecta credenciais

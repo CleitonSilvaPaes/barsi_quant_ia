@@ -69,5 +69,10 @@ class Settings(BaseSettings):
     r2_secret_access_key: str = ""
     r2_bucket_name: str = "barsi-history"
 
+    # Alertas Proativos (Telegram)
+    telegram_alerts_enabled: bool = False
+    telegram_bot_token: str = Field(default_factory=lambda: os.getenv("BARSI_TELEGRAM_BOT_TOKEN", ""))
+    telegram_chat_id: str = Field(default_factory=lambda: os.getenv("BARSI_TELEGRAM_CHAT_ID", ""))
+
 settings = Settings()
 

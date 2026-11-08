@@ -44,7 +44,7 @@ def test_salario_nao_inclui_transferencia_de_familiar():
         assert r.total_entradas == 4740.50
 
 
-def test_nizielma_credito_vai_para_outras_entradas():
+def test_familiar_credito_vai_para_outras_entradas():
     """Garante que créditos de familiar vão para outras_entradas e não para gastos de moradia/família."""
     tx_credito = _make_stmttrn("CREDIT", "20261110000000[-3:BRT]", 400.00, "fam-c-01", "Pix recebido de FAMILIAR")
     tx_debito = _make_stmttrn("DEBIT", "20261111000000[-3:BRT]", -250.00, "fam-d-01", "Pix enviado para FAMILIAR")

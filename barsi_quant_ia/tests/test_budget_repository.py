@@ -204,3 +204,32 @@ def test_processar_diretorio_nao_toca_sqlite(tmp_path, monkeypatch):
     assert not db_target.exists()
     assert not (tmp_path / "memory").exists()
 
+
+def test_upsert_and_delete_keyword(tmp_path):
+    """Testa adição, atualização e remoção de keywords via BudgetRepository."""
+    db_file = str(tmp_path / "keywords_test.db")
+    repo = BudgetRepository(db_file)
+
+    # Adiciona keyword
+    repo.upsert_keyword("SUPERMERCADO KOCH", "Despesas Variáveis", bucket="variavel", priority=150)
+    kws = repo.get_keywords()
+    koch = [k for k in kws if k[0] == "SUPERMERCADO KOCH"]
+    assert len(koch) == 1
+    assert koch[0] == ("SUPERMERCADO KOCH", "Despesas Variáveis", "variavel", 150)
+
+    # Atualiza prioridade e categoria (upsert idempotente)
+    repo.upsert_keyword("SUPERMERCADO KOCH", "Alimentação", bucket="variavel", priority=200)
+    kws2 = repo.get_keywords()
+    koch2 = [k for k in kws2 if k[0] == "SUPERMERCADO KOCH"]
+    assert len(koch2) == 1
+    assert koch2[0] == ("SUPERMERCADO KOCH", "Alimentação", "variavel", 200)
+
+    # Deleta keyword
+    deleted = repo.delete_keyword("SUPERMERCADO KOCH")
+    assert deleted is True
+    kws3 = repo.get_keywords()
+    assert not any(k[0] == "SUPERMERCADO KOCH" for k in kws3)
+
+    # Deletar inexistente retorna False
+    assert repo.delete_keyword("NAO_EXISTE") is False
+

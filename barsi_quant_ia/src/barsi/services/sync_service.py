@@ -9,6 +9,7 @@ from barsi.ports.news import NewsPort
 from barsi.ports.ai import AIPort
 from barsi.ports.sheets import SheetsPort
 from barsi.ports.history import HistoryPort
+from barsi.ports.notifications import NotificationsPort
 from barsi.domain.models import Position, RunSummary
 from barsi.domain.rules import atualizar_posicao_quant
 from barsi.services.insight_service import InsightService
@@ -23,12 +24,14 @@ class SyncService:
         ai: AIPort,
         sheets: SheetsPort,
         history: HistoryPort,
+        notifier: Optional[NotificationsPort] = None,
         max_concurrency: int = 3
     ):
         self.market = market
         self.news = news
         self.sheets = sheets
         self.history = history
+        self.notifier = notifier
         self.insight_service = InsightService(ai, history)
         self.semaphore = asyncio.Semaphore(max_concurrency)
 
@@ -55,6 +58,21 @@ class SyncService:
             insight_res = await self.insight_service.generate_position_insight(pos, news_summary.headlines)
             pos.insight_atual = insight_res.insight
             event_bus.publish("InsightGenerated", {"ticker": ticker, "insight": insight_res.insight})
+
+            # Notificação proativa (Telegram) se atingiu critérios de aporte
+            if self.notifier and not dry_run and not getattr(pos, "is_readonly", False):
+                if pos.margem_seguranca >= 20.0 and pos.status_barsi == "ACUMULAR":
+                    msg_body = (
+                        f"📊 *Cotação Atual:* R$ {pos.preco_atual:.2f} | *Teto:* R$ {pos.preco_teto:.2f}\n"
+                        f"🛡️ *Margem de Segurança:* {pos.margem_seguranca:.1f}%\n"
+                        f"💰 *DY Estimado:* {pos.dy:.1f}%\n"
+                        f"💡 *Insight:* {insight_res.insight}"
+                    )
+                    await self.notifier.notify(
+                        title=f"{ticker} em Zona de Aporte (Margem {pos.margem_seguranca:.1f}%)",
+                        body=msg_body,
+                        level="alert"
+                    )
 
             # 4. Grava no Histórico SQLite/R2
             if not dry_run:

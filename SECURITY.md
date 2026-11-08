@@ -31,8 +31,8 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"   # novo token HMAC
 ### Passo 2 — Verifique o histórico do Git
 ```bash
 # Encontra todos os commits que tiveram o arquivo/dado
-git log --all -S "CLEITON SILVA" --oneline
-git log --all -S "192.168.100" --oneline
+git log --all -S "NOME_TITULAR" --oneline
+git log --all -S "192.168.0." --oneline
 # Se retornar algum commit, o dado está no histórico
 ```
 
@@ -45,9 +45,9 @@ pip install git-filter-repo
 git filter-repo --path .env --path credentials.json --invert-paths
 
 # Remove por padrão de texto em qualquer arquivo
-git filter-repo --replace-text <(echo "CLEITON SILVA CARVALHO PAES==>TITULAR")
-git filter-repo --replace-text <(echo "192.168.100.72==>192.0.2.1")
-git filter-repo --replace-text <(echo "cleiton@==>user@")
+git filter-repo --replace-text <(echo "NOME_COMPLETO_TITULAR==>TITULAR")
+git filter-repo --replace-text <(echo "IP_PRIVADO_REAL==>192.0.2.1")
+git filter-repo --replace-text <(echo "usuario_pessoal@==>user@")
 
 # Force-push e avise todos os colaboradores
 git push --force --all

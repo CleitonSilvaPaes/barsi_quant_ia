@@ -24,6 +24,7 @@ def run(
         ai = AdapterFactory.create_ai_adapter(settings)
         sheets = AdapterFactory.create_sheets_adapter(settings)
         history = AdapterFactory.create_history_adapter(settings)
+        notifier = AdapterFactory.create_notification_adapter(settings)
 
         service = SyncService(
             market=market,
@@ -31,6 +32,7 @@ def run(
             ai=ai,
             sheets=sheets,
             history=history,
+            notifier=notifier,
             max_concurrency=settings.max_concurrency
         )
         summary = await service.execute_run(dry_run=dry_run, target_ticker=ticker)
@@ -54,7 +56,8 @@ def api(
 @app.command()
 def extratos(
     dir_path: str = typer.Option("extratos", "--dir", help="Pasta com arquivos de extrato .ofx"),
-    sync_sheet: bool = typer.Option(False, "--sync-sheet", help="Sincroniza valores consolidados na aba Budget_Manager_Fluxo")
+    sync_sheet: bool = typer.Option(False, "--sync-sheet", help="Sincroniza valores consolidados na aba Budget_Manager_Fluxo"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Mostra resultado da conciliação sem persistir no SQLite nem no Sheets"),
 ):
     """Lê e processa os extratos bancários da pasta extratos/ para conciliação Barsi."""
     from barsi.services.ofx_service import OFXParserService
@@ -96,6 +99,10 @@ def extratos(
             typer.echo(f"       • Variáveis (Débito/Dia)  : R$ {r.despesas_variaveis:>9.2f}")
         typer.echo(f"   ──> TOTAL DE SAÍDAS EFETIVAS  : R$ {r.total_saidas:>9.2f}")
         typer.echo(f"   💵 SALDO LIVRE / RESIDUAL     : R$ {r.saldo_livre:>9.2f}")
+
+    if dry_run:
+        typer.echo("\n[DRY-RUN] Simulação concluída. Nada foi persistido no SQLite nem no Google Sheets.")
+        return
 
     # Persistência no SQLite via caller (mantém SRP: parser não tem side-effects de I/O)
     try:
@@ -379,6 +386,155 @@ def budget_sync(
     if hasattr(sheets_adapter, "sync_budget_manager"):
         sheets_adapter.sync_budget_manager(resumos)
         typer.echo("[✔] Orçamento sincronizado com o Google Sheets com base nas despesas do SQLite!")
+
+@budget_app.command("audit")
+def budget_audit(
+    mes_ano: str = typer.Argument(..., help="Competência para auditoria no formato YYYY-MM (ex: '2026-10')")
+):
+    """Verifica integridade cruzada: transações dos extratos × budget_entries (conciliado)."""
+    from barsi.adapters.history.budget_repository import BudgetRepository
+    repo = BudgetRepository(settings.sqlite_db_path)
+
+    INCOME_CATEGORIES = {
+        "Salário / Renda Principal",
+        "Proventos B3",
+        "Rendimento NuConta",
+        "Outras Entradas",
+    }
+    CATEGORY_MAPPING = {
+        "Despesas Gerais": "Despesas Variáveis",
+        "Transferência Familiar": "Compromisso Familiar / Moradia",
+    }
+
+    with repo._conn() as conn:
+        # 1. Totalizações em budget_entries para o mês
+        rows_be = conn.execute(
+            """
+            SELECT c.name as categoria, b.amount
+              FROM budget_entries b
+              JOIN expense_categories c ON c.id = b.category_id
+             WHERE b.mes_ano = ?
+            """,
+            (mes_ano,)
+        ).fetchall()
+        soma_be = {r["categoria"]: round(float(r["amount"]), 2) for r in rows_be}
+
+        # Fallback para recurring se não houver registros em budget_entries
+        if not soma_be:
+            soma_be = repo.get_all_expenses(mes_ano)
+
+        # 2. Transações dos extratos
+        rows_tx = conn.execute(
+            """
+            SELECT tipo, categoria, valor
+              FROM transacoes
+             WHERE mes_ano = ?
+            """,
+            (mes_ano,)
+        ).fetchall()
+
+    soma_tx: Dict[str, float] = {}
+    for r in rows_tx:
+        raw_cat = r["categoria"]
+        cat = CATEGORY_MAPPING.get(raw_cat, raw_cat)
+        val = float(r["valor"])
+        if cat in INCOME_CATEGORIES:
+            if val > 0:
+                soma_tx[cat] = round(soma_tx.get(cat, 0.0) + val, 2)
+        else:
+            if val < 0:
+                soma_tx[cat] = round(soma_tx.get(cat, 0.0) + abs(val), 2)
+
+    typer.echo("\n" + "=" * 80)
+    typer.echo(f"   AUDITORIA DE INTEGRIDADE ORÇAMENTÁRIA — COMPETÊNCIA {mes_ano}   ")
+    typer.echo("=" * 80)
+    all_cats = sorted(set(soma_tx) | set(soma_be))
+    if not all_cats:
+        typer.echo(f"[!] Nenhum registro de extrato ou orçamento encontrado para o mês {mes_ano}.")
+        typer.echo("=" * 80 + "\n")
+        return
+
+    typer.echo(f" {'STATUS':<6} | {'CATEGORIA':<34} | {'EXTRATOS':>12} | {'ORÇAMENTO':>12} | {'DELTA':>10}")
+    typer.echo("-" * 80)
+    total_delta = 0.0
+    for cat in all_cats:
+        tx = soma_tx.get(cat, 0.0)
+        be = soma_be.get(cat, 0.0)
+        delta = round(be - tx, 2)
+        total_delta += abs(delta)
+        status = "  ✓   " if abs(delta) < 0.05 else "  ⚠️  "
+        typer.echo(f" {status} | {cat:<34} | R$ {tx:>9.2f} | R$ {be:>9.2f} | R$ {delta:>+7.2f}")
+    typer.echo("=" * 80)
+    if total_delta < 0.05:
+        typer.echo(" [✔] 100% CONCILIADO — Nenhuma divergência significativa entre extratos e orçamento.\n")
+    else:
+        typer.echo(f" [!] Detectada divergência acumulada de R$ {total_delta:.2f} entre extratos e orçamento.\n")
+
+
+keywords_app = typer.Typer(help="Gerenciamento de palavras-chave para classificação automática de extratos")
+app.add_typer(keywords_app, name="keywords")
+
+@keywords_app.command("list")
+def keywords_list():
+    """Lista todas as palavras-chave cadastradas para classificação de transações."""
+    from barsi.adapters.history.budget_repository import BudgetRepository
+    repo = BudgetRepository(settings.sqlite_db_path)
+    kws = repo.get_keywords()
+    typer.echo("\n" + "="*75)
+    typer.echo("   PALAVRAS-CHAVE DE CLASSIFICAÇÃO AUTOMÁTICA (KEYWORD TRIE)   ")
+    typer.echo("="*75)
+    typer.echo(f" {'PRIO':<6} | {'PALAVRA-CHAVE':<24} | {'CATEGORIA':<26} | {'BUCKET':<10}")
+    typer.echo("-" * 75)
+    for kw, cat, bucket, prio in kws:
+        typer.echo(f" {prio:<6} | {kw:<24} | {cat:<26} | {bucket:<10}")
+    typer.echo("="*75 + "\n")
+
+@keywords_app.command("add")
+def keywords_add(
+    keyword: str = typer.Argument(..., help="Palavra ou termo a identificar no extrato"),
+    category: str = typer.Argument(..., help="Categoria atribuída (ex: 'Despesas Variáveis')"),
+    bucket: str = typer.Option("variavel", "--bucket", help="Bucket: variavel | tributo | fixa | entrada | reserva | investimento"),
+    priority: int = typer.Option(100, "--priority", help="Prioridade no casamento (maior = mais prioritário)")
+):
+    """Adiciona ou atualiza uma palavra-chave no banco de dados para classificação automática."""
+    from barsi.adapters.history.budget_repository import BudgetRepository
+    from barsi.services.ofx_service import OFXParserService
+    repo = BudgetRepository(settings.sqlite_db_path)
+    repo.upsert_keyword(keyword, category, bucket=bucket, priority=priority)
+    OFXParserService.reload_keywords_from_db()
+    typer.echo(f"[✔] Palavra-chave '{keyword.upper()}' associada à categoria '{category}' (prioridade {priority})!")
+
+@keywords_app.command("remove")
+def keywords_remove(
+    keyword: str = typer.Argument(..., help="Palavra-chave a remover")
+):
+    """Remove uma palavra-chave do banco de dados."""
+    from barsi.adapters.history.budget_repository import BudgetRepository
+    from barsi.services.ofx_service import OFXParserService
+    repo = BudgetRepository(settings.sqlite_db_path)
+    removido = repo.delete_keyword(keyword)
+    if removido:
+        OFXParserService.reload_keywords_from_db()
+        typer.echo(f"[✔] Palavra-chave '{keyword.upper()}' removida com sucesso!")
+    else:
+        typer.echo(f"[!] Palavra-chave '{keyword.upper()}' não encontrada no banco.")
+
+@keywords_app.command("test")
+def keywords_test(
+    memo: str = typer.Argument(..., help="Texto ou descrição do extrato para testar classificação")
+):
+    """Testa qual categoria o classificador atribui a uma descrição de extrato."""
+    from barsi.services.ofx_service import OFXParserService
+    OFXParserService.reload_keywords_from_db()
+    trie = OFXParserService._get_trie()
+    match = trie.match(memo.upper())
+    typer.echo(f"\n🔍 TESTE DE CLASSIFICAÇÃO:")
+    typer.echo(f"   Memo analisado : '{memo}'")
+    if match:
+        cat, bucket, prio = match
+        typer.echo(f"   [✔] Categoria  : {cat} (Bucket: {bucket}, Prioridade: {prio})\n")
+    else:
+        typer.echo(f"   [!] Nenhuma palavra-chave coincidente encontrada.\n")
 
 if __name__ == "__main__":
     app()

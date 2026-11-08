@@ -12,9 +12,9 @@
 - **NUNCA** usar nomes reais como default em código:
   ```python
   # ❌ ERRADO
-  initial_admin_user: str = Field(default="cleiton")
-  TVBOX_USER = os.getenv("BARSI_TVBOX_USER", "cleiton")
-  target_ip = ip or settings.tvbox_ip or "192.168.100.72"
+  initial_admin_user: str = Field(default="usuario_real")
+  TVBOX_USER = os.getenv("BARSI_TVBOX_USER", "usuario_real")
+  target_ip = ip or settings.tvbox_ip or "192.168.x.x"
 
   # ✅ CORRETO
   initial_admin_user: str = Field(default="")
@@ -23,7 +23,7 @@
   if not target_ip:
       raise ConfigError("BARSI_TVBOX_IP obrigatório")
   ```
-- **NUNCA** usar caminhos absolutos que revelem username pessoal (`/home/cleiton/...`). Use `BARSI_TVBOX_HOME` ou caminhos relativos.
+- **NUNCA** usar caminhos absolutos que revelem username pessoal (`/home/usuario/...`). Use `BARSI_TVBOX_HOME` ou caminhos relativos.
 - **NUNCA** commitar `.env` real, `credentials.json`, `extratos/*.ofx`, `memory/*.db`.
 
 ## 3. .env.example é Template Público
@@ -45,7 +45,7 @@
 ## 6. Checklist Antes de Commitar
 - Rodar verificação de padrões sensíveis:
   ```bash
-  grep -rE "(CLEITON|NIZIELMA|SOLANGE|192\.168|10\.0\.|172\.(1[6-9]|2[0-9]|3[01])\.)" \
+  grep -rE "(TITULAR_REAL|FAMILIAR_REAL|192\.168|10\.0\.|172\.(1[6-9]|2[0-9]|3[01])\.)" \
     --include="*.py" --include="*.md" --include="*.env*" --include="*.sh" --include="*.toml" .
   ```
 - Se retornar qualquer ocorrência fora do `.env` local privado, corrigir imediatamente antes de commitar.

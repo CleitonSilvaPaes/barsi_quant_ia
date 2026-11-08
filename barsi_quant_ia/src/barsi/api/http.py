@@ -52,12 +52,14 @@ def get_sync_service() -> SyncService:
     ai = AdapterFactory.create_ai_adapter(settings)
     sheets = AdapterFactory.create_sheets_adapter(settings)
     history = AdapterFactory.create_history_adapter(settings)
+    notifier = AdapterFactory.create_notification_adapter(settings)
     return SyncService(
         market=market,
         news=news,
         ai=ai,
         sheets=sheets,
         history=history,
+        notifier=notifier,
         max_concurrency=settings.max_concurrency
     )
 

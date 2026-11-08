@@ -9,8 +9,8 @@
 
 ## 2. Zero PII em Código e Documentação
 - **NUNCA** commitar nome completo de titulares, familiares, CPFs, e-mails pessoais, números de conta, endereços ou IPs internos de rede doméstica.
-- **NUNCA** usar nomes reais como default em código (`cleiton`, `192.168.x.x`). Use `os.getenv()` sem fallback a dados reais.
-- **NUNCA** usar caminhos absolutos que revelem username pessoal (`/home/cleiton/...`). Use `BARSI_TVBOX_HOME` ou caminhos relativos.
+- **NUNCA** usar nomes reais como default em código (`usuario_real`, `192.168.x.x`). Use `os.getenv()` sem fallback a dados reais.
+- **NUNCA** usar caminhos absolutos que revelem username pessoal (`/home/usuario/...`). Use `BARSI_TVBOX_HOME` ou caminhos relativos.
 - **NUNCA** commitar `.env` real, `credentials.json`, `extratos/*.ofx`, `memory/*.db`.
 
 ## 3. .env.example é Template Público
@@ -31,7 +31,7 @@
 ## 6. Checklist Antes de Commitar
 - Rodar verificação de padrões sensíveis:
   ```bash
-  grep -rE "(CLEITON|NIZIELMA|SOLANGE|192\.168|10\.0\.|172\.(1[6-9]|2[0-9]|3[01])\.)" \
+  grep -rE "(TITULAR_REAL|FAMILIAR_REAL|192\.168|10\.0\.|172\.(1[6-9]|2[0-9]|3[01])\.)" \
     --include="*.py" --include="*.md" --include="*.env*" --include="*.sh" --include="*.toml" .
   ```
 

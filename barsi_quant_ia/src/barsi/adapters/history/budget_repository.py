@@ -234,6 +234,32 @@ class BudgetRepository:
             row = c.execute("SELECT count(*), coalesce(max(id), 0) FROM category_keywords").fetchone()
             return int((row[0] or 0) + (row[1] or 0))
 
+    def upsert_keyword(self, keyword: str, category: str, bucket: str = "variavel", priority: int = 100) -> None:
+        """Insere ou atualiza uma palavra-chave para classificação automática de transações."""
+        kw = keyword.strip().upper()
+        with self._conn() as conn:
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_cat_keywords_kw ON category_keywords(keyword);")
+            conn.execute(
+                """
+                INSERT INTO category_keywords (keyword, category, bucket, priority)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(keyword) DO UPDATE SET
+                    category = excluded.category,
+                    bucket = excluded.bucket,
+                    priority = excluded.priority;
+                """,
+                (kw, category, bucket, priority),
+            )
+            conn.commit()
+
+    def delete_keyword(self, keyword: str) -> bool:
+        """Remove uma palavra-chave do banco."""
+        kw = keyword.strip().upper()
+        with self._conn() as conn:
+            cur = conn.execute("DELETE FROM category_keywords WHERE keyword = ?", (kw,))
+            conn.commit()
+            return cur.rowcount > 0
+
     def seed_defaults(self) -> int:
         """Popula as despesas recorrentes padrão de forma 100% idempotente."""
         for cat, amt, dt, kind in DEFAULT_BUDGET_SEEDS:

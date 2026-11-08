@@ -5,6 +5,7 @@ from barsi.ports.news import NewsPort
 from barsi.ports.ai import AIPort
 from barsi.ports.sheets import SheetsPort
 from barsi.ports.history import HistoryPort
+from barsi.ports.notifications import NotificationsPort
 
 from barsi.adapters.market.yfinance_adapter import YFinanceAdapter
 from barsi.adapters.market.brapi_adapter import BrapiAdapter
@@ -66,4 +67,11 @@ class AdapterFactory:
                 bucket_name=cfg.r2_bucket_name
             )
         return base
+
+    @staticmethod
+    def create_notification_adapter(cfg: Settings) -> NotificationsPort:
+        from barsi.adapters.notifications import TelegramNotifier, NoOpNotifier
+        if cfg.telegram_alerts_enabled and cfg.telegram_bot_token and cfg.telegram_chat_id:
+            return TelegramNotifier(bot_token=cfg.telegram_bot_token, chat_id=cfg.telegram_chat_id)
+        return NoOpNotifier()
 
