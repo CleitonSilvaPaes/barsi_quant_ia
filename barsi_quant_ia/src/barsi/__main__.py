@@ -749,6 +749,25 @@ def history_sync_cli():
     snapshots = repo.build_real_portfolio_snapshots()
     typer.echo(f"[✔] Curva patrimonial real recalculada com {len(snapshots)} meses históricos!\n")
 
+@app.command("train-dss")
+def train_dss_cli(
+    db_path: Optional[str] = typer.Option(None, "--db", help="Path do SQLite (default: settings)"),
+    output: str = typer.Option("memory/dss_weights.json", "--output"),
+    use_system_data: bool = typer.Option(True, "--use-system/--no-system"),
+):
+    """Treina o modelo DSS com dataset base + feedbacks RLHF do sistema."""
+    from barsi.training.train_dss import train_full_pipeline
+    typer.echo("[+] Iniciando treinamento do modelo DSS (TinyMLP)...")
+    metrics = train_full_pipeline(
+        db_path=db_path or settings.sqlite_db_path,
+        output_path=output,
+        use_system_data=use_system_data,
+    )
+    typer.echo(f"[✔] Treinamento concluído com sucesso!")
+    typer.echo(f"    - Exemplos de treino: {metrics['n_train']}, validação: {metrics['n_val']} (total: {metrics['total_examples']})")
+    typer.echo(f"    - Acurácia na validação: {metrics['best_val_acc']:.1%}")
+    typer.echo(f"    - Pesos salvos em: {output}")
+
 if __name__ == "__main__":
     app()
 

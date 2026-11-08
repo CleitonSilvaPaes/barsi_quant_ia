@@ -192,6 +192,16 @@ _login_attempts: Dict[str, List[float]] = {}
 LOGIN_RATE_LIMIT_MAX = 5
 LOGIN_RATE_LIMIT_WINDOW = 60.0  # Janela de 60 segundos
 
+def _get_client_ip(request: Request) -> str:
+    """Extrai IP real considerando proxies reversos (Cloudflare Tunnel, Nginx, etc.)."""
+    cf_ip = request.headers.get("CF-Connecting-IP")
+    if cf_ip:
+        return cf_ip.strip()
+    xff = request.headers.get("X-Forwarded-For", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else "127.0.0.1"
+
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(error: Optional[str] = None):
     login_path = os.path.join(TEMPLATES_DIR, "login.html")
@@ -202,8 +212,17 @@ async def login_page(error: Optional[str] = None):
 
 @app.post("/login")
 async def do_login(request: Request):
-    client_ip = request.client.host if request.client else "127.0.0.1"
+    global _login_attempts
+    client_ip = _get_client_ip(request)
     now = time.time()
+
+    # Previne memory leak lento de IPs antigos
+    if len(_login_attempts) > 1000:
+        _login_attempts = {
+            ip: times for ip, times in _login_attempts.items()
+            if times and now - times[-1] < LOGIN_RATE_LIMIT_WINDOW
+        }
+
     recent_attempts = [t for t in _login_attempts.get(client_ip, []) if now - t < LOGIN_RATE_LIMIT_WINDOW]
 
     if len(recent_attempts) >= LOGIN_RATE_LIMIT_MAX:

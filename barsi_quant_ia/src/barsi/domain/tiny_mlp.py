@@ -84,3 +84,4 @@ class TinyMLP:
         self.b1 = data["b1"]
         self.W2 = data["W2"]
         self.b2 = data["b2"]
+

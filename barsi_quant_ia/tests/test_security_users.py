@@ -1,4 +1,5 @@
 """Testes unitários para segurança criptográfica, RBAC e repositório de usuários."""
+import pytest
 import tempfile
 import os
 from barsi.infra.security import hash_password, verify_password, create_session_token, decode_session_token
@@ -61,17 +62,24 @@ def test_user_repository_sqlite_crud():
         assert repo.authenticate("usuario_inexistente", "qualquer") is None
 
 
-def test_login_rate_limiting(monkeypatch, tmp_path):
+@pytest.fixture
+def clean_login_attempts():
+    from barsi.api.http import _login_attempts
+    _login_attempts.clear()
+    yield
+    _login_attempts.clear()
+
+
+def test_login_rate_limiting(clean_login_attempts, monkeypatch, tmp_path):
     """Valida que mais de 5 tentativas de login falhas no minuto bloqueiam tentativas subsequentes."""
     from fastapi.testclient import TestClient
-    from barsi.api.http import app, _login_attempts
+    from barsi.api.http import app
     import barsi.api.http as http_module
     from barsi.config import settings
 
     test_db = str(tmp_path / "test_rl.db")
     monkeypatch.setattr(settings, "sqlite_db_path", test_db)
     http_module._user_repo_cache = None
-    _login_attempts.clear()
 
     client = TestClient(app)
 
@@ -85,5 +93,49 @@ def test_login_rate_limiting(monkeypatch, tmp_path):
     blocked_resp = client.post("/login", data={"username": "user", "password": "wrong_password"}, follow_redirects=False)
     assert blocked_resp.status_code == 303
     assert "Muitas+tentativas" in blocked_resp.headers["location"]
+
+
+def test_login_rate_limiting_cloudflare_ip(clean_login_attempts, monkeypatch, tmp_path):
+    """Garante que o rate limiting rastreia o IP real via CF-Connecting-IP atrás de proxies."""
+    from fastapi.testclient import TestClient
+    from barsi.api.http import app
+    import barsi.api.http as http_module
+    from barsi.config import settings
+
+    test_db = str(tmp_path / "test_cf.db")
+    monkeypatch.setattr(settings, "sqlite_db_path", test_db)
+    http_module._user_repo_cache = None
+
+    client = TestClient(app)
+
+    # 5 tentativas do IP atacante 203.0.113.195
+    for i in range(5):
+        resp = client.post(
+            "/login",
+            data={"username": "admin", "password": "bad"},
+            headers={"CF-Connecting-IP": "203.0.113.195"},
+            follow_redirects=False
+        )
+        assert resp.status_code == 303
+
+    # Atacante é bloqueado
+    blocked = client.post(
+        "/login",
+        data={"username": "admin", "password": "bad"},
+        headers={"CF-Connecting-IP": "203.0.113.195"},
+        follow_redirects=False
+    )
+    assert "Muitas+tentativas" in blocked.headers["location"]
+
+    # Usuário legítimo em outro IP (198.51.100.10) NÃO é afetado
+    legit = client.post(
+        "/login",
+        data={"username": "admin", "password": "bad"},
+        headers={"CF-Connecting-IP": "198.51.100.10"},
+        follow_redirects=False
+    )
+    assert "Muitas+tentativas" not in legit.headers["location"]
+    assert "Usu" in legit.headers["location"]
+
 
 

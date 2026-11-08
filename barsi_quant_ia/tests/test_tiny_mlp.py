@@ -61,7 +61,7 @@ def test_dividend_sustainability_scorer(tmp_path):
         div_proj=2.85,
         preco_teto=47.50,
         margem_seguranca=72.7,
-        quantidade=100
+        qtd_antes=100
     )
     scorer = DividendSustainabilityScorer.get()
     res = scorer.score(p, extras={"perenidade": 0.95, "roe": 0.22, "anos_pagando": 10})
@@ -70,3 +70,30 @@ def test_dividend_sustainability_scorer(tmp_path):
     assert 0.0 <= res["score"] <= 1.0
     assert res["label"] in ["ALTA", "MÉDIA", "BAIXA"]
     assert res["badge"] in ["🟢", "🟡", "🔴"]
+
+
+def test_dividend_sustainability_scorer_untrained(tmp_path):
+    """Quando os pesos não existem, retorna fallback seguro 'NÃO TREINADO'."""
+    scorer = DividendSustainabilityScorer(weights_path=str(tmp_path / "inexistente.json"))
+    p = Position(ticker="ITUB4", row_index=11, preco_atual=30.0, div_proj=2.0)
+    res = scorer.score(p)
+    assert res["score"] == 0.5
+    assert res["label"] == "NÃO TREINADO"
+    assert res["badge"] == "⚪"
+
+
+def test_train_full_pipeline_execution(tmp_path):
+    """Executa o pipeline completo de treinamento e verifica as métricas de validação."""
+    from barsi.training.train_dss import train_full_pipeline
+    output_file = str(tmp_path / "trained_weights.json")
+
+    metrics = train_full_pipeline(
+        db_path=None,
+        output_path=output_file,
+        use_system_data=False
+    )
+    assert metrics["n_train"] >= 4
+    assert metrics["n_val"] >= 1
+    assert "best_val_acc" in metrics
+    assert os.path.exists(output_file)
+

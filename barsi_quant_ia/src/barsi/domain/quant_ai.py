@@ -242,9 +242,14 @@ rl_agent = QLearningBarsiAgent()
 class DividendSustainabilityScorer:
     """Avaliador neural de sustentabilidade de dividendos baseado em TinyMLP (Edge ARM64)."""
     _instance: Optional["DividendSustainabilityScorer"] = None
+    _has_weights: bool = False
 
     def __init__(self, weights_path: Optional[str] = None):
-        if weights_path is None:
+        resolved_path = None
+        if weights_path is not None:
+            if os.path.exists(weights_path):
+                resolved_path = weights_path
+        else:
             candidate_paths = [
                 "memory/dss_weights.json",
                 os.path.join(os.path.dirname(__file__), "..", "..", "..", "memory", "dss_weights.json"),
@@ -252,9 +257,11 @@ class DividendSustainabilityScorer:
             ]
             for p in candidate_paths:
                 if os.path.exists(p):
-                    weights_path = p
+                    resolved_path = p
                     break
-        self.mlp = TinyMLP(n_inputs=8, n_hidden=6, weights_path=weights_path)
+
+        self.mlp = TinyMLP(n_inputs=8, n_hidden=6, weights_path=resolved_path)
+        self._has_weights = resolved_path is not None and os.path.exists(resolved_path)
 
     @classmethod
     def get(cls) -> "DividendSustainabilityScorer":
@@ -262,7 +269,15 @@ class DividendSustainabilityScorer:
             cls._instance = DividendSustainabilityScorer()
         return cls._instance
 
+    @classmethod
+    def reload(cls) -> None:
+        """Invalida a instância singleton forçando recarga dos pesos aprendidos."""
+        cls._instance = None
+
     def score(self, posicao: Position, extras: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        if not self._has_weights:
+            return {"score": 0.5, "label": "NÃO TREINADO", "badge": "⚪"}
+
         extras = extras or {}
         div_proj = posicao.div_proj or 0.0
         preco = posicao.preco_atual or 1.0
