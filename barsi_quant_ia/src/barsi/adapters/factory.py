@@ -49,7 +49,8 @@ class AdapterFactory:
         if cfg.sheets_provider == "gspread" and os.path.exists(cfg.sheets_credentials_json):
             return GSpreadAdapter(
                 credentials_path=cfg.sheets_credentials_json,
-                spreadsheet_id=cfg.sheets_spreadsheet_id
+                spreadsheet_id=cfg.sheets_spreadsheet_id,
+                sqlite_db_path=cfg.sqlite_db_path,
             )
         return XLSXAdapter(file_path=cfg.local_xlsx_path)
 

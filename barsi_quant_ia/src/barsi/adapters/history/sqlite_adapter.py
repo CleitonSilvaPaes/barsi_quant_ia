@@ -6,6 +6,7 @@ from typing import Optional, Tuple
 from barsi.ports.history import HistoryPort
 from barsi.domain.models import Position, InsightResult, RunSummary
 from barsi.infra.logging import logger
+from barsi.adapters.history.budget_repository import INIT_BUDGET_SCHEMA_SQL
 
 class SQLiteHistoryAdapter(HistoryPort):
     def __init__(self, db_path: str = "./memory/barsi_memory.db"):
@@ -46,6 +47,7 @@ class SQLiteHistoryAdapter(HistoryPort):
                     errors TEXT
                 )
             """)
+            cursor.executescript(INIT_BUDGET_SCHEMA_SQL)
             conn.commit()
 
     async def get_last_analysis(self, ticker: str) -> Optional[Tuple[str, str, str]]:

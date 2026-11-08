@@ -9,6 +9,21 @@ class AcaoBarsi(str, Enum):
     AGUARDAR = "AGUARDAR"
     MANTER = "MANTER"
 
+class Categoria(str, Enum):
+    SALARIO = "Salário / Renda Principal"
+    PROVENTOS = "Proventos B3"
+    RENDIMENTO_CONTA = "Rendimento Conta"
+    APORTE = "Aporte Ações/FIIs"
+    FATURA = "Fatura Cartão Nubank"
+    ENCARGOS = "Encargos Cartão"
+    TRIBUTO = "Tributos & Taxas"
+    MORADIA = "Compromisso Familiar / Moradia"
+    AILOS = "Cooperativa Ailos"
+    RDB = "Reserva / RDB"
+    VARIAVEL = "Despesas Variáveis"
+    TRANSF_FAMILIAR = "Transferência Familiar"
+    OUTROS = "Outros"
+
 class Position(BaseModel):
     ticker: str
     row_index: int

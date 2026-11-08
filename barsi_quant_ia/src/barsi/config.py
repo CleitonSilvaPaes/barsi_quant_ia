@@ -1,7 +1,7 @@
 """Configuração da aplicação via pydantic-settings."""
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
-from typing import Literal
+from pydantic import Field, field_validator
+from typing import Literal, Union, Any, List
 import os
 
 class Settings(BaseSettings):
@@ -19,13 +19,25 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_bearer_token: str = Field(default_factory=lambda: os.getenv("BARSI_API_BEARER_TOKEN", ""))
     secret_key: str = Field(default_factory=lambda: os.getenv("BARSI_SECRET_KEY", "barsi_hmac_secret_key_secure_2026"))
-    initial_admin_user: str = Field(default_factory=lambda: os.getenv("BARSI_INITIAL_ADMIN_USER", "cleiton"))
+    initial_admin_user: str = Field(default_factory=lambda: os.getenv("BARSI_INITIAL_ADMIN_USER", ""))
     initial_admin_pass: str = Field(default_factory=lambda: os.getenv("BARSI_INITIAL_ADMIN_PASS", ""))
+    titular_nomes: Union[List[str], str] = Field(default_factory=list)
+    familiar_keywords: Union[List[str], str] = Field(default_factory=list)
+
+    @field_validator("titular_nomes", "familiar_keywords", mode="after")
+    @classmethod
+    def _parse_list_or_str(cls, v: Any) -> List[str]:
+        if isinstance(v, str):
+            return [x.strip().upper() for x in v.split(",") if x.strip()]
+        if isinstance(v, (list, tuple)):
+            return [str(x).strip().upper() for x in v if str(x).strip()]
+        return []
 
     # Conexão TV Box SSH (Zero credenciais hardcoded)
     tvbox_ip: str = Field(default_factory=lambda: os.getenv("BARSI_TVBOX_IP", ""))
     tvbox_user: str = Field(default_factory=lambda: os.getenv("BARSI_TVBOX_USER", ""))
     tvbox_pass: str = Field(default_factory=lambda: os.getenv("BARSI_TVBOX_PASS", ""))
+    tvbox_home: str = Field(default_factory=lambda: os.getenv("BARSI_TVBOX_HOME", "/opt/barsi_quant_ia"))
 
     # Restrições de Concorrência e Hardware (TV Box)
     max_concurrency: int = 3

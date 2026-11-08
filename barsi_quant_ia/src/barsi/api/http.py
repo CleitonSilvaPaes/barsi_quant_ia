@@ -30,6 +30,11 @@ TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
 user_repo = UserRepository(settings.sqlite_db_path)
 if settings.initial_admin_user and settings.initial_admin_pass:
     user_repo.init_admin_if_empty(settings.initial_admin_user, settings.initial_admin_pass)
+elif not user_repo.list_users():
+    logger.warning(
+        "no_admin_user_configured",
+        hint="Defina BARSI_INITIAL_ADMIN_USER e BARSI_INITIAL_ADMIN_PASS no .env ou rode `barsi user-add`"
+    )
 
 class EditItem(BaseModel):
     ticker: str
@@ -210,6 +215,7 @@ async def trigger_run_web(request: Request):
 @app.post("/api/extratos")
 async def trigger_extratos_web(request: Request):
     require_role_action(request, action_type="sync")
+    OFXParserService.reload_keywords_from_db()
     resumos = OFXParserService.processar_diretorio_extratos("extratos")
     sheets = AdapterFactory.create_sheets_adapter(settings)
     if hasattr(sheets, "sync_budget_manager"):
@@ -272,12 +278,13 @@ async def sync_tvbox_action(request: Request):
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         ssh.connect(tv_ip, username=tv_user, password=tv_pass, timeout=6)
-        ssh.exec_command("mkdir -p /home/cleiton/barsi_quant_ia/extratos")
+        remote_home = settings.tvbox_home
+        ssh.exec_command(f"mkdir -p {remote_home}/extratos")
 
         count_ofx = 0
         with SCPClient(ssh.get_transport()) as scp:
             for f in glob.glob("extratos/*.ofx"):
-                scp.put(f, f"/home/cleiton/barsi_quant_ia/extratos/{os.path.basename(f)}")
+                scp.put(f, f"{remote_home}/extratos/{os.path.basename(f)}")
                 count_ofx += 1
 
         stdin, stdout, stderr = ssh.exec_command("sudo systemctl restart barsi-api.service", get_pty=True)

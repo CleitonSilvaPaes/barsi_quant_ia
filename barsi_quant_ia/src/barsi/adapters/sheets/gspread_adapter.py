@@ -1,26 +1,21 @@
-"""Adapter para Google Sheets (gspread) com compatibilidade de layout."""
-import os
-import asyncio
-from typing import List
-from barsi.ports.sheets import SheetsPort
-from barsi.domain.models import Position, AcaoBarsi
-from barsi.infra.logging import logger
-import gspread
-
 """Adapter para Google Sheets (gspread) com detecção inteligente de layout."""
 import os
 import asyncio
 from typing import List, Optional
 from datetime import datetime
+import gspread
+
 from barsi.ports.sheets import SheetsPort
 from barsi.domain.models import Position, AcaoBarsi, SimuladorOrder
 from barsi.infra.logging import logger
-import gspread
 
 class GSpreadAdapter(SheetsPort):
-    def __init__(self, credentials_path: str, spreadsheet_id: str = ""):
+    def __init__(self, credentials_path: str, spreadsheet_id: str = "", sqlite_db_path: str = "./memory/barsi_memory.db"):
         self.credentials_path = credentials_path
         self.spreadsheet_id = spreadsheet_id
+        self.sqlite_db_path = sqlite_db_path
+        from barsi.adapters.history.budget_repository import BudgetRepository
+        self.budget_repo = BudgetRepository(sqlite_db_path)
 
     def _get_client_and_spreadsheet(self):
         gc = gspread.service_account(filename=self.credentials_path)
@@ -314,29 +309,6 @@ class GSpreadAdapter(SheetsPort):
         if not meses_ordenados:
             return
 
-        # Mapeia colunas existentes para preservar valores manuais (Aluguel, Nizielma, etc.)
-        header_row_idx = 9
-        header_vals = all_rows[header_row_idx - 1] if len(all_rows) >= header_row_idx else []
-        col_month_map = {}
-        for c_idx, col_title in enumerate(header_vals, start=1):
-            for m in meses_ordenados:
-                ano, mes = m.split("-")
-                nome_esperado = f"{meses_pt.get(mes, mes)}/{ano}"
-                if nome_esperado.lower() in col_title.lower():
-                    col_month_map[m] = c_idx
-
-        def _get_existing_val(m: str, row_1_based: int, default: float = 0.0) -> float:
-            c_idx = col_month_map.get(m)
-            if c_idx and len(all_rows) >= row_1_based:
-                raw = all_rows[row_1_based - 1][c_idx - 1].strip()
-                if raw:
-                    clean = raw.replace("R$", "").replace(".", "").replace(",", ".").strip()
-                    try:
-                        return float(clean)
-                    except ValueError:
-                        pass
-            return default
-
         # Monta os cabeçalhos cronológicos estritos
         headers = ["Item / Descrição Orçamentária"]
         for m in meses_ordenados:
@@ -400,9 +372,17 @@ class GSpreadAdapter(SheetsPort):
             c_let = self._col_idx_to_letter(col_idx)
             r = resumos[m]
 
+            # Resolve todas as despesas vigentes para o mês de referência 'm' via SQLite (Zero Magic Numbers)
+            expenses = self.budget_repo.get_all_expenses(m)
+            def _expense(name: str) -> float:
+                val = expenses.get(name, 0.0)
+                if val == 0.0:
+                    logger.debug("expense_missing_in_db", mes=m, category=name)
+                return val
+
             salario = round(r.salario_entradas, 2)
             proventos = round(r.proventos_recebidos, 2)
-            saldo_ant = _get_existing_val(m, 13, 50.28 if m == "2026-11" else 0.0)
+            saldo_ant = _expense("Saldo Inicial Nov/26") or _expense("Saldo Inicial")
 
             updates.append({"range": f"{c_let}11", "values": [[salario]]})
             updates.append({"range": f"{c_let}12", "values": [[proventos]]})
@@ -410,21 +390,21 @@ class GSpreadAdapter(SheetsPort):
             updates.append({"range": f"{c_let}14", "values": [[f"=SUM({c_let}11:{c_let}13)"]]})
 
             fatura = round(r.faturas_cartao, 2)
-            aluguel = _get_existing_val(m, 18, 521.30 if m in ["2026-10", "2026-11"] else 0.0)
-            nizielma = _get_existing_val(m, 19, 400.00 if m in ["2026-10", "2026-11"] else 0.0)
-            das = _get_existing_val(m, 20, 86.05 if m in ["2026-10", "2026-11"] else 0.0)
-            licenciamento = _get_existing_val(m, 21, 149.37 if m == "2026-11" else 0.0)
-            ailos = _get_existing_val(m, 22, 60.00 if m in ["2026-10", "2026-11"] else 0.0)
+            aluguel = _expense("Aluguel")
+            comp_familiar = _expense("Compromisso Familiar")
+            das = _expense("DAS Simples Nacional")
+            licenciamento = _expense("Licenciamento Detran")
+            ailos = _expense("Cooperativa Ailos")
 
             updates.append({"range": f"{c_let}17", "values": [[fatura]]})
             updates.append({"range": f"{c_let}18", "values": [[aluguel]]})
-            updates.append({"range": f"{c_let}19", "values": [[nizielma]]})
+            updates.append({"range": f"{c_let}19", "values": [[comp_familiar]]})
             updates.append({"range": f"{c_let}20", "values": [[das]]})
             updates.append({"range": f"{c_let}21", "values": [[licenciamento]]})
             updates.append({"range": f"{c_let}22", "values": [[ailos]]})
             updates.append({"range": f"{c_let}23", "values": [[f"=SUM({c_let}17:{c_let}22)"]]})
 
-            saldo_ant_caixa = _get_existing_val(m, 26, 180.44 if m == "2026-11" else 0.0)
+            saldo_ant_caixa = _expense("Saldo Ant. Caixa")
             novo_dep = round(r.reserva_rdb, 2)
             updates.append({"range": f"{c_let}26", "values": [[saldo_ant_caixa]]})
             updates.append({"range": f"{c_let}27", "values": [[novo_dep]]})
@@ -437,11 +417,11 @@ class GSpreadAdapter(SheetsPort):
             updates.append({"range": f"{c_let}33", "values": [[f"=SUM({c_let}31:{c_let}32)"]]})
 
             # Gastos Variáveis (Linhas 36..40)
-            v36 = _get_existing_val(m, 36, 450.00 if m == "2026-11" else (420.00 if m == "2026-10" else 0.0))
-            v37 = _get_existing_val(m, 37, 120.00 if m == "2026-11" else (50.00 if m == "2026-10" else 0.0))
-            v38 = _get_existing_val(m, 38, 120.00 if m == "2026-11" else (110.00 if m == "2026-10" else 0.0))
-            v39 = _get_existing_val(m, 39, 65.00 if m == "2026-11" else (60.00 if m == "2026-10" else 0.0))
-            v40 = _get_existing_val(m, 40, 50.00 if m in ["2026-10", "2026-11"] else 0.0)
+            v36 = _expense("Gastos Variáveis A")
+            v37 = _expense("Gastos Variáveis B")
+            v38 = _expense("Gastos Variáveis C")
+            v39 = _expense("Gastos Variáveis D")
+            v40 = _expense("Gastos Variáveis E")
 
             updates.append({"range": f"{c_let}36", "values": [[v36]]})
             updates.append({"range": f"{c_let}37", "values": [[v37]]})

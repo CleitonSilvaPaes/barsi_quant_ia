@@ -4,6 +4,43 @@ Sistema de investimento previdenciário baseado no **Método Barsi (B.E.S.T.)**,
 
 ---
 
+## 🔒 Dados Sensíveis — Leia Antes de Contribuir
+
+Este projeto processa **extratos bancários reais**, **credenciais SSH** e **dados pessoais de titulares e familiares**. Para evitar vazamentos acidentais:
+
+### ✅ O que PODE ser commitado
+- Código-fonte (`.py`, `.html`, `.js`, `.sh`)
+- Documentação (`README.md`, `ARCHITECTURE.md`, `SECURITY.md`)
+- Templates (`.env.example`, `docker-compose.yml`, `pyproject.toml`)
+- Testes com dados **sintéticos** (`tests/`)
+
+### ❌ O que NUNCA deve ser commitado
+- `.env` (variáveis reais) — protegido pelo `.gitignore`
+- `credentials.json` (Service Account Google) — protegido
+- `extratos/*.ofx` (extratos bancários reais) — protegido
+- `memory/*.db` (banco SQLite com dados pessoais) — protegido
+- `cache/` (cotações, Q-tables de RL com feedback do usuário) — protegido
+- Arquivos `.xlsx` com carteira real — protegido
+- **Qualquer nome completo** em docs, código ou comentários
+- **IPs internos da rede doméstica** em código (use `BARSI_TVBOX_IP`)
+
+### 🧪 Para testar localmente sem expor dados
+```bash
+# 1. Copie o template
+cp .env.example .env
+
+# 2. Preencha APENAS no .env local (que está gitignored)
+nano .env
+
+# 3. Verifique que o .env não vai ser commitado
+git status | grep ".env$"   # deve retornar vazio
+```
+
+> 🚨 **Já commitou algo sensível?**
+> Siga o procedimento em [SECURITY.md](SECURITY.md), seção "Vazamento de credenciais" — o histórico do Git precisa ser purgado com `git filter-repo` (não basta deletar o arquivo em um novo commit).
+
+---
+
 ## 🏛️ Diagrama da Arquitetura Hexagonal
 
 ```text
@@ -65,7 +102,7 @@ Sistema de investimento previdenciário baseado no **Método Barsi (B.E.S.T.)**,
 
 ### 1. Conecte na TV Box via SSH
 ```bash
-ssh cleiton@192.168.100.72
+ssh SEU_USUARIO@SEU_IP
 ```
 
 ### 2. Clone o repositório e execute o script idempotente
@@ -107,7 +144,7 @@ cloudflared tunnel route dns tvbox-invest barsi.seudominio.com
 ### 2. Configurar o arquivo `~/.cloudflared/config.yml`
 ```yaml
 tunnel: <UUID_DO_TUNEL>
-credentials-file: /home/cleiton/.cloudflared/<UUID>.json
+credentials-file: ~/.cloudflared/<UUID>.json
 
 ingress:
   - hostname: barsi.seudominio.com

@@ -1,0 +1,64 @@
+# Regras Mandatórias de Segurança & Arquitetura — Barsi Quant IA
+
+## 1. Zero Credenciais em Código (Strict Zero-Hardcode Policy)
+- **NUNCA** inserir senhas, tokens, chaves de API, credenciais SSH ou segredos em arquivos de código (`.py`, `.html`, `.js`, `.sh`, `.json`, `.md`, etc.).
+- Todo acesso a segredo deve vir exclusivamente de:
+  1. **Variáveis de Ambiente (`.env`)** — gerenciadas via `pydantic-settings` ou `os.getenv()`. O arquivo `.env` deve constar obrigatoriamente no `.gitignore`.
+  2. **Banco de Dados Seguro (SQLite)** — hash PBKDF2-HMAC-SHA256, 120k iterações e salt criptográfico.
+  3. **Prompt Interativo** — `getpass.getpass()` quando a variável não estiver setada em runtime CLI.
+
+## 2. Zero PII em Código e Documentação
+- **NUNCA** commitar nome completo de titulares, familiares, CPFs, e-mails pessoais, números de conta, endereços ou IPs internos de rede doméstica.
+- **NUNCA** usar nomes reais como default em código:
+  ```python
+  # ❌ ERRADO
+  initial_admin_user: str = Field(default="cleiton")
+  TVBOX_USER = os.getenv("BARSI_TVBOX_USER", "cleiton")
+  target_ip = ip or settings.tvbox_ip or "192.168.100.72"
+
+  # ✅ CORRETO
+  initial_admin_user: str = Field(default="")
+  TVBOX_USER = os.getenv("BARSI_TVBOX_USER", "")
+  target_ip = ip or settings.tvbox_ip
+  if not target_ip:
+      raise ConfigError("BARSI_TVBOX_IP obrigatório")
+  ```
+- **NUNCA** usar caminhos absolutos que revelem username pessoal (`/home/cleiton/...`). Use `BARSI_TVBOX_HOME` ou caminhos relativos.
+- **NUNCA** commitar `.env` real, `credentials.json`, `extratos/*.ofx`, `memory/*.db`.
+
+## 3. .env.example é Template Público
+- Todos os valores devem ser placeholders vazios ou genéricos.
+- Nomes de titulares e familiares NÃO aparecem em `.env.example`.
+- IPs e usuários SSH NÃO aparecem em `.env.example`.
+- Tokens, senhas e chaves NÃO aparecem em `.env.example`.
+- Se um novo campo sensível for adicionado, deve entrar em `.env.example` vazio com comentário explicativo.
+
+## 4. Logs Estruturados e PII
+- `structlog` **NUNCA** deve logar `<MEMO>` completo de transações OFX (pode conter nome de terceiros, CPF parcial, conta).
+- Permitido: `fitid`, `ticker`, `categoria`, `mes_ano`, `valor`.
+- Proibido: `descricao`, `memo`, `titular_nome`, `cpf`, `conta`.
+
+## 5. Documentação Sensível
+- `README.md`, `ARCHITECTURE.md`, `SECURITY.md` **NUNCA** devem conter IPs reais, usernames reais ou emails pessoais.
+- Exemplos devem usar placeholders: `SEU_USUARIO`, `SEU_IP`, `NOME_TITULAR`.
+
+## 6. Checklist Antes de Commitar
+- Rodar verificação de padrões sensíveis:
+  ```bash
+  grep -rE "(CLEITON|NIZIELMA|SOLANGE|192\.168|10\.0\.|172\.(1[6-9]|2[0-9]|3[01])\.)" \
+    --include="*.py" --include="*.md" --include="*.env*" --include="*.sh" --include="*.toml" .
+  ```
+- Se retornar qualquer ocorrência fora do `.env` local privado, corrigir imediatamente antes de commitar.
+
+## 7. Orçamento e Valores Monetários (Zero Magic Numbers)
+- **NUNCA** hardcodar valores monetários mensais (`aluguel = 521.30`, `if m == "2026-11"`).
+- Todo valor recorrente DEVE viver em `recurring_expenses` com `valid_from`/`valid_to`.
+- Toda leitura de valor mensal DEVE passar por `BudgetRepository.get_expense_amount()` ou `BudgetRepository.get_all_expenses()`.
+- Se um valor não existe no DB, o código loga `expense_missing_in_db` e usa `0.0` — **nunca inventa um default**.
+- Nova categoria só pode ser criada via `BudgetRepository.upsert_recurring()` (que registra em `expense_categories`), jamais por INSERT direto em `transacoes`.
+- `sync_budget_manager` é **somente leitura de Sheets + escrita de projeção**. A fonte da verdade é o SQLite.
+- O `OFXParserService` JÁ identifica categoria (`Transacao.categoria`) e `ticker_relacionado`. Nenhum classificador paralelo pode ser criado.
+
+## 8. Paridade de Ambientes (PC Local <-> TV Box)
+- O código que roda no PC deve ser idêntico ao da TV Box.
+- Qualquer alteração que envolva credenciais deve esperar que a TV Box possua as respectivas chaves em seu próprio `.env` ou SQLite local.

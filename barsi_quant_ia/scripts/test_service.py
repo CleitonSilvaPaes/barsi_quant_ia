@@ -4,8 +4,11 @@ import getpass
 import paramiko
 import time
 
-TVBOX_IP = os.getenv("BARSI_TVBOX_IP", "192.168.100.72")
-TVBOX_USER = os.getenv("BARSI_TVBOX_USER", "cleiton")
+TVBOX_IP = os.getenv("BARSI_TVBOX_IP", "")
+TVBOX_USER = os.getenv("BARSI_TVBOX_USER", "")
+if not TVBOX_IP or not TVBOX_USER:
+    print("[!] Configure BARSI_TVBOX_IP e BARSI_TVBOX_USER no .env")
+    raise SystemExit(1)
 TVBOX_PASS = os.getenv("BARSI_TVBOX_PASS") or getpass.getpass(f"Senha SSH para {TVBOX_USER}@{TVBOX_IP}: ")
 
 ssh = paramiko.SSHClient()

@@ -3,20 +3,24 @@ import os
 import getpass
 import paramiko
 
-TVBOX_IP = os.getenv("BARSI_TVBOX_IP", "192.168.100.72")
-TVBOX_USER = os.getenv("BARSI_TVBOX_USER", "cleiton")
+TVBOX_IP = os.getenv("BARSI_TVBOX_IP", "")
+TVBOX_USER = os.getenv("BARSI_TVBOX_USER", "")
+TVBOX_HOME = os.getenv("BARSI_TVBOX_HOME", "/opt/barsi_quant_ia")
+if not TVBOX_IP or not TVBOX_USER:
+    print("[!] Configure BARSI_TVBOX_IP e BARSI_TVBOX_USER no .env")
+    raise SystemExit(1)
 TVBOX_PASS = os.getenv("BARSI_TVBOX_PASS") or getpass.getpass(f"Senha SSH para {TVBOX_USER}@{TVBOX_IP}: ")
 
-service_content = """[Unit]
+service_content = f"""[Unit]
 Description=Execucao Barsi Sync Worker
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=cleiton
-WorkingDirectory=/home/cleiton/barsi_quant_ia
-ExecStart=/home/cleiton/barsi_quant_ia/.venv/bin/python -m barsi run
+User={TVBOX_USER}
+WorkingDirectory={TVBOX_HOME}
+ExecStart={TVBOX_HOME}/.venv/bin/python -m barsi run
 StandardOutput=journal
 StandardError=journal
 """

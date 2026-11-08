@@ -58,6 +58,7 @@ def extratos(
 ):
     """Lê e processa os extratos bancários da pasta extratos/ para conciliação Barsi."""
     from barsi.services.ofx_service import OFXParserService
+    OFXParserService.reload_keywords_from_db()
     resumos = OFXParserService.processar_diretorio_extratos(dir_path)
     if not resumos:
         typer.echo(f"[!] Nenhum extrato .ofx encontrado em '{dir_path}'")
@@ -96,6 +97,32 @@ def extratos(
         typer.echo(f"   ──> TOTAL DE SAÍDAS EFETIVAS  : R$ {r.total_saidas:>9.2f}")
         typer.echo(f"   💵 SALDO LIVRE / RESIDUAL     : R$ {r.saldo_livre:>9.2f}")
 
+    # Persistência no SQLite via caller (mantém SRP: parser não tem side-effects de I/O)
+    try:
+        from barsi.adapters.history.budget_repository import BudgetRepository
+        repo = BudgetRepository(settings.sqlite_db_path)
+        todas = [t for r in resumos.values() for t in r.transacoes]
+        if todas:
+            repo.persist_transacoes(todas)
+        BUCKETS_PERSISTIR = {
+            "Salário / Renda Principal":     lambda r: r.salario_entradas,
+            "Proventos B3":                 lambda r: r.proventos_recebidos,
+            "Aporte Ações/FIIs":            lambda r: r.compras_acoes_barsi,
+            "Fatura Cartão Nubank":         lambda r: r.faturas_cartao,
+            "Reserva / RDB":                lambda r: r.reserva_rdb,
+            "Tributos & Taxas":             lambda r: r.tributos_e_taxas,
+            "Compromisso Familiar / Moradia": lambda r: r.moradia_e_familia,
+            "Cooperativa Ailos":            lambda r: r.cooperativa_ailos,
+            "Despesas Variáveis":           lambda r: r.despesas_variaveis,
+        }
+        for mes, res in resumos.items():
+            for categoria, getter in BUCKETS_PERSISTIR.items():
+                val = getter(res)
+                if val > 0:
+                    repo.record_budget_entry(mes, categoria, val, source="ofx")
+    except Exception as exc:
+        logger.warning("persist_transacoes_failed", error=str(exc))
+
     if sync_sheet:
         typer.echo("\n[+] Sincronizando com Google Sheets (Budget_Manager_Fluxo)...")
         from barsi.config import Settings
@@ -118,8 +145,11 @@ def sync_tvbox(
     import os, glob, getpass, paramiko
     from scp import SCPClient
 
-    target_ip = ip or settings.tvbox_ip or "192.168.100.72"
-    target_user = user or settings.tvbox_user or "cleiton"
+    target_ip = ip or settings.tvbox_ip
+    target_user = user or settings.tvbox_user
+    if not target_ip or not target_user:
+        typer.echo("[!] Configure BARSI_TVBOX_IP e BARSI_TVBOX_USER no .env (ou passe --ip/--user)")
+        raise typer.Exit(code=1)
     target_pass = password or settings.tvbox_pass or getpass.getpass(f"Senha SSH para {target_user}@{target_ip}: ")
 
     typer.echo(f"\n[+] Conectando na TV Box ({target_user}@{target_ip}) para sincronização completa...")
@@ -131,14 +161,15 @@ def sync_tvbox(
         typer.echo(f"[!] Falha na conexão SSH com a TV Box: {exc}")
         return
 
+    remote_home = settings.tvbox_home
     # Garante diretórios essenciais na TV Box
-    ssh.exec_command("mkdir -p /home/cleiton/barsi_quant_ia/extratos /home/cleiton/barsi_quant_ia/src/barsi/api/templates /home/cleiton/barsi_quant_ia/memory")
+    ssh.exec_command(f"mkdir -p {remote_home}/extratos {remote_home}/src/barsi/api/templates {remote_home}/memory")
 
     with SCPClient(ssh.get_transport()) as scp:
         # 1. Extratos
         typer.echo("    - Sincronizando extratos bancários (.ofx)...")
         for f in glob.glob("extratos/*.ofx"):
-            scp.put(f, f"/home/cleiton/barsi_quant_ia/extratos/{os.path.basename(f)}")
+            scp.put(f, f"{remote_home}/extratos/{os.path.basename(f)}")
 
         # 2. Código fonte principal
         typer.echo("    - Sincronizando código fonte e adaptadores...")
@@ -148,7 +179,7 @@ def sync_tvbox(
                 if file.endswith((".py", ".html", ".json", ".sql")) and "__pycache__" not in root:
                     local_p = os.path.join(root, file)
                     rel_p = os.path.relpath(local_p, root_src).replace("\\", "/")
-                    remote_p = f"/home/cleiton/barsi_quant_ia/src/barsi/{rel_p}"
+                    remote_p = f"{remote_home}/src/barsi/{rel_p}"
                     remote_dir = os.path.dirname(remote_p)
                     ssh.exec_command(f"mkdir -p {remote_dir}")
                     scp.put(local_p, remote_p)
@@ -156,7 +187,7 @@ def sync_tvbox(
         # 3. Credentials se existir
         cred_p = "barsi_quant_ia/credentials.json" if os.path.exists("barsi_quant_ia/credentials.json") else "credentials.json"
         if os.path.exists(cred_p):
-            scp.put(cred_p, "/home/cleiton/barsi_quant_ia/credentials.json")
+            scp.put(cred_p, f"{remote_home}/credentials.json")
 
     typer.echo("    - Reiniciando serviço barsi-api na TV Box...")
     stdin, stdout, stderr = ssh.exec_command("sudo systemctl restart barsi-api.service", get_pty=True)
@@ -175,8 +206,11 @@ def tvbox(
     """Consulta a telemetria ao vivo da TV Box (Temperatura, RAM, Uptime e Timer)."""
     import getpass, paramiko
 
-    target_ip = ip or settings.tvbox_ip or "192.168.100.72"
-    target_user = user or settings.tvbox_user or "cleiton"
+    target_ip = ip or settings.tvbox_ip
+    target_user = user or settings.tvbox_user
+    if not target_ip or not target_user:
+        typer.echo("[!] Configure BARSI_TVBOX_IP e BARSI_TVBOX_USER no .env")
+        raise typer.Exit(code=1)
     target_pass = password or settings.tvbox_pass or getpass.getpass(f"Senha SSH para {target_user}@{target_ip}: ")
 
     typer.echo(f"\n[+] Conectando na TV Box ({target_user}@{target_ip})...")
@@ -260,6 +294,91 @@ def user_list():
     for r in rows:
         typer.echo(f" • ID: {r['id']} | Usuário: {r['username']:<12} | Perfil: {r['role'].upper():<10} | Permissões: {r['permissoes']}")
     typer.echo("=======================================================\n")
+
+budget_app = typer.Typer(name="budget", help="Gestão e reconciliação de orçamento e despesas recorrentes (Zero Magic Numbers)")
+app.add_typer(budget_app)
+
+@budget_app.command("seed")
+def budget_seed():
+    """Popula as despesas recorrentes iniciais no banco SQLite."""
+    from barsi.adapters.history.budget_repository import BudgetRepository
+    repo = BudgetRepository(settings.sqlite_db_path)
+    count = repo.seed_defaults()
+    typer.echo(f"[✔] {count} despesas recorrentes semeadas com sucesso no banco SQLite!")
+
+@budget_app.command("list")
+def budget_list():
+    """Lista todas as despesas recorrentes e vigências cadastradas no banco SQLite."""
+    from barsi.adapters.history.budget_repository import BudgetRepository
+    repo = BudgetRepository(settings.sqlite_db_path)
+    rows = repo.list_recurring()
+    typer.echo("\n" + "="*80)
+    typer.echo("       DESPESAS RECORRENTES & ORÇAMENTO (SQLITE SOURCE OF TRUTH)        ")
+    typer.echo("="*80)
+    if not rows:
+        typer.echo("Nenhuma despesa recorrente cadastrada.")
+    for r in rows:
+        v_to = r['valid_to'] or 'VIGENTE'
+        typer.echo(f" • [{r['kind']:<9}] {r['category']:<32} : R$ {r['amount']:>8.2f} (de {r['valid_from']} até {v_to})")
+    typer.echo("="*80 + "\n")
+
+@budget_app.command("set")
+def budget_set(
+    category: str = typer.Argument(..., help="Nome da categoria (ex: 'Aluguel')"),
+    amount: float = typer.Argument(..., help="Valor mensal da despesa (ex: 550.00)"),
+    valid_from: str = typer.Argument(..., help="Data de início da vigência no formato YYYY-MM-DD (ex: '2027-01-01')"),
+    valid_to: Optional[str] = typer.Option(None, "--valid-to", help="Data de fim da vigência (opcional)"),
+    kind: str = typer.Option("fixa", "--kind", help="Tipo: fixa | variavel | tributo | reserva | investimento | entrada"),
+    notes: Optional[str] = typer.Option(None, "--notes", help="Observações")
+):
+    """Cria ou atualiza uma despesa recorrente, fechando automaticamente a vigência anterior."""
+    from barsi.adapters.history.budget_repository import BudgetRepository
+    repo = BudgetRepository(settings.sqlite_db_path)
+    repo.upsert_recurring(category, amount, valid_from, valid_to=valid_to, kind=kind, source="manual", notes=notes)
+    typer.echo(f"[✔] Despesa '{category}' configurada para R$ {amount:.2f} a partir de {valid_from}!")
+
+@budget_app.command("sync")
+def budget_sync(
+    dir_path: str = typer.Option("extratos", "--dir", help="Pasta com extratos .ofx")
+):
+    """Executa a conciliação completa de extratos e sincroniza a aba Budget_Manager_Fluxo."""
+    from barsi.services.ofx_service import OFXParserService
+    from barsi.adapters.factory import AdapterFactory
+    resumos = OFXParserService.processar_diretorio_extratos(dir_path)
+    if not resumos:
+        typer.echo(f"[!] Nenhum extrato encontrado em '{dir_path}'")
+        return
+
+    # Persistência no SQLite via caller
+    try:
+        from barsi.adapters.history.budget_repository import BudgetRepository
+        repo = BudgetRepository(settings.sqlite_db_path)
+        todas = [t for r in resumos.values() for t in r.transacoes]
+        if todas:
+            repo.persist_transacoes(todas)
+        BUCKETS_PERSISTIR = {
+            "Salário / Renda Principal":     lambda r: r.salario_entradas,
+            "Proventos B3":                 lambda r: r.proventos_recebidos,
+            "Aporte Ações/FIIs":            lambda r: r.compras_acoes_barsi,
+            "Fatura Cartão Nubank":         lambda r: r.faturas_cartao,
+            "Reserva / RDB":                lambda r: r.reserva_rdb,
+            "Tributos & Taxas":             lambda r: r.tributos_e_taxas,
+            "Compromisso Familiar / Moradia": lambda r: r.moradia_e_familia,
+            "Cooperativa Ailos":            lambda r: r.cooperativa_ailos,
+            "Despesas Variáveis":           lambda r: r.despesas_variaveis,
+        }
+        for mes, res in resumos.items():
+            for categoria, getter in BUCKETS_PERSISTIR.items():
+                val = getter(res)
+                if val > 0:
+                    repo.record_budget_entry(mes, categoria, val, source="ofx")
+    except Exception as exc:
+        logger.warning("persist_transacoes_failed", error=str(exc))
+
+    sheets_adapter = AdapterFactory.create_sheets_adapter(settings)
+    if hasattr(sheets_adapter, "sync_budget_manager"):
+        sheets_adapter.sync_budget_manager(resumos)
+        typer.echo("[✔] Orçamento sincronizado com o Google Sheets com base nas despesas do SQLite!")
 
 if __name__ == "__main__":
     app()

@@ -5,10 +5,14 @@ import getpass
 import paramiko
 from scp import SCPClient
 
-TVBOX_IP = os.getenv("BARSI_TVBOX_IP", "192.168.100.72")
-TVBOX_USER = os.getenv("BARSI_TVBOX_USER", "cleiton")
+TVBOX_IP = os.getenv("BARSI_TVBOX_IP", "")
+TVBOX_USER = os.getenv("BARSI_TVBOX_USER", "")
+TVBOX_HOME = os.getenv("BARSI_TVBOX_HOME", "/opt/barsi_quant_ia")
+if not TVBOX_IP or not TVBOX_USER:
+    print("[!] Configure BARSI_TVBOX_IP e BARSI_TVBOX_USER no .env")
+    sys.exit(1)
 TVBOX_PASS = os.getenv("BARSI_TVBOX_PASS") or getpass.getpass(f"Senha SSH para {TVBOX_USER}@{TVBOX_IP}: ")
-REMOTE_DIR = "/home/cleiton/barsi_quant_ia"
+REMOTE_DIR = TVBOX_HOME
 LOCAL_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 def run_remote(ssh, cmd, sudo=False):

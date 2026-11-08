@@ -59,14 +59,15 @@ fi
 
 # 6. Criar e habilitar serviço systemd
 echo "[6/6] Configurando Systemd Service e Timer..."
-cat << 'EOF' | sudo tee /etc/systemd/system/barsi.service
+USER_NAME="${BARSI_TVBOX_USER:-$USER}"
+cat << EOF | sudo tee /etc/systemd/system/barsi.service
 [Unit]
 Description=Sistema Previdenciario Barsi API & Worker
 After=network.target
 
 [Service]
 Type=simple
-User=cleiton
+User=${USER_NAME}
 WorkingDirectory=/opt/barsi_quant_ia
 ExecStart=/opt/barsi_quant_ia/.venv/bin/python -m barsi api --port 8000
 Restart=always
