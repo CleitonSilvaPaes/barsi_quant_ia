@@ -369,5 +369,20 @@ def test_api_run_creates_snapshot(auth_client, monkeypatch):
     assert snapshots[-1]["patrimonio_total"] == 3500.0
 
 
+def test_snapshot_today_skipped_when_empty_portfolio(auth_client, monkeypatch):
+    """Garante que snapshot não sobrescreve com 0 se o patrimônio for 0 ou vazio."""
+    repo = BudgetRepository(settings.sqlite_db_path)
+    # Posições com quantidade ou preço zero
+    repo.save_positions([
+        Position(ticker="BBAS3", row_index=10, preco_atual=0.0, div_proj=2.0, qtd_antes=0)
+    ])
+    res = auth_client.post("/api/snapshot/today")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "skipped"
+    assert data["reason"] == "empty_portfolio"
+
+
+
 
 

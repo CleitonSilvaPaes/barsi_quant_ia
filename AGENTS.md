@@ -31,3 +31,4 @@ Este documento define os papéis, responsabilidades e diretrizes operacionais do
   - Gerenciar e treinar palavras-chave (`budget_keywords`) para autoclassificação de despesas fixas, variáveis e receitas.
   - Integrar com o serviço `BudgetProjectionService` para projetar a capacidade mensal de aporte da carteira.
   - Monitorar e conciliar despesas sem interferir na persistência canônica do SQLite.
+

@@ -552,6 +552,10 @@ async def save_insight_feedback(req: FeedbackRequest, request: Request):
 def _record_snapshot_logic(positions: List[Position], repo: BudgetRepository) -> Dict[str, Any]:
     soma_patrimonio = sum((p.qtd_antes or 0) * (p.preco_atual or 0.0) for p in positions)
     soma_cotas = sum(p.qtd_antes or 0 for p in positions)
+    if soma_patrimonio <= 0:
+        logger.warning("snapshot_skipped_empty_portfolio", cotas=soma_cotas)
+        return {"status": "skipped", "reason": "empty_portfolio"}
+
     soma_aporte = sum((p.qtd_aporte or 0) * (p.preco_atual or 0.0) for p in positions)
     proventos_ano = sum(((p.qtd_antes or 0) + (p.qtd_aporte or 0)) * (p.div_proj or 0.0) for p in positions)
     setores = {}

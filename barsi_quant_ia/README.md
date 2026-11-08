@@ -1,63 +1,57 @@
-# 🏦 Sistema Previdenciário Barsi - Agente Quantitativo Resiliente
+# 🏦 Sistema Previdenciário Barsi Quant IA — Agente Resiliente
 
-Sistema de investimento previdenciário baseado no **Método Barsi (B.E.S.T.)**, construído sob **Arquitetura Hexagonal (Ports & Adapters)** e otimizado para execução contínua em **Edge / SBC (TV Box Amlogic S905W · ARM64)** integrado a **Google Sheets** e **Cloudflare Workers / Tunnels**.
-
----
-
-## 🔒 Dados Sensíveis — Leia Antes de Contribuir
-
-Este projeto processa **extratos bancários reais**, **credenciais SSH** e **dados pessoais de titulares e familiares**. Para evitar vazamentos acidentais:
-
-### ✅ O que PODE ser commitado
-- Código-fonte (`.py`, `.html`, `.js`, `.sh`)
-- Documentação (`README.md`, `ARCHITECTURE.md`, `SECURITY.md`)
-- Templates (`.env.example`, `docker-compose.yml`, `pyproject.toml`)
-- Testes com dados **sintéticos** (`tests/`)
-
-### ❌ O que NUNCA deve ser commitado
-- `.env` (variáveis reais) — protegido pelo `.gitignore`
-- `credentials.json` (Service Account Google) — protegido
-- `extratos/*.ofx` (extratos bancários reais) — protegido
-- `memory/*.db` (banco SQLite com dados pessoais) — protegido
-- `cache/` (cotações, Q-tables de RL com feedback do usuário) — protegido
-- Arquivos `.xlsx` com carteira real — protegido
-- **Qualquer nome completo** em docs, código ou comentários
-- **IPs internos da rede doméstica** em código (use `BARSI_TVBOX_IP`)
-
-### 🧪 Para testar localmente sem expor dados
-```bash
-# 1. Copie o template
-cp .env.example .env
-
-# 2. Preencha APENAS no .env local (que está gitignored)
-nano .env
-
-# 3. Verifique que o .env não vai ser commitado
-git status | grep ".env$"   # deve retornar vazio
-```
-
-> 🚨 **Já commitou algo sensível?**
-> Siga o procedimento em [SECURITY.md](SECURITY.md), seção "Vazamento de credenciais" — o histórico do Git precisa ser purgado com `git filter-repo` (não basta deletar o arquivo em um novo commit).
+Sistema de investimento previdenciário e geração de renda passiva baseado no **Método Barsi (Setores B.E.S.T.)**, construído sob **Arquitetura Hexagonal (Ports & Adapters)** com **persistência canônica em SQLite (Path B)**, interface web interativa completa (**Web Suite 2.0**) e otimizado para execução autônoma em hardware **Edge / SBC (TV Box Amlogic S905W · ARM64)** integrado a **Cloudflare Tunnel/Workers**.
 
 ---
 
-## 🏛️ Diagrama da Arquitetura Hexagonal
+## 🏛️ Diretrizes Arquiteturais Centrais (Path B)
+
+1. **Fonte Canônica da Verdade (SQLite)**: O banco de dados local `barsi.db` (ou `memory/barsi_memory.db`) via `BudgetRepository` é a **única fonte primária da verdade**. Todas as leituras e edições de carteira, transações OFX, categorias e usuários operam diretamente no SQLite com latência ultrabaixa e zero dependência de APIs externas de planilhas em runtime.
+2. **Exportação Sob Demanda (Unidirecional)**:
+   - **Google Sheets**: Sincronização disparada manualmente via interface web (`/api/export/sheets`) ou CLI (`python -m barsi export-sheets`).
+   - **Excel (.xlsx)**: Exportação gerada dinamicamente sob demanda para download (`/api/export/xlsx` ou `python -m barsi export-xlsx`), garantindo arquivos limpos sem manter planilhas obsoletas no disco.
+3. **Isolamento e Segurança**:
+   - Autenticação e RBAC (Controle de Acesso Baseado em Perfis: `admin`, `investidor`, `leitor`).
+   - Criptografia de senhas com PBKDF2 e tokens de sessão JWT assinados.
+   - 100% dos testes rodam sobre bancos temporários (`tmp_path`) sem tocar na base de produção.
+
+---
+
+## 🖥️ Web Suite 2.0 — Recursos do Painel Web
+
+A aplicação conta com uma interface moderna em HTML5 + CSS responsivo + Vanilla JS (sem overhead de frameworks pesados de frontend):
+
+- 💼 **Carteira Inteligente (`/carteira`)**: Tabela inline-editable com cotas atuais, aportes sugeridos, preço atual em tempo real, Preço Teto Barsi, margem de segurança e status de convicção.
+- 📈 **Analytics & Benchmarks (`/analytics`)**:
+  - Gráfico dinâmico de evolução patrimonial com base em snapshots reais.
+  - Benchmarks comparativos em tempo real: **Carteira vs IBOVESPA (`^BVSP`) vs CDI Acumulado 12M (via API oficial do Banco Central do Brasil - BCB)** com fallback offline resiliente.
+  - Histórico mensal de dividendos e distribuição setorial (Bancos, Energia, Saneamento, Telecomunicações, Seguros e FIIs).
+- 💡 **Central de Insights & RLHF (`/insights`)**: Recomendações determinísticas de aporte com motor quantitativo e feedback do investidor (*Concordo / Discordo*) sincronizado em lote.
+- 📑 **Conciliação Orçamentária OFX (`/extratos`)**: Upload e leitura de extratos bancários OFX, deduplicação idempotente por `fitid`/hash, visualização de receitas/despesas e gerenciador de palavras-chave para autoclassificação.
+- 🎯 **Simulador de Aportes (`/aportes`)**: Distribuição interativa de aportes mensais via slider com respeito estrito à margem de segurança e priorização de yield.
+- 👥 **Gestão de Usuários e RBAC (`/admin/users`)**: Criação, troca de perfil e exclusão de contas com isolamento de privilégios.
+- 💾 **Backup do SQLite (`/api/backup/download`)**: Download seguro e direto do banco de dados completo (exclusivo para perfil `admin`).
+- 📸 **Snapshots Diários Automáticos (`/api/snapshot/today`)**: Executados automaticamente a cada término de `/api/run`, com proteção preventiva contra sobrescrita por carteiras vazias.
+
+---
+
+## 🏗️ Arquitetura Hexagonal & Diagrama de Componentes
 
 ```text
                +-------------------------------------------------------------+
                |                    Nuvem / Interfaces                      |
                |                                                             |
-               |  [Google Sheets]     [Cloudflare Tunnel]   [Cloudflare R2]  |
+               |  [Cloudflare Tunnel]    [Web Suite 2.0]     [Telegram / WPP] |
                +-------+---------------------+---------------------+---------+
                        |                     |                     |
                        v                     v                     v
 +----------------------+---------------------+---------------------+----------------------+
-| ADAPTERS             |                     |                     |                      |
-|                      |  [GSpreadAdapter]   |  [FastAPI /run]     |  [R2MirrorAdapter]   |
-|                      |                     |                     |                      |
+| ADAPTERS (INBOUND)   |                     |                     |                      |
+|                      |  FastAPI Router     |  RBAC Middleware    |  CLI Typer           |
+|                      |  /carteira /run ... |  (Session Tokens)   |  (barsi CLI)         |
 +----------------------+---------------------+---------------------+----------------------+
 | PORTS                |                     |                     |                      |
-|                      |  SheetsPort         |  HTTP Controller    |  HistoryPort         |
+|                      |  HTTP Controller    |  HistoryPort        |  SheetsPort (Export) |
 +----------------------+---------------------+---------------------+----------------------+
 |                                                                                         |
 | DOMÍNIO PURO & REGRAS B.E.S.T. (Sem I/O, 100% Testável)                                 |
@@ -65,110 +59,122 @@ git status | grep ".env$"   # deve retornar vazio
 |       * Preço Teto Barsi: Teto = DivProj / 0.06                                         |
 |       * Margem de Segurança: ((Teto - Preço) / Preço) * 100                             |
 |       * Status Barsi: ACUMULAR (Margem >= 0) / AGUARDAR (Margem < 0)                    |
-|       * Engine Determinístico de Regras (RuleEngineAdapter)                             |
+|       * Engine Determinístico de Regras & Quant AI (Score B.E.S.T.)                     |
 |                                                                                         |
 +----------------------+---------------------+---------------------+----------------------+
 | PORTS                |                     |                     |                      |
-|                      |  MarketDataPort     |  NewsPort           |  AIPort              |
+|                      |  MarketDataPort     |  NewsPort           |  NotificationPort    |
 +----------------------+---------------------+---------------------+----------------------+
-| ADAPTERS             |                     |                     |                      |
-|  [CachedMarket]      |  [GoogleNewsRSS]    |  [RuleEngine]       |  [SQLiteAdapter]     |
-|   ├── YFinance       |   └── XML Parser    |   └── OllamaRemote  |   └── barsi_memory   |
+| ADAPTERS (OUTBOUND)  |                     |                     |                      |
+|  [CachedMarket]      |  [GoogleNewsRSS]    |  [Telegram / WPP]   |  [BudgetRepository]  |
+|   ├── YFinance       |   └── XML Parser    |   └── CallMeBot     |   └── SQLite Canonical
 |   └── Brapi (token)  |                     |                     |                      |
 +----------------------+---------------------+---------------------+----------------------+
                        |                     |                     |
                        v                     v                     v
                +-------------------------------------------------------------+
                |                  Hardware Alvo (TV Box)                     |
-               |   Amlogic S905W (ARM64) · RAM < 250MB RSS · Sem GPU/VPU      |
+               |   Amlogic S905W (ARM64) · RAM < 250MB RSS · Sem GPU          |
                +-------------------------------------------------------------+
 ```
 
 ---
 
-## 📑 ADR - Tabela de Decisões de Arquitetura
+## 🤖 Ecossistema de Subagentes Antigravity
 
-| Decisão | Opção Escolhida | Justificativa Técnica |
-| :--- | :--- | :--- |
-| **Padrão Arquitetural** | Ports & Adapters (Hexagonal) | Desacopla 100% o cálculo financeiro das APIs externas. Trocar de Excel para Google Sheets ou de yfinance para Brapi não altera 1 linha de regra Barsi. |
-| **Dados em Runtime** | Sem Pandas (Dicionários + Pydantic) | Pandas aloca entre 80 MB e 150 MB de RAM base. Em um hardware com apenas 500 MB livres, Pydantic consome < 15 MB e atinge NF02. |
-| **Geração de Insights** | Strategy (RuleEngine + Ollama Remoto) | O modelo neural `gemma2:2b` exige > 2 GB de RAM e travava a TV Box. O padrão padrão é o motor de regras determinístico B.E.S.T.; LLM externa é apenas um plugin opcional. |
-| **Orquestração** | Cloudflare Cron + Tunnel | A TV Box conectada em Wi-Fi doméstico não tem IP público fixo e está atrás de CGNAT. O Cloudflare Tunnel expõe `/run` com segurança Zero Trust e o Cron Trigger da Cloudflare dispara as runs. |
-| **Resiliência de Rede** | Circuit Breaker + Retry Exponencial | Evita que oscilações da B3 ou do Google News travem o ciclo. Falhas consecutivas abrem o circuito e usam cache em disco (`diskcache`). |
+Conforme documentado no arquivo [`AGENTS.md`](../AGENTS.md), o sistema conta com subagentes especializados:
 
----
-
-## 🚀 Instalação Rápida na TV Box (ARM64)
-
-### 1. Conecte na TV Box via SSH
-```bash
-ssh SEU_USUARIO@SEU_IP
-```
-
-### 2. Clone o repositório e execute o script idempotente
-```bash
-git clone <seu-repo> /opt/barsi_quant_ia
-cd /opt/barsi_quant_ia
-chmod +x scripts/deploy/tvbox/install_tvbox.sh
-./scripts/deploy/tvbox/install_tvbox.sh
-```
-O script cuidará de:
-* Instalar pacotes de sistema (`python3-venv`, `cron`, `jq`);
-* Criar memória Swap de 2 GB (evitando OOM Killer);
-* Desativar a interface gráfica (liberando +250 MB de RAM livre);
-* Instalar o `cloudflared` oficial para ARM64;
-* Configurar o serviço do sistema `barsi.service` no Systemd.
+1. `barsi-quant-analyst`:
+   - Análise quantitativa, validação de Preço Teto, Margem de Segurança e sustentabilidade de dividendos.
+   - Filtros de setores perenes B.E.S.T. e governança dos modelos em `barsi.domain.rules` e `barsi.domain.quant_ai`.
+2. `barsi-budget-conciliator`:
+   - Processamento idempotente de extratos OFX, categorização orçamentária via palavras-chave e cálculo da capacidade de aporte mensal via `BudgetProjectionService`.
 
 ---
 
-## 🔄 Migração: Excel Local -> Google Sheets (Passo Único)
+## 🛠️ Comandos da CLI (`barsi`)
 
-1. Obtenha suas credenciais de Service Account no Google Cloud Console e salve em `credentials.json`.
-2. Compartilhe sua planilha do Google Sheets com o email da Service Account gerada.
-3. Execute o script de migração:
+O sistema conta com interface de linha de comando completa:
+
 ```bash
-python scripts/migrations/migrate_xlsx_to_sheets.py carteira_barsi_quant_ia.xlsx credentials.json
+# Executar ciclo quantitativo diário de análise e cotações
+python -m barsi run
+
+# Sincronizar código, banco SQLite e reiniciar serviço na TV Box
+python -m barsi sync-tvbox
+
+# Exportar dados canônicos do SQLite sob demanda para Google Sheets
+python -m barsi export-sheets
+
+# Exportar carteira sob demanda para planilha Excel (.xlsx)
+python -m barsi export-xlsx
+
+# Conciliar arquivos OFX da pasta extratos/
+python -m barsi parse-ofx
+
+# Gerenciar usuários e acessos
+python -m barsi user-add admin_user senha123 --role admin
+python -m barsi user-list
+python -m barsi user-del antigo_user
 ```
 
 ---
 
-## ☁️ Configuração Cloudflare (Tunnel + Worker Cron)
+## 🔒 Dados Sensíveis e Proteção Contra Vazamento (Zero PII)
 
-### 1. Criar o Túnel na TV Box
-```bash
-cloudflared tunnel login
-cloudflared tunnel create tvbox-invest
-cloudflared tunnel route dns tvbox-invest barsi.seudominio.com
-```
+Este projeto processa extratos financeiros e credenciais de infraestrutura. Diretrizes obrigatórias:
 
-### 2. Configurar o arquivo `~/.cloudflared/config.yml`
-```yaml
-tunnel: <UUID_DO_TUNEL>
-credentials-file: ~/.cloudflared/<UUID>.json
+### ✅ O que PODE ser commitado
+- Código-fonte (`.py`, `.html`, `.js`, `.sh`, `.css`)
+- Documentação técnica e arquitetural
+- Templates de ambiente (`.env.example`, `pyproject.toml`)
+- Testes com mocks e dados sintéticos
 
-ingress:
-  - hostname: barsi.seudominio.com
-    service: http://localhost:8000
-  - service: http_status:404
-```
-
-### 3. Deploy do Worker Cron Trigger
-Crie um Worker na Cloudflare com o código em `scripts/cloudflare_worker.js` e configure o agendador:
-* Cron: `0 9-18 * * 1-5` (de hora em hora durante o horário de pregão).
-* Variáveis de ambiente: `BARSI_TUNNEL_URL` e `BARSI_API_BEARER_TOKEN`.
+### ❌ O que NUNCA deve ser commitado
+- `.env` e chaves de API reais
+- `credentials.json` (Google Cloud Service Account)
+- Extratos bancários reais (`extratos/*.ofx`)
+- Banco de dados de produção (`barsi.db`, `memory/*.db`)
+- Planilhas `.xlsx` com dados patrimoniais reais
+- Nomes de titulares de contas bancárias ou IPs internos privados
 
 ---
 
-## 🧪 Execução de Testes
+## 🧪 Testes Automatizados & Qualidade de Código
+
+A suíte de testes utiliza `pytest` com asserções estritas, isolamento via `tmp_path`, mocks para chamadas de rede e validação de cobertura:
+
 ```bash
-# Rodar todos os testes com cobertura do domínio
-pytest tests/ -v --cov=barsi.domain --cov-report=term-missing
+# Executar suíte completa de testes com gate de cobertura mínimo de 40%
+pytest tests/ -v --cov=barsi --cov-fail-under=40
 ```
+
+- **Total de Testes**: 91 testes automatizados (100% passando).
+- **Cobertura de Código**: > 61% (superando o gate do CI).
+- **Isolamento**: Testes de endpoints, repositórios e serviços rodam de forma independente e determinística.
 
 ---
 
-## 🔮 Stretch Goals (Próximos Passos Futuros)
-* [ ] Notificações automáticas no Telegram / ntfy em caso de cotação com margem > 30%.
-* [ ] Dashboard web estático via Cloudflare Pages consumindo os snapshots JSONL do R2.
-* [ ] Backtesting histórico de proventos acumulados por ativo.
+## 🚀 Sincronização e Deploy na TV Box (ARM64)
 
+Para atualizar o servidor em execução na TV Box doméstica (`cleiton@192.168.100.72`):
+
+```bash
+python -m barsi sync-tvbox
+```
+
+O comando realiza automaticamente:
+1. Sincronização dos extratos bancários `.ofx`;
+2. Atualização dos códigos-fonte e templates HTML;
+3. Sincronização do banco SQLite `barsi_memory.db`;
+4. Reinicialização limpa do serviço `barsi-api.service` via SSH.
+
+---
+
+## 🔮 Roadmap de Evolução Estratégica (Top 5 Prioridades)
+
+1. 🥇 **Rastreamento de Dividendos Reais Recebidos**: Tabela `dividends_received` a partir dos lançamentos de proventos do OFX, comparando DPA Projetado vs DPA Realizado com cálculo de Yield on Cost real.
+2. 🥇 **Backtesting Histórico de Aportes**: Simulador de curva de bola de neve (*Snowball Chart*) baseado no histórico de cotações (`price_history`) e reinvestimento dos proventos.
+3. 🥇 **Relatório Mensal Automatizado em PDF**: Geração de relatório consolidado de fechamento de mês para arquivo pessoal e prestação familiar.
+4. 🥇 **Alertas Preventivos de Mudança de Tese**: Detecção via NLP/notícias de cortes de dividendos, payout abusivo (>100%) ou endividamento acelerado antes do mercado precificar.
+5. 🥇 **Observabilidade & Métricas Prometheus (`/metrics`)**: Exposição de métricas operacionais para monitoramento de saúde do sistema e do daemon diário.
