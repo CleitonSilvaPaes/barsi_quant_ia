@@ -168,64 +168,70 @@ def sync_tvbox(
         typer.echo(f"[!] Falha na conexão SSH com a TV Box: {exc}")
         return
 
-    remote_home = settings.tvbox_home
-    # Garante diretórios essenciais na TV Box com permissão para o usuário
-    init_cmd = (
-        f"sudo mkdir -p '{remote_home}/extratos' '{remote_home}/src/barsi' '{remote_home}/memory' '{remote_home}/cache' "
-        f"&& sudo chown -R {target_user}:{target_user} '{remote_home}' "
-        f"&& sudo chmod -R 777 '{remote_home}/memory' '{remote_home}/cache' '{remote_home}/extratos'"
-    )
-    stdin, stdout, stderr = ssh.exec_command(init_cmd, get_pty=True)
-    stdin.write(f"{target_pass}\n")
-    stdin.flush()
-    stdout.channel.recv_exit_status()
+    target_homes = [settings.tvbox_home]
+    alt_home = f"/home/{target_user}/barsi_quant_ia"
+    if alt_home not in target_homes:
+        target_homes.append(alt_home)
 
-    # Prepara lista de arquivos do código fonte
     root_src = "barsi_quant_ia/src/barsi" if os.path.exists("barsi_quant_ia/src/barsi") else "src/barsi"
-    files_to_sync = []
-    remote_dirs = set()
-    for root, _, files in os.walk(root_src):
-        for file in files:
-            if file.endswith((".py", ".html", ".json", ".sql")) and "__pycache__" not in root:
-                local_p = os.path.join(root, file)
-                rel_p = os.path.relpath(local_p, root_src).replace("\\", "/")
-                remote_p = f"{remote_home}/src/barsi/{rel_p}"
-                files_to_sync.append((local_p, remote_p))
-                remote_dirs.add(os.path.dirname(remote_p))
+    extratos_list = glob.glob("extratos/*.ofx") or glob.glob("barsi_quant_ia/extratos/*.ofx")
+    base_dir = "barsi_quant_ia" if os.path.exists("barsi_quant_ia") else "."
+    cred_p = "barsi_quant_ia/credentials.json" if os.path.exists("barsi_quant_ia/credentials.json") else "credentials.json"
+    env_p = ".env" if os.path.exists(".env") else "barsi_quant_ia/.env"
 
-    # Garante que todas as subpastas remotas existam antes do SCP
-    for rdir in sorted(remote_dirs):
-        _, out, _ = ssh.exec_command(f"mkdir -p '{rdir}'")
-        out.channel.recv_exit_status()
+    for remote_home in target_homes:
+        # Garante diretórios essenciais na TV Box com permissão para o usuário
+        init_cmd = (
+            f"sudo mkdir -p '{remote_home}/extratos' '{remote_home}/src/barsi' '{remote_home}/memory' '{remote_home}/cache' "
+            f"&& sudo chown -R {target_user}:{target_user} '{remote_home}' "
+            f"&& sudo chmod -R 777 '{remote_home}/memory' '{remote_home}/cache' '{remote_home}/extratos'"
+        )
+        stdin, stdout, stderr = ssh.exec_command(init_cmd, get_pty=True)
+        stdin.write(f"{target_pass}\n")
+        stdin.flush()
+        stdout.channel.recv_exit_status()
 
-    with SCPClient(ssh.get_transport()) as scp:
-        # 1. Extratos
-        typer.echo("    - Sincronizando extratos bancários (.ofx)...")
-        extratos_list = glob.glob("extratos/*.ofx") or glob.glob("barsi_quant_ia/extratos/*.ofx")
-        for f in extratos_list:
-            scp.put(f, f"{remote_home}/extratos/{os.path.basename(f)}")
+        # Prepara lista de arquivos do código fonte
+        files_to_sync = []
+        remote_dirs = set()
+        for root, _, files in os.walk(root_src):
+            for file in files:
+                if file.endswith((".py", ".html", ".json", ".sql")) and "__pycache__" not in root:
+                    local_p = os.path.join(root, file)
+                    rel_p = os.path.relpath(local_p, root_src).replace("\\", "/")
+                    remote_p = f"{remote_home}/src/barsi/{rel_p}"
+                    files_to_sync.append((local_p, remote_p))
+                    remote_dirs.add(os.path.dirname(remote_p))
 
-        # 2. Código fonte principal
-        typer.echo("    - Sincronizando código fonte e adaptadores...")
-        for local_p, remote_p in files_to_sync:
-            scp.put(local_p, remote_p)
+        # Garante que todas as subpastas remotas existam antes do SCP
+        for rdir in sorted(remote_dirs):
+            _, out, _ = ssh.exec_command(f"mkdir -p '{rdir}'")
+            out.channel.recv_exit_status()
 
-        # 3. Metadados e Docker (para suporte a docker compose up na TV Box)
-        base_dir = "barsi_quant_ia" if os.path.exists("barsi_quant_ia") else "."
-        for meta_file in ["pyproject.toml", "README.md", "Dockerfile", "docker-compose.yml"]:
-            meta_path = os.path.join(base_dir, meta_file)
-            if os.path.exists(meta_path):
-                scp.put(meta_path, f"{remote_home}/{meta_file}")
+        with SCPClient(ssh.get_transport()) as scp:
+            # 1. Extratos
+            typer.echo(f"    - Sincronizando extratos bancários (.ofx) para {remote_home}...")
+            for f in extratos_list:
+                scp.put(f, f"{remote_home}/extratos/{os.path.basename(f)}")
 
-        # 4. Credentials se existir
-        cred_p = "barsi_quant_ia/credentials.json" if os.path.exists("barsi_quant_ia/credentials.json") else "credentials.json"
-        if os.path.exists(cred_p):
-            scp.put(cred_p, f"{remote_home}/credentials.json")
+            # 2. Código fonte principal (inclui templates HTML)
+            typer.echo(f"    - Sincronizando código fonte e templates HTML para {remote_home}...")
+            for local_p, remote_p in files_to_sync:
+                scp.put(local_p, remote_p)
 
-        # 5. .env local para TV Box
-        env_p = ".env" if os.path.exists(".env") else "barsi_quant_ia/.env"
-        if os.path.exists(env_p):
-            scp.put(env_p, f"{remote_home}/.env")
+            # 3. Metadados e Docker
+            for meta_file in ["pyproject.toml", "README.md", "Dockerfile", "docker-compose.yml"]:
+                meta_path = os.path.join(base_dir, meta_file)
+                if os.path.exists(meta_path):
+                    scp.put(meta_path, f"{remote_home}/{meta_file}")
+
+            # 4. Credentials se existir
+            if os.path.exists(cred_p):
+                scp.put(cred_p, f"{remote_home}/credentials.json")
+
+            # 5. .env local para TV Box
+            if os.path.exists(env_p):
+                scp.put(env_p, f"{remote_home}/.env")
 
     typer.echo("    - Reiniciando serviço barsi-api na TV Box...")
     stdin, stdout, stderr = ssh.exec_command("sudo systemctl restart barsi-api.service", get_pty=True)
