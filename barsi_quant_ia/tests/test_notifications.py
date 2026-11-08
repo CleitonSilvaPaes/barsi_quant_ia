@@ -157,12 +157,14 @@ def test_adapter_factory_notification_fallback():
         telegram_alerts_enabled=True,
         telegram_bot_token="tok_test",
         telegram_chat_id="chat_test",
+        whatsapp_alerts_enabled=False,
     )
     adapter_active = AdapterFactory.create_notification_adapter(cfg_active)
     assert isinstance(adapter_active, TelegramNotifier)
 
     # WhatsApp CallMeBot
     cfg_wa = Settings(
+        telegram_alerts_enabled=False,
         whatsapp_alerts_enabled=True,
         whatsapp_provider="callmebot",
         whatsapp_phone="5511999999999",
