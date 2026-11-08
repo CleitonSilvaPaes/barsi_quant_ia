@@ -211,6 +211,8 @@ class GSpreadAdapter(SheetsPort):
                 updates = []
                 for p in positions:
                     row = p.row_index
+                    # Col D: Custódia Atual (Qtd Antes)
+                    updates.append({"range": f"D{row}", "values": [[p.qtd_antes]]})
                     # Col E: Aporte Programado (Qtd)
                     updates.append({"range": f"E{row}", "values": [[p.qtd_aporte]]})
                     # Col F: Qtd Total Atual

@@ -1,71 +1,283 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Barsi Quant IA — Painel de Controle Previdenciário</title>
   <style>
-    :root { 
-      --bg: #0f172a; 
-      --card: #1e293b; 
-      --border: #334155; 
-      --text: #f8fafc; 
-      --text-muted: #94a3b8; 
-      --accent: #38bdf8; 
-      --green: #10b981; 
-      --red: #ef4444; 
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #10b981;
+      --red: #ef4444;
       --amber: #f59e0b;
       --indigo: #6366f1;
     }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 1.5rem; }
-    .container { max-width: 1400px; margin: 0 auto; }
-    .topbar { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem; }
-    .title { font-size: 1.4rem; font-weight: 700; color: var(--accent); display: flex; align-items: center; gap: 0.5rem; }
-    .badge { background: var(--green); color: #042f2e; padding: 0.25rem 0.6rem; border-radius: 9999px; font-weight: 700; font-size: 0.8rem; }
-    
-    .grid-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
-    .stat-card { background: var(--card); border: 1px solid var(--border); border-radius: 0.75rem; padding: 1.1rem; }
-    .stat-card h4 { margin: 0 0 0.3rem 0; font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
-    .stat-card p { margin: 0; font-size: 1.35rem; font-weight: 700; }
-    .stat-card .sub { font-size: 0.8rem; color: var(--text-muted); font-weight: normal; margin-top: 0.2rem; }
 
-    .actions-bar { display: flex; gap: 0.75rem; margin-bottom: 1.5rem; flex-wrap: wrap; align-items: center; }
-    button.btn { background: #2563eb; color: #fff; border: none; padding: 0.65rem 1.1rem; border-radius: 0.5rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 0.4rem; font-size: 0.88rem; transition: background 0.15s; }
-    button.btn:hover { background: #1d4ed8; }
-    button.btn-green { background: var(--green); color: #042f2e; }
-    button.btn-green:hover { background: #059669; }
-    button.btn-sec { background: #334155; color: #e2e8f0; }
-    button.btn-sec:hover { background: #475569; }
-    button.btn-amber { background: var(--amber); color: #451a03; }
-    button.btn-amber:hover { background: #d97706; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 1.5rem;
+    }
 
-    .card { background: var(--card); border: 1px solid var(--border); border-radius: 0.75rem; padding: 1.25rem; margin-bottom: 1.5rem; }
-    table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.88rem; }
-    th, td { padding: 0.65rem 0.6rem; border-bottom: 1px solid var(--border); }
-    th { color: var(--text-muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; }
-    tr:hover td { background: rgba(255,255,255,0.02); }
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
 
-    .badge-acumular { background: rgba(16, 185, 129, 0.2); color: #34d399; padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: 700; font-size: 0.75rem; }
-    .badge-aguardar { background: rgba(239, 68, 68, 0.2); color: #f87171; padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: 700; font-size: 0.75rem; }
-    .badge-ordem { background: rgba(56, 189, 248, 0.2); color: #38bdf8; padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: 600; font-size: 0.75rem; }
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 1rem;
+      margin-bottom: 1.5rem;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
 
-    input.tbl-input { background: #0f172a; border: 1px solid #475569; color: #fff; padding: 0.35rem 0.45rem; border-radius: 4px; box-sizing: border-box; font-size: 0.85rem; }
-    input.tbl-input:focus { border-color: var(--accent); outline: none; }
-    input.input-qtd { width: 65px; text-align: right; }
-    input.input-dpa { width: 75px; text-align: right; }
-    input.input-fb { width: 100%; }
+    .title {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
 
-    #log-output { background: #090d16; border: 1px solid var(--border); border-radius: 0.5rem; padding: 0.85rem 1rem; font-family: monospace; font-size: 0.82rem; color: #38bdf8; max-height: 180px; overflow-y: auto; display: none; margin-bottom: 1.5rem; white-space: pre-wrap; }
-    .pill-sector { font-size: 0.72rem; color: var(--text-muted); background: rgba(255,255,255,0.05); padding: 0.15rem 0.4rem; border-radius: 3px; display: inline-block; margin-top: 2px; }
+    .badge {
+      background: var(--green);
+      color: #042f2e;
+      padding: 0.25rem 0.6rem;
+      border-radius: 9999px;
+      font-weight: 700;
+      font-size: 0.8rem;
+    }
+
+    .grid-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .stat-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      padding: 1.1rem;
+    }
+
+    .stat-card h4 {
+      margin: 0 0 0.3rem 0;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .stat-card p {
+      margin: 0;
+      font-size: 1.35rem;
+      font-weight: 700;
+    }
+
+    .stat-card .sub {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      font-weight: normal;
+      margin-top: 0.2rem;
+    }
+
+    .actions-bar {
+      display: flex;
+      gap: 0.75rem;
+      margin-bottom: 1.5rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    button.btn {
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      padding: 0.65rem 1.1rem;
+      border-radius: 0.5rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.88rem;
+      transition: background 0.15s;
+    }
+
+    button.btn:hover {
+      background: #1d4ed8;
+    }
+
+    button.btn-green {
+      background: var(--green);
+      color: #042f2e;
+    }
+
+    button.btn-green:hover {
+      background: #059669;
+    }
+
+    button.btn-sec {
+      background: #334155;
+      color: #e2e8f0;
+    }
+
+    button.btn-sec:hover {
+      background: #475569;
+    }
+
+    button.btn-amber {
+      background: var(--amber);
+      color: #451a03;
+    }
+
+    button.btn-amber:hover {
+      background: #d97706;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      padding: 1.25rem;
+      margin-bottom: 1.5rem;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 0.88rem;
+    }
+
+    th,
+    td {
+      padding: 0.65rem 0.6rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    th {
+      color: var(--text-muted);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    tr:hover td {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .badge-acumular {
+      background: rgba(16, 185, 129, 0.2);
+      color: #34d399;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      font-weight: 700;
+      font-size: 0.75rem;
+    }
+
+    .badge-aguardar {
+      background: rgba(239, 68, 68, 0.2);
+      color: #f87171;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      font-weight: 700;
+      font-size: 0.75rem;
+    }
+
+    .badge-ordem {
+      background: rgba(56, 189, 248, 0.2);
+      color: #38bdf8;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      font-weight: 600;
+      font-size: 0.75rem;
+    }
+
+    input.tbl-input {
+      background: #0f172a;
+      border: 1px solid #475569;
+      color: #fff;
+      padding: 0.35rem 0.45rem;
+      border-radius: 4px;
+      box-sizing: border-box;
+      font-size: 0.85rem;
+    }
+
+    input.tbl-input:focus {
+      border-color: var(--accent);
+      outline: none;
+    }
+
+    input.input-qtd {
+      width: 65px;
+      text-align: right;
+    }
+
+    input.input-aporte {
+      width: 65px;
+      text-align: right;
+    }
+
+    input.input-dpa {
+      width: 75px;
+      text-align: right;
+    }
+
+    input.input-fb {
+      width: 100%;
+    }
+
+    #log-output {
+      background: #090d16;
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      padding: 0.85rem 1rem;
+      font-family: monospace;
+      font-size: 0.82rem;
+      color: #38bdf8;
+      max-height: 180px;
+      overflow-y: auto;
+      display: none;
+      margin-bottom: 1.5rem;
+      white-space: pre-wrap;
+    }
+
+    .pill-sector {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      background: rgba(255, 255, 255, 0.05);
+      padding: 0.15rem 0.4rem;
+      border-radius: 3px;
+      display: inline-block;
+      margin-top: 2px;
+    }
   </style>
 </head>
+
 <body>
   <div class="container">
     <div class="topbar">
       <div class="title">📈 Barsi Quant IA — Carteira B.E.S.T. & Aportes</div>
       <div style="display: flex; gap: 1rem; align-items: center;">
         <span class="badge">● ONLINE ({{AI_PROVIDER}})</span>
-        <a href="/logout" style="color: var(--text-muted); font-size: 0.85rem; text-decoration: none;">Sair ({{USER_NAME}})</a>
+        <a href="/logout" style="color: var(--text-muted); font-size: 0.85rem; text-decoration: none;">Sair
+          ({{USER_NAME}})</a>
       </div>
     </div>
 
@@ -98,11 +310,13 @@
       <button class="btn btn-green" onclick="salvarAlteracoes()">💾 Salvar Edições (Sheets & Excel)</button>
       <button class="btn" onclick="executarSync()">🚀 Sincronizar Cotações B3 & IA</button>
       <button class="btn btn-sec" onclick="executarExtratos()">📑 Conciliar Extratos (OFX)</button>
-      
+
       <!-- Upload direto de extratos pelo navegador -->
-      <input type="file" id="file-extrato" style="display:none;" accept=".ofx,.zip" onchange="uploadExtrato(this.files[0])" />
-      <button class="btn btn-sec" onclick="document.getElementById('file-extrato').click()">📤 Enviar Extrato (OFX / ZIP)</button>
-      
+      <input type="file" id="file-extrato" style="display:none;" accept=".ofx,.zip"
+        onchange="uploadExtrato(this.files[0])" />
+      <button class="btn btn-sec" onclick="document.getElementById('file-extrato').click()">📤 Enviar Extrato (OFX /
+        ZIP)</button>
+
       <!-- Sincronização direta PC -> TV Box -->
       <button class="btn btn-amber" onclick="sincronizarComTVBox()">🔄 Sincronizar com TV Box</button>
       <button class="btn btn-sec" onclick="carregarTudo()">🔄 Recarregar</button>
@@ -112,29 +326,33 @@
 
     <!-- Tabela 1: Carteira B.E.S.T. com Custódia Atual e Aporte Programado -->
     <div class="card">
-      <h3 style="margin-top: 0; color: var(--accent); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+      <h3
+        style="margin-top: 0; color: var(--accent); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
         <span>📊 Screener B.E.S.T. & Custódia Consolidada</span>
-        <span style="font-size: 0.8rem; font-weight: normal; color: var(--text-muted);">Edite DPA Projetado, Aporte Programado e Feedbacks diretamente na tabela</span>
+        <span style="font-size: 0.8rem; font-weight: normal; color: var(--text-muted);">Edite Qtd Atual, Aporte Programado, DPA e Feedbacks diretamente na tabela</span>
       </h3>
       <div style="overflow-x: auto;">
         <table id="tbl-carteira">
           <thead>
             <tr>
               <th>Ativo / Setor</th>
-              <th style="text-align: right;">Qtd Atual</th>
-              <th style="text-align: right; min-width: 90px;">Aporte (Qtd)</th>
+              <th style="text-align: right; min-width: 85px;">Qtd Atual</th>
+              <th style="text-align: right; min-width: 85px;">Aporte (Qtd)</th>
+              <th style="text-align: right; min-width: 75px;">Qtd Total</th>
               <th style="text-align: right;">Cotação</th>
               <th style="text-align: right;">Preço Teto</th>
               <th style="text-align: right;">Margem</th>
-              <th style="text-align: right; min-width: 95px;">DPA Proj.</th>
-              <th style="text-align: right;">Total Posição</th>
+              <th style="text-align: right; min-width: 85px;">DPA Proj.</th>
+              <th style="text-align: right;">Patrimônio Atual</th>
               <th style="text-align: right;">Total Aporte</th>
               <th style="text-align: center;">Decisão</th>
-              <th style="min-width: 250px;">Feedback do Usuário (Ensina IA)</th>
+              <th style="min-width: 220px;">Feedback do Usuário (Ensina IA)</th>
             </tr>
           </thead>
           <tbody id="tbl-body">
-            <tr><td colspan="11" style="text-align: center; color: var(--text-muted);">Carregando ativos do Google Sheets / Excel...</td></tr>
+            <tr>
+              <td colspan="12" style="text-align: center; color: var(--text-muted);">Carregando ativos do Google Sheets / Excel...</td>
+            </tr>
           </tbody>
         </table>
       </div>
@@ -144,7 +362,8 @@
     <div class="card">
       <h3 style="margin-top: 0; color: #38bdf8; display: flex; justify-content: space-between; align-items: center;">
         <span>🎯 Simulador de Aportes Fracionários (Home Broker B3)</span>
-        <span style="font-size: 0.8rem; font-weight: normal; color: var(--text-muted);">Ordens calculadas com base no saldo orçamentário e margem de segurança</span>
+        <span style="font-size: 0.8rem; font-weight: normal; color: var(--text-muted);">Ordens calculadas com base no
+          saldo orçamentário e margem de segurança</span>
       </h3>
       <div style="overflow-x: auto;">
         <table id="tbl-simulador">
@@ -166,7 +385,10 @@
             </tr>
           </thead>
           <tbody id="tbl-simulador-body">
-            <tr><td colspan="13" style="text-align: center; color: var(--text-muted);">Carregando ordens do simulador...</td></tr>
+            <tr>
+              <td colspan="13" style="text-align: center; color: var(--text-muted);">Carregando ordens do simulador...
+              </td>
+            </tr>
           </tbody>
         </table>
       </div>
@@ -183,10 +405,12 @@
         const data = await res.json();
         posicoesCache = data;
         tbody.innerHTML = "";
-        
-        let somaPatrimonio = 0;
+
+        let somaPatrimonioAtual = 0;
+        let somaPatrimonioTotal = 0;
         let somaAporte = 0;
-        let somaCotas = 0;
+        let somaCotasAtuais = 0;
+        let somaCotasTotal = 0;
         let somaQtdAporte = 0;
         let abaixoDoTeto = 0;
 
@@ -195,30 +419,44 @@
           const margemColor = p.margem >= 0 ? "var(--green)" : "var(--red)";
           const readOnlyAttr = p.is_readonly ? "disabled" : "";
 
-          somaPatrimonio += (p.valor_total || (p.qtd_total * p.preco));
-          somaAporte += (p.total_aporte || (p.qtd_aporte * p.preco));
-          somaCotas += (p.qtd_total || 0);
-          somaQtdAporte += (p.qtd_aporte || 0);
+          const qtdAtual = (p.qtd_antes !== undefined && p.qtd_antes !== null) ? p.qtd_antes : (p.qtd_total - (p.qtd_aporte || 0));
+          const qtdAporte = p.qtd_aporte || 0;
+          const qtdTotal = qtdAtual + qtdAporte;
+          const preco = p.preco || 0;
+
+          const valAtual = qtdAtual * preco;
+          const valAporte = qtdAporte * preco;
+          const valTotal = qtdTotal * preco;
+
+          somaPatrimonioAtual += valAtual;
+          somaPatrimonioTotal += valTotal;
+          somaAporte += valAporte;
+          somaCotasAtuais += qtdAtual;
+          somaCotasTotal += qtdTotal;
+          somaQtdAporte += qtdAporte;
           if (p.status === "ACUMULAR") abaixoDoTeto++;
 
           tbody.innerHTML += `
-            <tr data-ticker="${p.ticker}" data-row="${p.row_index}">
+            <tr data-ticker="${p.ticker}" data-row="${p.row_index}" data-preco="${preco}">
               <td>
                 <strong>${p.ticker}</strong>
                 <div><span class="pill-sector">${p.setor || 'B.E.S.T.'}</span> <span style="font-size: 0.75rem; color: var(--text-muted);">${p.empresa || ''}</span></div>
               </td>
-              <td style="text-align: right; font-weight: 600;">${p.qtd_total || 0}</td>
               <td style="text-align: right;">
-                <input type="number" class="tbl-input input-qtd" value="${p.qtd_aporte || 0}" min="0" ${readOnlyAttr} />
+                <input type="number" class="tbl-input input-qtd" value="${qtdAtual}" min="0" ${readOnlyAttr} oninput="recalcularTabela()" title="Edite sua custódia atual de ${p.ticker}" />
               </td>
-              <td style="text-align: right;">R$ ${p.preco.toFixed(2)}</td>
+              <td style="text-align: right;">
+                <input type="number" class="tbl-input input-aporte" value="${qtdAporte}" min="0" ${readOnlyAttr} oninput="recalcularTabela()" title="Edite o aporte programado para ${p.ticker}" />
+              </td>
+              <td style="text-align: right; font-weight: 600; color: #94a3b8;" class="cell-qtd-total">${qtdTotal}</td>
+              <td style="text-align: right;">R$ ${preco.toFixed(2)}</td>
               <td style="text-align: right;">R$ ${p.teto.toFixed(2)}</td>
               <td style="text-align: right; color: ${margemColor}; font-weight: 700;">${p.margem.toFixed(1)}%</td>
               <td style="text-align: right;">
                 <input type="number" step="0.01" class="tbl-input input-dpa" value="${p.div_proj.toFixed(2)}" ${readOnlyAttr} />
               </td>
-              <td style="text-align: right; font-weight: 600;">R$ ${(p.valor_total || (p.qtd_total * p.preco)).toFixed(2)}</td>
-              <td style="text-align: right; color: var(--green); font-weight: 600;">R$ ${(p.total_aporte || (p.qtd_aporte * p.preco)).toFixed(2)}</td>
+              <td style="text-align: right; font-weight: 600;" class="cell-patrimonio-atual">R$ ${valAtual.toFixed(2)}</td>
+              <td style="text-align: right; color: var(--green); font-weight: 600;" class="cell-total-aporte">R$ ${valAporte.toFixed(2)}</td>
               <td style="text-align: center;"><span class="${badgeClass}">${p.status}</span></td>
               <td><input type="text" class="tbl-input input-fb" value="${p.feedback || ''}" placeholder="Ex: Priorizar compras em margem > 15%" ${readOnlyAttr} /></td>
             </tr>
@@ -226,15 +464,61 @@
         });
 
         // Atualiza cards
-        document.getElementById("card-patrimonio").innerText = `R$ ${somaPatrimonio.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-        document.getElementById("card-cotas").innerText = `${somaCotas} cotas em carteira`;
-        document.getElementById("card-aporte").innerText = `R$ ${somaAporte.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+        document.getElementById("card-patrimonio").innerText = `R$ ${somaPatrimonioAtual.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        document.getElementById("card-cotas").innerText = `${somaCotasAtuais} cotas em carteira (R$ ${somaPatrimonioTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} projetado pós-aporte)`;
+        document.getElementById("card-aporte").innerText = `R$ ${somaAporte.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
         document.getElementById("card-qtd-aporte").innerText = `${somaQtdAporte} novas ações programadas`;
         document.getElementById("card-radar").innerText = `${abaixoDoTeto} de ${data.length}`;
 
       } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="11" style="color: var(--red);">Erro ao carregar carteira: ${err}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="12" style="color: var(--red);">Erro ao carregar carteira: ${err}</td></tr>`;
       }
+    }
+
+    function recalcularTabela() {
+      const rows = document.querySelectorAll("#tbl-body tr");
+      let somaPatrimonioAtual = 0;
+      let somaPatrimonioTotal = 0;
+      let somaAporte = 0;
+      let somaCotasAtuais = 0;
+      let somaCotasTotal = 0;
+      let somaQtdAporte = 0;
+
+      rows.forEach(r => {
+        const preco = parseFloat(r.getAttribute("data-preco")) || 0;
+        const inputAtual = r.querySelector(".input-qtd");
+        const inputAporte = r.querySelector(".input-aporte");
+        if (!inputAtual || !inputAporte) return;
+
+        const qtdAtual = parseInt(inputAtual.value) || 0;
+        const qtdAporte = parseInt(inputAporte.value) || 0;
+        const qtdTotal = qtdAtual + qtdAporte;
+
+        const valAtual = qtdAtual * preco;
+        const valAporte = qtdAporte * preco;
+        const valTotal = qtdTotal * preco;
+
+        somaPatrimonioAtual += valAtual;
+        somaPatrimonioTotal += valTotal;
+        somaAporte += valAporte;
+        somaCotasAtuais += qtdAtual;
+        somaCotasTotal += qtdTotal;
+        somaQtdAporte += qtdAporte;
+
+        const cellTot = r.querySelector(".cell-qtd-total");
+        if (cellTot) cellTot.innerText = qtdTotal;
+
+        const cellPat = r.querySelector(".cell-patrimonio-atual");
+        if (cellPat) cellPat.innerText = `R$ ${valAtual.toFixed(2)}`;
+
+        const cellAp = r.querySelector(".cell-total-aporte");
+        if (cellAp) cellAp.innerText = `R$ ${valAporte.toFixed(2)}`;
+      });
+
+      document.getElementById("card-patrimonio").innerText = `R$ ${somaPatrimonioAtual.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      document.getElementById("card-cotas").innerText = `${somaCotasAtuais} cotas em carteira (R$ ${somaPatrimonioTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} projetado pós-aporte)`;
+      document.getElementById("card-aporte").innerText = `R$ ${somaAporte.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      document.getElementById("card-qtd-aporte").innerText = `${somaQtdAporte} novas ações programadas`;
     }
 
     async function carregarSimulador() {
@@ -283,9 +567,10 @@
         const row_index = parseInt(r.getAttribute("data-row"));
         if (!ticker || isNaN(row_index)) return;
         const div_proj = parseFloat(r.querySelector(".input-dpa").value) || 0.0;
-        const qtd_aporte = parseInt(r.querySelector(".input-qtd").value) || 0;
+        const qtd_antes = parseInt(r.querySelector(".input-qtd").value) || 0;
+        const qtd_aporte = parseInt(r.querySelector(".input-aporte").value) || 0;
         const feedback = r.querySelector(".input-fb").value || "";
-        items.push({ ticker, row_index, div_proj, qtd_aporte, feedback });
+        items.push({ ticker, row_index, div_proj, qtd_antes, qtd_aporte, feedback });
       });
 
       log("Enviando alterações para Google Sheets e Excel local...");
@@ -365,4 +650,5 @@
     window.addEventListener("DOMContentLoaded", carregarTudo);
   </script>
 </body>
+
 </html>

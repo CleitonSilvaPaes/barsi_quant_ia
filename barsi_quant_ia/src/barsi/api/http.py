@@ -40,6 +40,7 @@ class EditItem(BaseModel):
     ticker: str
     row_index: int
     div_proj: float
+    qtd_antes: Optional[int] = None
     qtd_aporte: Optional[int] = None
     feedback: str = ""
 
@@ -196,9 +197,13 @@ async def save_carteira_edits(req: SaveEditsRequest, request: Request):
         if item.ticker in pos_map:
             p = pos_map[item.ticker]
             p.div_proj = item.div_proj
+            if item.qtd_antes is not None:
+                p.qtd_antes = max(0, item.qtd_antes)
             if item.qtd_aporte is not None:
-                p.qtd_aporte = item.qtd_aporte
-                p.qtd_total = p.qtd_antes + item.qtd_aporte
+                p.qtd_aporte = max(0, item.qtd_aporte)
+            p.qtd_total = p.qtd_antes + p.qtd_aporte
+            p.valor_total = round(p.qtd_total * p.preco_atual, 2)
+            p.total_aporte = round(p.qtd_aporte * p.preco_atual, 2)
             p.feedback_usuario = item.feedback
             atualizar_posicao_quant(p, p.preco_atual, p.div_proj)
 

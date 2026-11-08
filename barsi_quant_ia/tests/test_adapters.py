@@ -119,3 +119,51 @@ def test_rss_adapter_with_respx():
             assert news.source == "google_rss"
 
     asyncio.run(_test())
+
+
+def test_save_carteira_edits_allows_editing_qtd_atual():
+    """Valida que o usuário pode editar Qtd Atual (qtd_antes) e Aporte (qtd_aporte), recalculando total e valores."""
+    from barsi.api.http import EditItem, SaveEditsRequest
+    from barsi.domain.rules import atualizar_posicao_quant
+
+    p = Position(
+        ticker="BBAS3",
+        row_index=10,
+        qtd_antes=55,
+        qtd_aporte=0,
+        qtd_total=55,
+        preco_atual=17.13,
+        div_proj=2.30,
+    )
+    positions = [p]
+    pos_map = {p.ticker: p for p in positions}
+
+    # Usuário ajusta BBAS3 de 55 para 37 em carteira atual, com aporte de 18
+    item = EditItem(
+        ticker="BBAS3",
+        row_index=10,
+        div_proj=2.30,
+        qtd_antes=37,
+        qtd_aporte=18,
+        feedback="Priorizar compras com margem > 15%",
+    )
+
+    p_target = pos_map[item.ticker]
+    p_target.div_proj = item.div_proj
+    if item.qtd_antes is not None:
+        p_target.qtd_antes = max(0, item.qtd_antes)
+    if item.qtd_aporte is not None:
+        p_target.qtd_aporte = max(0, item.qtd_aporte)
+    p_target.qtd_total = p_target.qtd_antes + p_target.qtd_aporte
+    p_target.valor_total = round(p_target.qtd_total * p_target.preco_atual, 2)
+    p_target.total_aporte = round(p_target.qtd_aporte * p_target.preco_atual, 2)
+    p_target.feedback_usuario = item.feedback
+    atualizar_posicao_quant(p_target, p_target.preco_atual, p_target.div_proj)
+
+    assert p_target.qtd_antes == 37
+    assert p_target.qtd_aporte == 18
+    assert p_target.qtd_total == 55
+    assert p_target.valor_total == 942.15
+    assert p_target.total_aporte == 308.34
+    assert round(p_target.qtd_antes * p_target.preco_atual, 2) == 633.81
+
