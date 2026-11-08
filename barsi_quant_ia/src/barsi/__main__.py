@@ -212,26 +212,63 @@ def sync_tvbox(
             # 1. Extratos
             typer.echo(f"    - Sincronizando extratos bancários (.ofx) para {remote_home}...")
             for f in extratos_list:
-                scp.put(f, f"{remote_home}/extratos/{os.path.basename(f)}")
+                try:
+                    scp.put(f, f"{remote_home}/extratos/{os.path.basename(f)}")
+                except Exception as e:
+                    typer.echo(f"    [!] Aviso ao enviar extrato {f}: {e}")
 
             # 2. Código fonte principal (inclui templates HTML)
             typer.echo(f"    - Sincronizando código fonte e templates HTML para {remote_home}...")
             for local_p, remote_p in files_to_sync:
-                scp.put(local_p, remote_p)
+                try:
+                    scp.put(local_p, remote_p)
+                except Exception as e:
+                    typer.echo(f"    [!] Aviso ao enviar {local_p}: {e}")
 
             # 3. Metadados e Docker
             for meta_file in ["pyproject.toml", "README.md", "Dockerfile", "docker-compose.yml"]:
                 meta_path = os.path.join(base_dir, meta_file)
                 if os.path.exists(meta_path):
-                    scp.put(meta_path, f"{remote_home}/{meta_file}")
+                    try:
+                        scp.put(meta_path, f"{remote_home}/{meta_file}")
+                    except Exception:
+                        pass
 
             # 4. Credentials se existir
             if os.path.exists(cred_p):
-                scp.put(cred_p, f"{remote_home}/credentials.json")
+                try:
+                    scp.put(cred_p, f"{remote_home}/credentials.json")
+                except Exception:
+                    pass
 
             # 5. .env local para TV Box
             if os.path.exists(env_p):
-                scp.put(env_p, f"{remote_home}/.env")
+                try:
+                    scp.put(env_p, f"{remote_home}/.env")
+                except Exception:
+                    pass
+
+            # 6. Banco SQLite local consolidado com histórico e paridade
+            db_candidates = ["memory/barsi_memory.db", "barsi_quant_ia/memory/barsi_memory.db"]
+            for db_cand in db_candidates:
+                if os.path.exists(db_cand):
+                    try:
+                        typer.echo(f"    - Sincronizando banco SQLite ({db_cand}) com histórico e paridade...")
+                        scp.put(db_cand, f"{remote_home}/memory/barsi_memory.db")
+                        break
+                    except Exception as e:
+                        typer.echo(f"    [!] Aviso ao sincronizar SQLite memory DB: {e}")
+
+            # 7. Excel local espelhado
+            xlsx_candidates = ["carteira_barsi_quant_ia.xlsx", "barsi_quant_ia/carteira_barsi_quant_ia.xlsx"]
+            for xlsx_cand in xlsx_candidates:
+                if os.path.exists(xlsx_cand):
+                    try:
+                        typer.echo(f"    - Sincronizando carteira Excel (.xlsx)...")
+                        scp.put(xlsx_cand, f"{remote_home}/carteira_barsi_quant_ia.xlsx")
+                        break
+                    except Exception as e:
+                        typer.echo(f"    [!] Aviso ao sincronizar XLSX: {e}")
 
     typer.echo("    - Reiniciando serviço barsi-api na TV Box...")
     stdin, stdout, stderr = ssh.exec_command("sudo systemctl restart barsi-api.service", get_pty=True)
@@ -470,7 +507,7 @@ def budget_audit(
             (mes_ano,)
         ).fetchall()
 
-    soma_tx: Dict[str, float] = {}
+    soma_tx: dict[str, float] = {}
     for r in rows_tx:
         raw_cat = r["categoria"]
         cat = CATEGORY_MAPPING.get(raw_cat, raw_cat)
@@ -672,6 +709,50 @@ def notify_get_chat_id():
         typer.echo("[✔] Alerta de teste entregue no seu Telegram!\n")
     except Exception as exc:
         typer.echo(f"[!] Erro ao consultar API do Telegram: {exc}\n")
+
+@app.command("audit-sources")
+def audit_sources_cli(
+    reconcile: bool = typer.Option(False, "--reconcile", help="Força reconciliação e paridade 100% entre as 3 fontes"),
+    master: str = typer.Option("sheets", "--master", help="Fonte master para reconciliação: sheets | sqlite | xlsx")
+):
+    """Audita a integridade e paridade entre Google Sheets, Excel local (.xlsx) e SQLite."""
+    from barsi.services.sync_health_service import SyncHealthService
+    svc = SyncHealthService(settings)
+    report = asyncio.run(svc.audit_sources())
+    
+    typer.echo("\n" + "="*60)
+    typer.echo("📊 AUDITORIA DE FONTES DE DADOS (Sheets ↔ XLSX ↔ SQLite)")
+    typer.echo("="*60)
+    for src, info in report["sources"].items():
+        status_ico = "✔" if info["available"] else "✖"
+        typer.echo(f"  [{status_ico}] {src.upper():7}: {info['count']} ativos encontrados" + (f" (Erro: {info['error']})" if info['error'] else ""))
+
+    if report["in_sync"]:
+        typer.echo("\n[✔] PARIDADE CONFIRMADA: As 3 fontes possuem dados 100% idênticos!\n")
+    else:
+        typer.echo(f"\n[!] DIVERGÊNCIA DETECTADA em {len(report['divergences'])} ativo(s):")
+        for d in report["divergences"]:
+            typer.echo(f"  - {d['ticker']}:")
+            for diff in d["divergences"]:
+                typer.echo(f"      {diff['field']}: Sheets={diff['values'].get('sheets')}, XLSX={diff['values'].get('xlsx')}, SQLite={diff['values'].get('sqlite')}")
+
+    if reconcile:
+        rec_res = asyncio.run(svc.reconcile_sources(master=master))
+        if rec_res.get("ok"):
+            typer.echo(f"\n[✔] RECONCILIAÇÃO CONCLUÍDA! {rec_res['positions_count']} posições sincronizadas usando '{master.upper()}'.\n")
+        else:
+            typer.echo(f"\n[!] Falha na reconciliação: {rec_res.get('detail')}\n")
+
+@app.command("history-sync")
+def history_sync_cli():
+    """Baixa o histórico diário real via YFinance para todos os ativos e recalcula a curva no SQLite."""
+    from barsi.adapters.history.budget_repository import BudgetRepository
+    repo = BudgetRepository(settings.sqlite_db_path)
+    typer.echo("[+] Sincronizando cotações históricas diárias via YFinance...")
+    count = repo.sync_yfinance_history()
+    typer.echo(f"[✔] {count} pregões salvos na tabela price_history!")
+    snapshots = repo.build_real_portfolio_snapshots()
+    typer.echo(f"[✔] Curva patrimonial real recalculada com {len(snapshots)} meses históricos!\n")
 
 if __name__ == "__main__":
     app()

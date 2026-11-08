@@ -1,0 +1,194 @@
+<div class="grid-stats">
+  <div class="stat-card">
+    <h4>Patrimônio em Ativos</h4>
+    <div class="val" id="card-patrimonio" style="color: var(--accent);">R$ 0,00</div>
+    <div class="sub" id="card-cotas">Carregando carteira...</div>
+  </div>
+  <div class="stat-card">
+    <h4>Aporte Programado</h4>
+    <div class="val" id="card-aporte" style="color: var(--green);">R$ 0,00</div>
+    <div class="sub" id="card-qtd-aporte">Ações sugeridas pelo simulador</div>
+  </div>
+  <div class="stat-card">
+    <h4>Radar B.E.S.T.</h4>
+    <div class="val" id="card-radar">0 de 0</div>
+    <div class="sub">Ativos abaixo do Preço Teto</div>
+  </div>
+  <div class="stat-card">
+    <h4>Proventos Anuais Proj.</h4>
+    <div class="val" id="card-proventos" style="color: #a855f7;">R$ 0,00</div>
+    <div class="sub">Fluxo de dividendos passivo</div>
+  </div>
+  <div class="stat-card">
+    <h4>Taxa de Concordância IA</h4>
+    <div class="val" id="card-concordancia" style="color: #38bdf8;">0%</div>
+    <div class="sub">Aderência aos sinais da IA</div>
+  </div>
+  <div class="stat-card">
+    <h4>Status do Servidor</h4>
+    <div class="val" style="font-size: 1.25rem;">ONLINE</div>
+    <div class="sub">TV Box Edge SBC (ARM64)</div>
+  </div>
+</div>
+
+<div class="actions-bar">
+  <button class="btn btn-primary" onclick="executarSync()">🚀 Rodar Análise Completa B3 & IA</button>
+  <a href="/carteira" class="btn">💼 Ver Carteira & Custódia</a>
+  <a href="/aportes" class="btn btn-green">📊 Simulador de Aportes</a>
+  <a href="/insights" class="btn btn-amber">🧠 Validar Insights (RLHF)</a>
+  <button class="btn btn-outline" onclick="carregarHome()">🔄 Recarregar Dados</button>
+</div>
+
+<div id="log-output" style="display:none; background:#090d16; border:1px solid var(--border); border-radius:6px; padding:0.75rem 1rem; font-family:monospace; font-size:0.8rem; color:#38bdf8; margin-bottom:1.5rem;"></div>
+
+<!-- Gráfico de Evolução Patrimonial -->
+<div class="card">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+    <h3 style="color: var(--accent); font-size: 1.05rem;">📈 Evolução do Patrimônio (Últimos 12 Meses)</h3>
+    <a href="/analytics" style="color: var(--accent); font-size: 0.8rem; text-decoration: none;">Ver análise completa →</a>
+  </div>
+  <div style="height: 280px; position: relative;">
+    <canvas id="chart-patrimonio"></canvas>
+  </div>
+</div>
+
+<!-- Mini-Feed de Últimas Análises da IA -->
+<div class="card">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+    <h3 style="color: var(--accent); font-size: 1.05rem;">🧠 Radar de Oportunidades — Sugestões Recentes da IA</h3>
+    <a href="/insights" style="color: var(--accent); font-size: 0.8rem; text-decoration: none;">Abrir central de validação →</a>
+  </div>
+  <div style="overflow-x: auto;">
+    <table>
+      <thead>
+        <tr>
+          <th>Ativo / Setor</th>
+          <th style="text-align: right;">Cotação</th>
+          <th style="text-align: right;">Preço Teto</th>
+          <th style="text-align: right;">Margem Seguranca</th>
+          <th style="text-align: center;">Decisão Sugerida</th>
+          <th>Raciocínio Quant & NLP</th>
+          <th style="text-align: center;">Validação</th>
+        </tr>
+      </thead>
+      <tbody id="tbl-home-insights">
+        <tr><td colspan="7" style="text-align:center; color: var(--text-muted);">Carregando insights...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+  let chartPatrimonio = null;
+
+  async function carregarHome() {
+    try {
+      const [resSummary, resSnapshots] = await Promise.all([
+        fetch("/api/home/summary"),
+        fetch("/api/analytics/data")
+      ]);
+
+      const summary = await resSummary.json();
+      const analytics = await resSnapshots.json();
+
+      document.getElementById("card-patrimonio").innerText = formatBRL(summary.patrimonio_total);
+      document.getElementById("card-cotas").innerText = `${summary.cotas_totais} cotas em carteira`;
+      document.getElementById("card-aporte").innerText = formatBRL(summary.aporte_programado);
+      document.getElementById("card-qtd-aporte").innerText = `${summary.novas_cotas} cotas sugeridas`;
+      document.getElementById("card-radar").innerText = `${summary.ativos_abaixo_teto} de ${summary.total_ativos}`;
+      document.getElementById("card-proventos").innerText = formatBRL(summary.proventos_proj_ano);
+      document.getElementById("card-concordancia").innerText = `${summary.taxa_concordancia}%`;
+
+      // Renderiza Feed de Insights
+      const tbody = document.getElementById("tbl-home-insights");
+      tbody.innerHTML = "";
+      (summary.top_insights || []).forEach(item => {
+        const badge = item.status === "ACUMULAR" ? "badge-acumular" : "badge-aguardar";
+        const margemColor = item.margem >= 0 ? "var(--green)" : "var(--red)";
+        const fbStatus = item.feedback ? `<span style="color:var(--green);">✓ ${item.feedback}</span>` : `<a href="/insights" class="btn btn-outline" style="padding:0.2rem 0.5rem; font-size:0.75rem;">Validar</a>`;
+
+        tbody.innerHTML += `
+          <tr>
+            <td><strong>${item.ticker}</strong> <span style="font-size:0.75rem; color:var(--text-muted);">(${item.setor || 'B.E.S.T.'})</span></td>
+            <td style="text-align: right;">R$ ${item.preco.toFixed(2)}</td>
+            <td style="text-align: right;">R$ ${item.teto.toFixed(2)}</td>
+            <td style="text-align: right; color: ${margemColor}; font-weight:700;">${item.margem.toFixed(1)}%</td>
+            <td style="text-align: center;"><span class="${badge}">${item.status}</span></td>
+            <td style="font-size:0.8rem; color:#cbd5e1; max-width:380px;">${item.insight_resumo || 'Margem de segurança atrativa para acúmulo previdenciário.'}</td>
+            <td style="text-align: center;">${fbStatus}</td>
+          </tr>
+        `;
+      });
+
+      // Renderiza Gráfico
+      renderChartPatrimonio(analytics.snapshots || []);
+
+    } catch (err) {
+      showToast("Erro ao carregar dados do Cockpit: " + err, "error");
+    }
+  }
+
+  function renderChartPatrimonio(snapshots) {
+    const ctx = document.getElementById('chart-patrimonio').getContext('2d');
+    if (chartPatrimonio) chartPatrimonio.destroy();
+
+    const labels = snapshots.map(s => {
+      const parts = s.data_snapshot.split('-');
+      return `${parts[1]}/${parts[0].slice(2)}`;
+    });
+    const values = snapshots.map(s => s.patrimonio_total);
+
+    chartPatrimonio = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: 'Patrimônio em Ativos (R$)',
+          data: values,
+          borderColor: '#38bdf8',
+          backgroundColor: 'rgba(56, 189, 248, 0.1)',
+          fill: true,
+          tension: 0.35,
+          borderWidth: 2.5,
+          pointBackgroundColor: '#38bdf8',
+          pointRadius: 4
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => 'Patrimônio: R$ ' + ctx.raw.toLocaleString('pt-BR', { minimumFractionDigits: 2 })
+            }
+          }
+        },
+        scales: {
+          x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#94a3b8' } },
+          y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#94a3b8', callback: (v) => 'R$ ' + v.toLocaleString('pt-BR') } }
+        }
+      }
+    });
+  }
+
+  async function executarSync() {
+    const el = document.getElementById("log-output");
+    el.style.display = "block";
+    el.innerText = `[${new Date().toLocaleTimeString()}] 🚀 Iniciando análise completa de cotações B3 e inferência de IA...`;
+    try {
+      const res = await fetch("/api/run", { method: "POST" });
+      const out = await res.json();
+      el.innerText = `[${new Date().toLocaleTimeString()}] ✅ Sincronização concluída em ${out.duration_ms}ms! ${out.tickers_analyzed} ativos atualizados.`;
+      showToast("Cotações e análises atualizadas com sucesso!");
+      carregarHome();
+    } catch (err) {
+      el.innerText = `[${new Date().toLocaleTimeString()}] ❌ Erro na sincronização: ` + err;
+      showToast("Falha na sincronização", "error");
+    }
+  }
+
+  window.addEventListener("DOMContentLoaded", carregarHome);
+</script>
+

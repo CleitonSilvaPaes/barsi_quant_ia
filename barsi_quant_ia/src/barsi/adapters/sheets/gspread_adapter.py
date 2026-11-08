@@ -1,6 +1,7 @@
 """Adapter para Google Sheets (gspread) com detecção inteligente de layout."""
 import os
 import asyncio
+import time
 from typing import List, Optional
 from datetime import datetime
 import gspread
@@ -10,6 +11,19 @@ from barsi.domain.models import Position, AcaoBarsi, SimuladorOrder
 from barsi.infra.logging import logger
 
 class GSpreadAdapter(SheetsPort):
+    _positions_cache: Optional[List[Position]] = None
+    _positions_cache_time: float = 0.0
+    _sim_orders_cache: Optional[List[SimuladorOrder]] = None
+    _sim_orders_cache_time: float = 0.0
+    _CACHE_TTL: float = 60.0  # 60s TTL para evitar erro [429] Quota exceeded do Google Sheets
+
+    @classmethod
+    def invalidate_cache(cls):
+        cls._positions_cache = None
+        cls._positions_cache_time = 0.0
+        cls._sim_orders_cache = None
+        cls._sim_orders_cache_time = 0.0
+
     def __init__(self, credentials_path: str, spreadsheet_id: str = "", sqlite_db_path: str = "./memory/barsi_memory.db"):
         self.credentials_path = credentials_path
         self.spreadsheet_id = spreadsheet_id
@@ -40,9 +54,19 @@ class GSpreadAdapter(SheetsPort):
             return 0.0
 
     async def load_positions(self) -> List[Position]:
+        now = time.time()
+        if GSpreadAdapter._positions_cache and (now - GSpreadAdapter._positions_cache_time < GSpreadAdapter._CACHE_TTL):
+            return GSpreadAdapter._positions_cache
+
         def _load():
-            sh = self._get_client_and_spreadsheet()
-            worksheet_titles = [w.title for w in sh.worksheets()]
+            try:
+                sh = self._get_client_and_spreadsheet()
+                worksheet_titles = [w.title for w in sh.worksheets()]
+            except Exception as e:
+                logger.warn("sheets_connect_error_fallback", error=str(e))
+                if GSpreadAdapter._positions_cache:
+                    return GSpreadAdapter._positions_cache
+                return self.budget_repo.load_positions()
 
             # Cenário 1: Planilha Pro B.E.S.T. ('Screener_BEST_Custodia')
             if "Screener_BEST_Custodia" in worksheet_titles:
@@ -124,6 +148,8 @@ class GSpreadAdapter(SheetsPort):
                         total_aporte=total_aporte,
                         feedback_usuario=fb
                     ))
+                GSpreadAdapter._positions_cache = positions
+                GSpreadAdapter._positions_cache_time = time.time()
                 return positions
 
             # Cenário 2: Layout Legado ('Dashboard Barsi')
@@ -144,19 +170,39 @@ class GSpreadAdapter(SheetsPort):
                     div_proj=div,
                     feedback_usuario=feedback
                 ))
+            GSpreadAdapter._positions_cache = positions
+            GSpreadAdapter._positions_cache_time = time.time()
             return positions
 
         return await asyncio.to_thread(_load)
 
     async def load_simulador_orders(self) -> List[SimuladorOrder]:
         """Carrega as ordens programadas do Simulador de Aportes B.E.S.T."""
+        now = time.time()
+        if GSpreadAdapter._sim_orders_cache and (now - GSpreadAdapter._sim_orders_cache_time < GSpreadAdapter._CACHE_TTL):
+            return GSpreadAdapter._sim_orders_cache
+
         def _load_sim():
-            sh = self._get_client_and_spreadsheet()
-            worksheet_titles = [w.title for w in sh.worksheets()]
+            try:
+                sh = self._get_client_and_spreadsheet()
+                worksheet_titles = [w.title for w in sh.worksheets()]
+            except Exception as e:
+                logger.warn("sheets_connect_sim_fallback", error=str(e))
+                if GSpreadAdapter._sim_orders_cache:
+                    return GSpreadAdapter._sim_orders_cache
+                return []
+
             if "Simulador_Aportes_Barsi" not in worksheet_titles:
                 return []
-            ws = sh.worksheet("Simulador_Aportes_Barsi")
-            rows = ws.get("A12:O16")
+            try:
+                ws = sh.worksheet("Simulador_Aportes_Barsi")
+                rows = ws.get("A12:O16")
+            except Exception as e:
+                logger.warn("sheets_get_sim_rows_fallback", error=str(e))
+                if GSpreadAdapter._sim_orders_cache:
+                    return GSpreadAdapter._sim_orders_cache
+                return []
+
             orders = []
             for r in rows:
                 if not r or not r[0] or not str(r[0]).strip().isdigit():
@@ -196,11 +242,14 @@ class GSpreadAdapter(SheetsPort):
                     ))
                 except Exception as e:
                     logger.warn("simulador_parse_error", row=r, error=str(e))
+            GSpreadAdapter._sim_orders_cache = orders
+            GSpreadAdapter._sim_orders_cache_time = time.time()
             return orders
 
         return await asyncio.to_thread(_load_sim)
 
     async def update_positions(self, positions: List[Position]) -> None:
+        GSpreadAdapter.invalidate_cache()
         def _update():
             sh = self._get_client_and_spreadsheet()
             worksheet_titles = [w.title for w in sh.worksheets()]
@@ -414,8 +463,15 @@ class GSpreadAdapter(SheetsPort):
 
             acoes = round(r.compras_acoes_barsi, 2)
             fiis = round(r.compras_fiis, 2)
-            updates.append({"range": f"{c_let}31", "values": [[acoes]]})
-            updates.append({"range": f"{c_let}32", "values": [[fiis]]})
+            if acoes > 0:
+                updates.append({"range": f"{c_let}31", "values": [[acoes]]})
+            else:
+                updates.append({"range": f"{c_let}31", "values": [[f'=SUMIFS(Screener_BEST_Custodia!O10:O19; Screener_BEST_Custodia!B10:B19; "<>*FII*"; Screener_BEST_Custodia!P10:P19; "ACUMULAR")']]})
+
+            if fiis > 0:
+                updates.append({"range": f"{c_let}32", "values": [[fiis]]})
+            else:
+                updates.append({"range": f"{c_let}32", "values": [[f'=SUMIFS(Screener_BEST_Custodia!O10:O19; Screener_BEST_Custodia!B10:B19; "*FII*"; Screener_BEST_Custodia!P10:P19; "ACUMULAR")']]})
             updates.append({"range": f"{c_let}33", "values": [[f"=SUM({c_let}31:{c_let}32)"]]})
 
             # Gastos Variáveis (Linhas 36..40)

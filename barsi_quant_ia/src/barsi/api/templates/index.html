@@ -525,6 +525,10 @@
       const tbody = document.getElementById("tbl-simulador-body");
       try {
         const res = await fetch("/api/simulador");
+        if (!res.ok) {
+          tbody.innerHTML = `<tr><td colspan="13" style="text-align: center; color: var(--amber);">Aguardando liberação de cota do Google Sheets. Clique em Recarregar em alguns instantes.</td></tr>`;
+          return;
+        }
         const orders = await res.json();
         if (!orders || orders.length === 0) {
           tbody.innerHTML = `<tr><td colspan="13" style="text-align: center; color: var(--text-muted);">Nenhuma ordem programada no simulador no momento.</td></tr>`;

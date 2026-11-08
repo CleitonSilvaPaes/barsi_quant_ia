@@ -1,0 +1,122 @@
+<div class="card" style="border: 2px dashed var(--border-accent); background: rgba(37, 99, 235, 0.05); text-align: center; padding: 2.5rem 1.5rem; cursor: pointer;" onclick="document.getElementById('file-upload').click()">
+  <input type="file" id="file-upload" style="display:none;" accept=".ofx,.zip" onchange="uploadExtrato(this.files[0])" />
+  <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">📤</div>
+  <h3 style="color: #fff; margin-bottom: 0.25rem;">Arraste extratos bancários (.OFX ou .ZIP) aqui</h3>
+  <p style="color: var(--text-muted); font-size: 0.85rem;">Suporta arquivos do Nubank, Banco do Brasil, Bradesco, Inter e Itaú com categorização automática</p>
+  <button class="btn btn-primary" style="margin-top: 1rem;" onclick="event.stopPropagation(); document.getElementById('file-upload').click()">Selecionar Arquivo no Computador</button>
+</div>
+
+<div class="actions-bar">
+  <button class="btn btn-green" onclick="conciliarExtratos()">📑 Executar Conciliação com SQLite & Sheets</button>
+  <button class="btn btn-amber" onclick="sincronizarTVBox()">🔄 Sincronizar com TV Box</button>
+  <button class="btn btn-outline" onclick="carregarExtratos()">🔄 Recarregar</button>
+</div>
+
+<div id="extrato-log" style="display:none; background:#090d16; border:1px solid var(--border); border-radius:6px; padding:0.75rem 1rem; font-family:monospace; font-size:0.8rem; color:#38bdf8; margin-bottom:1.5rem;"></div>
+
+<div class="card" style="padding:0; overflow:hidden;">
+  <div style="padding: 1rem 1.25rem; border-bottom: 1px solid var(--border);">
+    <h3 style="font-size: 1rem; color: #fff;">📋 Últimas Transações Conciliadas</h3>
+  </div>
+  <div style="overflow-x: auto;">
+    <table>
+      <thead>
+        <tr>
+          <th>Data</th>
+          <th>Descrição da Transação</th>
+          <th>Categoria Barsi</th>
+          <th>Tipo</th>
+          <th style="text-align: right;">Valor (R$)</th>
+          <th style="text-align: center;">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>06/11/2026</td>
+          <td><strong>Compra Ações BBAS3 (18 cotas)</strong></td>
+          <td>Aportes B.E.S.T.</td>
+          <td>Investimento</td>
+          <td style="text-align: right; color: var(--accent); font-weight:600;">- R$ 308,34</td>
+          <td style="text-align: center;"><span class="badge-acumular">CONCILIADO</span></td>
+        </tr>
+        <tr>
+          <td>06/11/2026</td>
+          <td><strong>Transferência PIX Recebida</strong></td>
+          <td>Salário / Entradas</td>
+          <td>Entrada</td>
+          <td style="text-align: right; color: var(--green); font-weight:600;">+ R$ 4.440,00</td>
+          <td style="text-align: center;"><span class="badge-acumular">CONCILIADO</span></td>
+        </tr>
+        <tr>
+          <td>05/11/2026</td>
+          <td><strong>Pagamento Aluguel Moradia</strong></td>
+          <td>Moradia</td>
+          <td>Despesa Fixa</td>
+          <td style="text-align: right; color: var(--red); font-weight:600;">- R$ 849,46</td>
+          <td style="text-align: center;"><span class="badge-acumular">CONCILIADO</span></td>
+        </tr>
+        <tr>
+          <td>04/11/2026</td>
+          <td><strong>SUPERMERCADO ARCHER</strong></td>
+          <td>Despesas Variáveis</td>
+          <td>Despesa Variável</td>
+          <td style="text-align: right; color: var(--red); font-weight:600;">- R$ 242,10</td>
+          <td style="text-align: center;"><span class="badge-acumular">CONCILIADO</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+  async function uploadExtrato(file) {
+    if (!file) return;
+    const log = document.getElementById("extrato-log");
+    log.style.display = "block";
+    log.innerText = `[${new Date().toLocaleTimeString()}] Enviando '${file.name}' para processamento...`;
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const res = await fetch("/api/upload-extrato", { method: "POST", body: formData });
+      const out = await res.json();
+      log.innerText = `[${new Date().toLocaleTimeString()}] ✅ Arquivo '${out.filename}' recebido e processado com sucesso! Meses conciliados: ${out.meses.join(', ')}.`;
+      showToast("Extrato importado com sucesso!");
+    } catch (err) {
+      log.innerText = `[${new Date().toLocaleTimeString()}] ❌ Erro ao enviar extrato: ` + err;
+      showToast("Falha no upload do extrato", "error");
+    }
+  }
+
+  async function conciliarExtratos() {
+    const log = document.getElementById("extrato-log");
+    log.style.display = "block";
+    log.innerText = `[${new Date().toLocaleTimeString()}] Conciliando extratos OFX locais com o orçamento...`;
+    try {
+      const res = await fetch("/api/extratos", { method: "POST" });
+      const out = await res.json();
+      log.innerText = `[${new Date().toLocaleTimeString()}] ✅ Conciliação concluída! Meses atualizados: ${out.meses.join(', ')}.`;
+      showToast("Extratos conciliados com sucesso!");
+    } catch (err) {
+      log.innerText = `[${new Date().toLocaleTimeString()}] ❌ Erro: ` + err;
+      showToast("Erro na conciliação", "error");
+    }
+  }
+
+  async function sincronizarTVBox() {
+    const log = document.getElementById("extrato-log");
+    log.style.display = "block";
+    log.innerText = `[${new Date().toLocaleTimeString()}] Conectando na TV Box via SSH...`;
+    try {
+      const res = await fetch("/api/sync-tvbox", { method: "POST" });
+      const out = await res.json();
+      log.innerText = `[${new Date().toLocaleTimeString()}] ✅ TV Box atualizada com sucesso! (${out.tvbox_ip})`;
+      showToast("TV Box sincronizada!");
+    } catch (err) {
+      log.innerText = `[${new Date().toLocaleTimeString()}] ❌ Erro: ` + err;
+      showToast("Erro na sincronização", "error");
+    }
+  }
+</script>
+

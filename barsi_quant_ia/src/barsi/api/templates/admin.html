@@ -1,0 +1,121 @@
+<div class="grid-stats">
+  <div class="stat-card">
+    <h4>Usuários Cadastrados</h4>
+    <div class="val" id="adm-users-count" style="color: var(--accent);">0</div>
+    <div class="sub">Perfis de acesso no SQLite</div>
+  </div>
+  <div class="stat-card">
+    <h4>Uptime do Servidor</h4>
+    <div class="val" style="color: var(--green);">{{UPTIME_STR}}</div>
+    <div class="sub">TV Box ARM64 Ativo</div>
+  </div>
+  <div class="stat-card">
+    <h4>Memória Livre</h4>
+    <div class="val" style="color: #cbd5e1;">{{FREE_MB}} MB</div>
+    <div class="sub">Total: {{TOTAL_MB}} MB</div>
+  </div>
+  <div class="stat-card">
+    <h4>Consumo do Processo</h4>
+    <div class="val" style="color: var(--amber);">{{RSS_MB}} MB</div>
+    <div class="sub">Otimizado para baixo consumo</div>
+  </div>
+</div>
+
+<div style="display:grid; grid-template-columns: 2fr 1fr; gap:1.5rem;">
+  <div class="card" style="padding:0; overflow:hidden;">
+    <div style="padding:1rem 1.25rem; border-bottom:1px solid var(--border);">
+      <h3 style="font-size:1rem; color:#fff;">👥 Usuários do Sistema</h3>
+    </div>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Usuário</th>
+            <th>Perfil (RBAC)</th>
+            <th>Criado em</th>
+          </tr>
+        </thead>
+        <tbody id="tbl-users">
+          <tr><td colspan="4" style="text-align:center; color:var(--text-muted);">Carregando usuários...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 style="font-size:1rem; color:var(--accent); margin-bottom:1rem;">➕ Adicionar Usuário</h3>
+    <form onsubmit="criarUsuario(event)" style="display:flex; flex-direction:column; gap:0.75rem;">
+      <div>
+        <label style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Nome de Usuário</label>
+        <input type="text" id="new-user-name" class="tbl-input" required />
+      </div>
+      <div>
+        <label style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Senha Inicial</label>
+        <input type="password" id="new-user-pass" class="tbl-input" required />
+      </div>
+      <div>
+        <label style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Perfil (Permissão)</label>
+        <select id="new-user-role" class="tbl-input">
+          <option value="investidor">Investidor (Visualiza & Edita)</option>
+          <option value="leitor">Leitor (Apenas Leitura)</option>
+          <option value="admin">Administrador (Total)</option>
+        </select>
+      </div>
+      <button type="submit" class="btn btn-green" style="margin-top:0.5rem; justify-content:center;">Criar Usuário</button>
+    </form>
+  </div>
+</div>
+
+<script>
+  async function carregarUsuarios() {
+    try {
+      const res = await fetch("/api/admin/users");
+      const users = await res.json();
+      document.getElementById("adm-users-count").innerText = users.length;
+      const tbody = document.getElementById("tbl-users");
+      tbody.innerHTML = "";
+      users.forEach(u => {
+        tbody.innerHTML += `
+          <tr>
+            <td>#${u.id}</td>
+            <td><strong>${u.username}</strong></td>
+            <td><span class="badge-acumular" style="text-transform:uppercase;">${u.role}</span></td>
+            <td style="color:var(--text-muted); font-size:0.8rem;">${u.created_at || '—'}</td>
+          </tr>
+        `;
+      });
+    } catch (err) {
+      document.getElementById("tbl-users").innerHTML = `<tr><td colspan="4" style="color:var(--red);">Erro ao carregar usuários: ${err}</td></tr>`;
+    }
+  }
+
+  async function criarUsuario(e) {
+    e.preventDefault();
+    const username = document.getElementById("new-user-name").value.trim();
+    const password = document.getElementById("new-user-pass").value.trim();
+    const role = document.getElementById("new-user-role").value;
+
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password, role })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast("Novo usuário cadastrado com sucesso!");
+        document.getElementById("new-user-name").value = "";
+        document.getElementById("new-user-pass").value = "";
+        carregarUsuarios();
+      } else {
+        showToast(data.detail || "Erro ao criar usuário", "error");
+      }
+    } catch (err) {
+      showToast("Erro na requisição: " + err, "error");
+    }
+  }
+
+  window.addEventListener("DOMContentLoaded", carregarUsuarios);
+</script>
+

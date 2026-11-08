@@ -1,0 +1,322 @@
+<div class="grid-stats">
+  <div class="stat-card">
+    <h4>Patrimônio Custodiado</h4>
+    <div class="val" id="card-patrimonio" style="color: var(--accent);">R$ 0,00</div>
+    <div class="sub" id="card-cotas">0 cotas em carteira</div>
+  </div>
+  <div class="stat-card">
+    <h4>Aporte Programado</h4>
+    <div class="val" id="card-aporte" style="color: var(--green);">R$ 0,00</div>
+    <div class="sub" id="card-qtd-aporte">0 novas ações programadas</div>
+  </div>
+  <div class="stat-card">
+    <h4>Patrimônio Projetado</h4>
+    <div class="val" id="card-patrimonio-pos" style="color: #cbd5e1;">R$ 0,00</div>
+    <div class="sub">Total após execução dos aportes</div>
+  </div>
+  <div class="stat-card">
+    <h4>Radar B.E.S.T.</h4>
+    <div class="val" id="card-radar">0 de 0</div>
+    <div class="sub">Ativos abaixo do Preço Teto</div>
+  </div>
+</div>
+
+<div class="actions-bar">
+  <button class="btn btn-green" onclick="salvarAlteracoes()">💾 Salvar Edições (Sheets & Excel)</button>
+  <button class="btn btn-primary" onclick="executarSync()">🚀 Sincronizar Cotações B3</button>
+  <button class="btn btn-outline" onclick="carregarCarteira()">🔄 Recarregar</button>
+
+  <div style="margin-left: auto; display: flex; gap: 0.5rem; flex-wrap: wrap;">
+    <input type="text" id="filtro-busca" class="tbl-input" placeholder="🔍 Buscar ticker ou empresa..." style="width: 220px;" oninput="aplicarFiltros()" />
+    <select id="filtro-setor" class="tbl-input" style="width: 150px;" onchange="aplicarFiltros()">
+      <option value="">Todos os Setores</option>
+      <option value="Bancos">Bancos</option>
+      <option value="Saneamento">Saneamento</option>
+      <option value="Energia">Energia</option>
+      <option value="Seguros">Seguros</option>
+      <option value="FII">Fundos Imob. (FII)</option>
+    </select>
+    <select id="filtro-status" class="tbl-input" style="width: 140px;" onchange="aplicarFiltros()">
+      <option value="">Todas Decisões</option>
+      <option value="ACUMULAR">ACUMULAR</option>
+      <option value="AGUARDAR">AGUARDAR</option>
+    </select>
+  </div>
+</div>
+
+<div class="card" style="padding:0; overflow:hidden;">
+  <div style="overflow-x: auto;">
+    <table id="tbl-carteira">
+      <thead>
+        <tr>
+          <th onclick="ordenarPor('ticker')" style="cursor:pointer;">Ativo / Setor ⬍</th>
+          <th style="text-align: right; min-width: 90px;">Qtd Atual</th>
+          <th style="text-align: right; min-width: 90px;">Aporte (Qtd)</th>
+          <th style="text-align: right; min-width: 80px;" onclick="ordenarPor('qtd_total')" style="cursor:pointer;">Qtd Total ⬍</th>
+          <th style="text-align: right;" onclick="ordenarPor('preco')" style="cursor:pointer;">Cotação ⬍</th>
+          <th style="text-align: right;" onclick="ordenarPor('teto')" style="cursor:pointer;">Preço Teto ⬍</th>
+          <th style="text-align: right;" onclick="ordenarPor('margem')" style="cursor:pointer;">Margem ⬍</th>
+          <th style="text-align: right; min-width: 85px;">DPA Proj.</th>
+          <th style="text-align: right;" onclick="ordenarPor('valor_atual')" style="cursor:pointer;">Patrimônio Atual ⬍</th>
+          <th style="text-align: right;" onclick="ordenarPor('total_aporte')" style="cursor:pointer;">Total Aporte ⬍</th>
+          <th style="text-align: center;">Decisão</th>
+          <th style="min-width: 200px;">Feedback do Usuário</th>
+          <th style="text-align: center; width: 60px;">Ações</th>
+        </tr>
+      </thead>
+      <tbody id="tbl-body">
+        <tr><td colspan="13" style="text-align:center; color: var(--text-muted);">Carregando ativos da carteira...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Drawer Lateral de Detalhes do Ativo -->
+<div id="asset-drawer" style="display:none; position:fixed; top:0; right:0; width:400px; height:100vh; background:#0f172a; border-left:1px solid var(--border); box-shadow:-10px 0 25px rgba(0,0,0,0.5); z-index:200; padding:1.5rem; overflow-y:auto;">
+  <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); padding-bottom:1rem; margin-bottom:1rem;">
+    <div>
+      <h2 id="drawer-ticker" style="color:var(--accent); font-size:1.4rem;">TICKER</h2>
+      <div id="drawer-empresa" style="font-size:0.85rem; color:var(--text-muted);">Empresa S.A.</div>
+    </div>
+    <button onclick="fecharDrawer()" class="btn btn-outline" style="padding:0.25rem 0.6rem;">✕</button>
+  </div>
+
+  <div style="display:flex; flex-direction:column; gap:1rem;">
+    <div class="stat-card" style="background:#1e293b;">
+      <h4>Margem de Segurança Barsi</h4>
+      <div id="drawer-margem" style="font-size:1.6rem; font-weight:700; color:var(--green);">+0.0%</div>
+      <div id="drawer-precos" class="sub">Cotação: R$ 0,00 | Teto: R$ 0,00</div>
+    </div>
+
+    <div class="stat-card" style="background:#1e293b;">
+      <h4>Posição Atual</h4>
+      <div id="drawer-custodia" style="font-size:1.2rem; font-weight:700; color:#fff;">0 cotas (R$ 0,00)</div>
+      <div id="drawer-aporte" class="sub">Aporte programado: 0 cotas (R$ 0,00)</div>
+    </div>
+
+    <div style="background:#1e293b; border:1px solid var(--border); border-radius:8px; padding:1rem;">
+      <h4 style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; margin-bottom:0.5rem;">Último Insight da IA</h4>
+      <div id="drawer-insight" style="font-size:0.85rem; color:#cbd5e1; line-height:1.4;">Carregando análise...</div>
+    </div>
+
+    <div style="margin-top:0.5rem;">
+      <a href="/insights" class="btn btn-primary" style="width:100%; justify-content:center;">🧠 Ver e Validar na Central de Insights</a>
+    </div>
+  </div>
+</div>
+
+<script>
+  let carteiraCompleta = [];
+  let ordenacaoAtual = { coluna: 'margem', asc: false };
+
+  async function carregarCarteira() {
+    try {
+      const res = await fetch("/api/carteira");
+      carteiraCompleta = await res.json();
+      aplicarFiltros();
+    } catch (err) {
+      document.getElementById("tbl-body").innerHTML = `<tr><td colspan="13" style="color:var(--red); text-align:center;">Erro ao carregar carteira: ${err}</td></tr>`;
+    }
+  }
+
+  function aplicarFiltros() {
+    const busca = (document.getElementById("filtro-busca").value || "").toLowerCase();
+    const setor = document.getElementById("filtro-setor").value;
+    const status = document.getElementById("filtro-status").value;
+
+    let filtrados = carteiraCompleta.filter(p => {
+      const matchBusca = !busca || p.ticker.toLowerCase().includes(busca) || (p.empresa || "").toLowerCase().includes(busca);
+      const matchSetor = !setor || (p.setor || "").includes(setor);
+      const matchStatus = !status || p.status === status;
+      return matchBusca && matchSetor && matchStatus;
+    });
+
+    filtrados.sort((a, b) => {
+      let vA = a[ordenacaoAtual.coluna];
+      let vB = b[ordenacaoAtual.coluna];
+      if (typeof vA === 'string') return ordenacaoAtual.asc ? vA.localeCompare(vB) : vB.localeCompare(vA);
+      return ordenacaoAtual.asc ? (vA - vB) : (vB - vA);
+    });
+
+    renderizarTabela(filtrados);
+  }
+
+  function ordenarPor(col) {
+    if (ordenacaoAtual.coluna === col) {
+      ordenacaoAtual.asc = !ordenacaoAtual.asc;
+    } else {
+      ordenacaoAtual.coluna = col;
+      ordenacaoAtual.asc = false;
+    }
+    aplicarFiltros();
+  }
+
+  function renderizarTabela(data) {
+    const tbody = document.getElementById("tbl-body");
+    tbody.innerHTML = "";
+
+    let somaPatrimonioAtual = 0;
+    let somaAporte = 0;
+    let somaCotasAtuais = 0;
+    let somaQtdAporte = 0;
+    let abaixoDoTeto = 0;
+
+    data.forEach(p => {
+      const badgeClass = p.status === "ACUMULAR" ? "badge-acumular" : "badge-aguardar";
+      const margemColor = p.margem >= 0 ? "var(--green)" : "var(--red)";
+      const readOnlyAttr = p.is_readonly ? "disabled" : "";
+
+      const qtdAtual = (p.qtd_antes !== undefined && p.qtd_antes !== null) ? p.qtd_antes : 0;
+      const qtdAporte = p.qtd_aporte || 0;
+      const qtdTotal = qtdAtual + qtdAporte;
+      const preco = p.preco || 0;
+
+      const valAtual = qtdAtual * preco;
+      const valAporte = qtdAporte * preco;
+
+      somaPatrimonioAtual += valAtual;
+      somaAporte += valAporte;
+      somaCotasAtuais += qtdAtual;
+      somaQtdAporte += qtdAporte;
+      if (p.status === "ACUMULAR") abaixoDoTeto++;
+
+      tbody.innerHTML += `
+        <tr data-ticker="${p.ticker}" data-row="${p.row_index}" data-preco="${preco}">
+          <td>
+            <strong>${p.ticker}</strong>
+            <div style="font-size:0.75rem; color:var(--text-muted);">${p.setor || 'B.E.S.T.'} • ${p.empresa || ''}</div>
+          </td>
+          <td style="text-align: right;">
+            <input type="number" class="tbl-input input-qtd" value="${qtdAtual}" min="0" ${readOnlyAttr} oninput="recalcularTotais()" style="width:75px; text-align:right;" />
+          </td>
+          <td style="text-align: right;">
+            <input type="number" class="tbl-input input-aporte" value="${qtdAporte}" min="0" ${readOnlyAttr} oninput="recalcularTotais()" style="width:75px; text-align:right;" />
+          </td>
+          <td style="text-align: right; font-weight:600; color:#94a3b8;" class="cell-qtd-total">${qtdTotal}</td>
+          <td style="text-align: right;">R$ ${preco.toFixed(2)}</td>
+          <td style="text-align: right;">R$ ${p.teto.toFixed(2)}</td>
+          <td style="text-align: right; color: ${margemColor}; font-weight: 700;">${p.margem.toFixed(1)}%</td>
+          <td style="text-align: right;">
+            <input type="number" step="0.01" class="tbl-input input-dpa" value="${p.div_proj.toFixed(2)}" ${readOnlyAttr} style="width:75px; text-align:right;" />
+          </td>
+          <td style="text-align: right; font-weight: 600;" class="cell-patrimonio-atual">R$ ${valAtual.toFixed(2)}</td>
+          <td style="text-align: right; color: var(--green); font-weight: 600;" class="cell-total-aporte">R$ ${valAporte.toFixed(2)}</td>
+          <td style="text-align: center;"><span class="${badgeClass}">${p.status}</span></td>
+          <td><input type="text" class="tbl-input input-fb" value="${p.feedback || ''}" placeholder="Ex: Priorizar compras em margem > 15%" ${readOnlyAttr} /></td>
+          <td style="text-align: center;">
+            <button onclick="abrirDrawer('${p.ticker}')" class="btn btn-outline" style="padding:0.2rem 0.45rem; font-size:0.8rem;" title="Ver detalhes">👁️</button>
+          </td>
+        </tr>
+      `;
+    });
+
+    document.getElementById("card-patrimonio").innerText = formatBRL(somaPatrimonioAtual);
+    document.getElementById("card-cotas").innerText = `${somaCotasAtuais} cotas em carteira`;
+    document.getElementById("card-aporte").innerText = formatBRL(somaAporte);
+    document.getElementById("card-qtd-aporte").innerText = `${somaQtdAporte} novas ações programadas`;
+    document.getElementById("card-patrimonio-pos").innerText = formatBRL(somaPatrimonioAtual + somaAporte);
+    document.getElementById("card-radar").innerText = `${abaixoDoTeto} de ${data.length}`;
+  }
+
+  function recalcularTotais() {
+    const rows = document.querySelectorAll("#tbl-body tr");
+    let somaAtual = 0;
+    let somaAporte = 0;
+    let somaCotas = 0;
+    let somaQtdAp = 0;
+
+    rows.forEach(r => {
+      const preco = parseFloat(r.getAttribute("data-preco")) || 0;
+      const inAtual = r.querySelector(".input-qtd");
+      const inAporte = r.querySelector(".input-aporte");
+      if (!inAtual || !inAporte) return;
+
+      const qAtual = parseInt(inAtual.value) || 0;
+      const qAp = parseInt(inAporte.value) || 0;
+      const qTot = qAtual + qAp;
+
+      const vAtual = qAtual * preco;
+      const vAp = qAp * preco;
+
+      somaAtual += vAtual;
+      somaAporte += vAp;
+      somaCotas += qAtual;
+      somaQtdAp += qAp;
+
+      const cellTot = r.querySelector(".cell-qtd-total");
+      if (cellTot) cellTot.innerText = qTot;
+      const cellPat = r.querySelector(".cell-patrimonio-atual");
+      if (cellPat) cellPat.innerText = `R$ ${vAtual.toFixed(2)}`;
+      const cellAp = r.querySelector(".cell-total-aporte");
+      if (cellAp) cellAp.innerText = `R$ ${vAp.toFixed(2)}`;
+    });
+
+    document.getElementById("card-patrimonio").innerText = formatBRL(somaAtual);
+    document.getElementById("card-cotas").innerText = `${somaCotas} cotas em carteira`;
+    document.getElementById("card-aporte").innerText = formatBRL(somaAporte);
+    document.getElementById("card-qtd-aporte").innerText = `${somaQtdAp} novas ações programadas`;
+    document.getElementById("card-patrimonio-pos").innerText = formatBRL(somaAtual + somaAporte);
+  }
+
+  async function salvarAlteracoes() {
+    const rows = document.querySelectorAll("#tbl-body tr");
+    const items = [];
+    rows.forEach(r => {
+      const ticker = r.getAttribute("data-ticker");
+      const row_index = parseInt(r.getAttribute("data-row"));
+      if (!ticker || isNaN(row_index)) return;
+      const div_proj = parseFloat(r.querySelector(".input-dpa").value) || 0.0;
+      const qtd_antes = parseInt(r.querySelector(".input-qtd").value) || 0;
+      const qtd_aporte = parseInt(r.querySelector(".input-aporte").value) || 0;
+      const feedback = r.querySelector(".input-fb").value || "";
+      items.push({ ticker, row_index, div_proj, qtd_antes, qtd_aporte, feedback });
+    });
+
+    try {
+      const res = await fetch("/api/carteira", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items })
+      });
+      const out = await res.json();
+      showToast("Edições salvas com sucesso no Google Sheets e Excel local!");
+      carregarCarteira();
+    } catch (err) {
+      showToast("Erro ao salvar alterações: " + err, "error");
+    }
+  }
+
+  function abrirDrawer(ticker) {
+    const p = carteiraCompleta.find(item => item.ticker === ticker);
+    if (!p) return;
+
+    document.getElementById("drawer-ticker").innerText = p.ticker;
+    document.getElementById("drawer-empresa").innerText = `${p.empresa || ''} • Setor: ${p.setor || 'B.E.S.T.'}`;
+    document.getElementById("drawer-margem").innerText = `${p.margem.toFixed(1)}%`;
+    document.getElementById("drawer-precos").innerText = `Cotação Atual: R$ ${p.preco.toFixed(2)} | Preço Teto Barsi: R$ ${p.teto.toFixed(2)}`;
+    document.getElementById("drawer-custodia").innerText = `${p.qtd_antes || 0} cotas (R$ ${((p.qtd_antes || 0) * p.preco).toFixed(2)})`;
+    document.getElementById("drawer-aporte").innerText = `Aporte programado: ${p.qtd_aporte || 0} cotas (R$ ${((p.qtd_aporte || 0) * p.preco).toFixed(2)})`;
+    document.getElementById("drawer-insight").innerText = p.insight_atual || 'Margem de segurança atrativa para acúmulo de longo prazo com base nas regras quantitativas do Método Barsi.';
+
+    document.getElementById("asset-drawer").style.display = "block";
+  }
+
+  function fecharDrawer() {
+    document.getElementById("asset-drawer").style.display = "none";
+  }
+
+  async function executarSync() {
+    try {
+      showToast("Sincronizando cotações B3 e IA...");
+      const res = await fetch("/api/run", { method: "POST" });
+      const out = await res.json();
+      showToast(`Sincronização concluída! ${out.tickers_analyzed} ativos atualizados.`);
+      carregarCarteira();
+    } catch (err) {
+      showToast("Erro na sincronização: " + err, "error");
+    }
+  }
+
+  window.addEventListener("DOMContentLoaded", carregarCarteira);
+</script>
+

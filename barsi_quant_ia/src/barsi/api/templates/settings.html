@@ -1,0 +1,165 @@
+<div class="card">
+  <h3 style="color: var(--accent); font-size: 1.05rem; margin-bottom: 0.5rem;">🔌 Teste de Conectividade dos Provedores (1 Clique)</h3>
+  <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.25rem;">Verifique a integridade das integrações externas sem precisar rodar comandos no terminal.</p>
+
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem;">
+    <div class="stat-card" style="background:#1e293b;">
+      <h4>Mercado & Cotações (B3)</h4>
+      <div style="font-size:1.1rem; font-weight:600; color:#fff; margin-bottom:0.5rem;">YFinance API</div>
+      <button class="btn btn-primary" onclick="testarConexao('yfinance')" style="width:100%; justify-content:center; font-size:0.8rem;">Testar YFinance</button>
+      <div id="res-yfinance" class="sub" style="margin-top:0.5rem;">Status: Aguardando teste</div>
+    </div>
+
+    <div class="stat-card" style="background:#1e293b;">
+      <h4>Google Sheets & Drive</h4>
+      <div style="font-size:1.1rem; font-weight:600; color:#fff; margin-bottom:0.5rem;">GSpread Service Account</div>
+      <button class="btn btn-primary" onclick="testarConexao('sheets')" style="width:100%; justify-content:center; font-size:0.8rem;">Testar Google Sheets</button>
+      <div id="res-sheets" class="sub" style="margin-top:0.5rem;">Status: Aguardando teste</div>
+    </div>
+
+    <div class="stat-card" style="background:#1e293b;">
+      <h4>Notificações Telegram</h4>
+      <div style="font-size:1.1rem; font-weight:600; color:#fff; margin-bottom:0.5rem;">Telegram Bot API</div>
+      <button class="btn btn-primary" onclick="testarConexao('telegram')" style="width:100%; justify-content:center; font-size:0.8rem;">Enviar Alerta Teste</button>
+      <div id="res-telegram" class="sub" style="margin-top:0.5rem;">Status: Aguardando teste</div>
+    </div>
+
+    <div class="stat-card" style="background:#1e293b;">
+      <h4>Motor de Inteligência Artificial</h4>
+      <div style="font-size:1.1rem; font-weight:600; color:#fff; margin-bottom:0.5rem;">Rule Engine / Ollama</div>
+      <button class="btn btn-primary" onclick="testarConexao('ai')" style="width:100%; justify-content:center; font-size:0.8rem;">Testar Motor IA</button>
+      <div id="res-ai" class="sub" style="margin-top:0.5rem;">Status: Aguardando teste</div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h3 style="color: var(--accent); font-size: 1.05rem; margin-bottom: 0.5rem;">⚖️ Auditoria & Paridade das 3 Fontes (Sheets ↔ XLSX ↔ SQLite)</h3>
+  <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.25rem;">Garante 100% de integridade e divergência zero entre a Planilha Google Sheets, o Excel local (.xlsx) e o SQLite.</p>
+
+  <div style="display:flex; justify-content:space-between; align-items:center; background:#1e293b; padding:1rem; border-radius:6px; margin-bottom:1rem; flex-wrap:wrap; gap:1rem;">
+    <div>
+      <div id="sync-health-status" style="font-weight:700; font-size:1.1rem; color:var(--green);">🟢 Verificando paridade...</div>
+      <div id="sync-health-sub" style="font-size:0.8rem; color:var(--text-muted);">Comparando posições ativas...</div>
+    </div>
+    <div style="display:flex; gap:0.5rem;">
+      <button class="btn btn-outline" onclick="verificarParidade()">🔍 Auditar Agora</button>
+      <button class="btn btn-green" onclick="reconciliarFontes('sheets')">🔄 Reconciliar (Master: Sheets)</button>
+      <button class="btn btn-amber" onclick="reconciliarFontes('sqlite')">🔄 Reconciliar (Master: SQLite)</button>
+    </div>
+  </div>
+
+  <div id="sync-divergences-box" style="display:none; background:#090d16; border:1px solid var(--amber); border-radius:6px; padding:0.75rem 1rem; font-size:0.85rem; color:#f8fafc; margin-bottom:0.5rem;"></div>
+</div>
+
+<div class="card">
+  <h3 style="color: var(--accent); font-size: 1.05rem; margin-bottom: 0.5rem;">📈 Histórico Real de Cotações Diárias (YFinance)</h3>
+  <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">Baixa o histórico diário de fechamento dos últimos 12 meses para os 10 ativos B.E.S.T. e recalcula a curva patrimonial real no SQLite.</p>
+  <div style="display:flex; gap:1rem; align-items:center; flex-wrap:wrap;">
+    <button class="btn btn-primary" onclick="sincronizarHistoricoYFinance()">⚡ Sincronizar Histórico 12 Meses</button>
+    <span id="hist-sync-status" style="font-size:0.82rem; color:var(--text-muted);">Status: Pronto</span>
+  </div>
+</div>
+
+<div class="card">
+  <h3 style="color: var(--accent); font-size: 1.05rem; margin-bottom: 0.5rem;">💾 Backup & Segurança de Dados</h3>
+  <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.25rem;">Baixe uma cópia completa do banco SQLite com todo o histórico de análises, extratos e posições.</p>
+
+  <div style="display:flex; gap:1rem; align-items:center; flex-wrap:wrap;">
+    <a href="/api/backup/download" class="btn btn-green" download>📥 Baixar Banco SQLite (barsi_memory.db)</a>
+    <span style="font-size:0.8rem; color:var(--text-muted);">Tamanho estimado: ~250 KB • Zero dependência de nuvem proprietária</span>
+  </div>
+</div>
+
+<script>
+  async function testarConexao(provedor) {
+    const el = document.getElementById(`res-${provedor}`);
+    el.innerText = "⏳ Testando conexão...";
+    el.style.color = "var(--accent)";
+
+    try {
+      const res = await fetch(`/api/settings/test/${provedor}`, { method: "POST" });
+      const data = await res.json();
+      if (data.ok) {
+        el.innerText = `✅ Sucesso! Latência: ${data.latency_ms || 120}ms. ${data.detail || ''}`;
+        el.style.color = "var(--green)";
+        showToast(`Conexão com ${provedor.toUpperCase()} validada!`);
+      } else {
+        el.innerText = `❌ Falha: ${data.detail || 'Não foi possível conectar'}`;
+        el.style.color = "var(--red)";
+        showToast(`Erro ao testar ${provedor}`, "error");
+      }
+    } catch (err) {
+      el.innerText = `❌ Erro de requisição: ${err}`;
+      el.style.color = "var(--red)";
+      showToast("Erro no teste de rede", "error");
+    }
+  }
+
+  async function verificarParidade() {
+    const statusEl = document.getElementById("sync-health-status");
+    const subEl = document.getElementById("sync-health-sub");
+    const boxEl = document.getElementById("sync-divergences-box");
+    statusEl.innerText = "⏳ Auditando Sheets, XLSX e SQLite...";
+    statusEl.style.color = "var(--accent)";
+
+    try {
+      const res = await fetch("/api/health/sync");
+      const data = await res.json();
+      if (data.in_sync) {
+        statusEl.innerText = "🟢 100% Sincronizado e Íntegro";
+        statusEl.style.color = "var(--green)";
+        subEl.innerText = `Todas as 3 fontes possuem dados idênticos para os ${data.tickers_checked} ativos.`;
+        boxEl.style.display = "none";
+        showToast("Paridade confirmada entre as 3 fontes!");
+      } else {
+        statusEl.innerText = `⚠️ ${data.divergences.length} divergência(s) detectada(s)`;
+        statusEl.style.color = "var(--amber)";
+        subEl.innerText = "Divergência entre Sheets, XLSX e SQLite detectada. Reconcilie abaixo.";
+        boxEl.style.display = "block";
+        boxEl.innerHTML = `<strong>Divergências encontradas:</strong><br>` + 
+          data.divergences.map(d => `• <strong>${d.ticker}</strong>: ${JSON.stringify(d.divergences)}`).join("<br>");
+      }
+    } catch (err) {
+      statusEl.innerText = "❌ Erro ao auditar fontes";
+      statusEl.style.color = "var(--red)";
+    }
+  }
+
+  async function reconciliarFontes(master) {
+    if (!confirm(`Deseja igualar todas as 3 fontes usando '${master.toUpperCase()}' como fonte mestre da verdade?`)) return;
+    try {
+      showToast(`Reconciliando fontes com base no ${master.toUpperCase()}...`);
+      const res = await fetch(`/api/health/sync/reconcile?master=${master}`, { method: "POST" });
+      const data = await res.json();
+      if (data.ok) {
+        showToast(`Sucesso! ${data.positions_count} ativos replicados para ${data.synced_targets.join(', ')}.`);
+        verificarParidade();
+      } else {
+        showToast(data.detail || "Erro na reconciliação", "error");
+      }
+    } catch (err) {
+      showToast("Falha na reconciliação: " + err, "error");
+    }
+  }
+
+  async function sincronizarHistoricoYFinance() {
+    const el = document.getElementById("hist-sync-status");
+    el.innerText = "⏳ Baixando histórico de 1 ano do YFinance...";
+    el.style.color = "var(--accent)";
+    try {
+      const res = await fetch("/api/history/sync", { method: "POST" });
+      const data = await res.json();
+      el.innerText = `✅ Sucesso! ${data.records_synced} pregões diários salvos no SQLite. Curva real atualizada com ${data.snapshots_built} meses.`;
+      el.style.color = "var(--green)";
+      showToast("Histórico diário persistido com sucesso!");
+    } catch (err) {
+      el.innerText = `❌ Erro: ${err}`;
+      el.style.color = "var(--red)";
+      showToast("Erro ao baixar histórico", "error");
+    }
+  }
+
+  window.addEventListener("DOMContentLoaded", verificarParidade);
+</script>
+

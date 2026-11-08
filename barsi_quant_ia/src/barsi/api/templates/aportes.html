@@ -1,0 +1,146 @@
+<div class="grid-stats">
+  <div class="stat-card">
+    <h4>Orçamento Selecionado</h4>
+    <div class="val" id="disp-orcamento" style="color: var(--accent);">R$ 1.000,00</div>
+    <div class="sub">Arraste o slider para simular novos cenários</div>
+  </div>
+  <div class="stat-card">
+    <h4>Gasto Efetivo Total</h4>
+    <div class="val" id="disp-gasto" style="color: var(--green);">R$ 0,00</div>
+    <div class="sub">Total nas 4 ordens prioritárias</div>
+  </div>
+  <div class="stat-card">
+    <h4>Troco Residual</h4>
+    <div class="val" id="disp-troco" style="color: #cbd5e1;">R$ 0,00</div>
+    <div class="sub">Saldo para somar no próximo aporte</div>
+  </div>
+  <div class="stat-card">
+    <h4>Provento Adicional / Ano</h4>
+    <div class="val" id="disp-provento-adic" style="color: #a855f7;">R$ 0,00</div>
+    <div class="sub">Incremento de dividendos na carteira</div>
+  </div>
+</div>
+
+<div class="card">
+  <h3 style="color: var(--accent); font-size: 1.05rem; margin-bottom: 0.75rem;">🎚️ Simulador Interativo de Orçamento Barsi</h3>
+  <div style="display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap;">
+    <input type="range" id="slider-orcamento" min="100" max="5000" step="50" value="1000" style="flex: 1; min-width: 250px; accent-color: var(--accent);" oninput="atualizarSlider(this.value)" />
+    <div style="display: flex; gap: 0.5rem;">
+      <button class="btn btn-outline" onclick="setSlider(500)">R$ 500</button>
+      <button class="btn btn-outline" onclick="setSlider(1000)">R$ 1.000</button>
+      <button class="btn btn-outline" onclick="setSlider(1500)">R$ 1.500</button>
+      <button class="btn btn-outline" onclick="setSlider(2500)">R$ 2.500</button>
+    </div>
+  </div>
+</div>
+
+<div class="card" style="padding:0; overflow:hidden;">
+  <div style="padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
+    <h3 style="font-size: 1rem; color: #fff;">📋 Distribuição Sugerida de Ordens Fracionárias</h3>
+    <button class="btn btn-primary" onclick="carregarSimulador()">🔄 Recalcular Simulador</button>
+  </div>
+  <div style="overflow-x: auto;">
+    <table>
+      <thead>
+        <tr>
+          <th>Rank</th>
+          <th>Ticker</th>
+          <th>Empresa</th>
+          <th>Setor</th>
+          <th style="text-align: right;">Cotação</th>
+          <th style="text-align: right;">Preço Teto</th>
+          <th style="text-align: right;">Margem</th>
+          <th style="text-align: right;">Qtd a Comprar</th>
+          <th style="text-align: right;">Gasto Efetivo</th>
+          <th style="text-align: right;">Troco</th>
+          <th style="text-align: right;">Provento Adic./Ano</th>
+          <th style="text-align: center;">Status da Ordem</th>
+        </tr>
+      </thead>
+      <tbody id="tbl-simulador-body">
+        <tr><td colspan="12" style="text-align:center; color: var(--text-muted);">Carregando ordens do simulador...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+  let ordensOriginais = [];
+
+  async function carregarSimulador() {
+    const tbody = document.getElementById("tbl-simulador-body");
+    try {
+      const res = await fetch("/api/simulador");
+      if (!res.ok) {
+        tbody.innerHTML = `<tr><td colspan="12" style="color:var(--amber); text-align:center;">Aguardando liberação de cota do Google Sheets. Clique em Recarregar em alguns instantes.</td></tr>`;
+        return;
+      }
+      ordensOriginais = await res.json();
+      recalcularDistribuicao(parseFloat(document.getElementById("slider-orcamento").value) || 1000);
+    } catch (err) {
+      tbody.innerHTML = `<tr><td colspan="12" style="color:var(--red); text-align:center;">Erro ao carregar simulador: ${err}</td></tr>`;
+    }
+  }
+
+  function setSlider(val) {
+    document.getElementById("slider-orcamento").value = val;
+    atualizarSlider(val);
+  }
+
+  function atualizarSlider(val) {
+    document.getElementById("disp-orcamento").innerText = formatBRL(parseFloat(val));
+    recalcularDistribuicao(parseFloat(val));
+  }
+
+  function recalcularDistribuicao(orcamentoTotal) {
+    const tbody = document.getElementById("tbl-simulador-body");
+    tbody.innerHTML = "";
+
+    if (!ordensOriginais || ordensOriginais.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; color:var(--text-muted);">Nenhuma ordem programada no simulador no momento.</td></tr>`;
+      return;
+    }
+
+    let somaGasto = 0;
+    let somaTroco = 0;
+    let somaProvento = 0;
+
+    // Distribuição proporcional baseada no alocacao_meta_pct de cada ordem
+    ordensOriginais.forEach(o => {
+      const orcamentoAtivo = orcamentoTotal * (o.alocacao_meta_pct || 0.25);
+      const cotacao = o.cotacao || 1;
+      const qtd = Math.floor(orcamentoAtivo / cotacao);
+      const gasto = qtd * cotacao;
+      const troco = orcamentoAtivo - gasto;
+      const provento = qtd * (o.cotacao * ((o.yield_compra_pct || 10) / 100));
+
+      somaGasto += gasto;
+      somaTroco += troco;
+      somaProvento += provento;
+
+      tbody.innerHTML += `
+        <tr>
+          <td><strong>#${o.rank}</strong></td>
+          <td><strong style="color: var(--accent);">${o.ticker}</strong></td>
+          <td>${o.empresa}</td>
+          <td><span style="font-size:0.75rem; color:var(--text-muted); background:rgba(255,255,255,0.05); padding:2px 6px; border-radius:3px;">${o.setor}</span></td>
+          <td style="text-align: right;">R$ ${cotacao.toFixed(2)}</td>
+          <td style="text-align: right;">R$ ${(o.preco_teto || 0).toFixed(2)}</td>
+          <td style="text-align: right; color: var(--green); font-weight: 600;">${((o.margem_seg || 0) * 100).toFixed(1)}%</td>
+          <td style="text-align: right; font-weight: 700; color: #38bdf8;">${qtd} cotas</td>
+          <td style="text-align: right; font-weight: 600;">R$ ${gasto.toFixed(2)}</td>
+          <td style="text-align: right; color: var(--text-muted);">R$ ${troco.toFixed(2)}</td>
+          <td style="text-align: right; color: var(--green); font-weight: 600;">R$ ${provento.toFixed(2)}</td>
+          <td style="text-align: center;"><span class="badge-acumular">ORDEM VÁLIDA</span></td>
+        </tr>
+      `;
+    });
+
+    document.getElementById("disp-gasto").innerText = formatBRL(somaGasto);
+    document.getElementById("disp-troco").innerText = formatBRL(somaTroco);
+    document.getElementById("disp-provento-adic").innerText = formatBRL(somaProvento);
+  }
+
+  window.addEventListener("DOMContentLoaded", carregarSimulador);
+</script>
+

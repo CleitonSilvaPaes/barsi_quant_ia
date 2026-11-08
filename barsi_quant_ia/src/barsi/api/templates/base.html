@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{TITLE}} — Barsi Quant IA</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --sidebar-bg: #070a12;
+      --card-bg: #111827;
+      --card-hover: #1e293b;
+      --border: #1f293d;
+      --border-accent: #2563eb;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #22c55e;
+      --green-bg: rgba(34, 197, 94, 0.12);
+      --red: #ef4444;
+      --red-bg: rgba(239, 68, 68, 0.12);
+      --amber: #f59e0b;
+      --amber-bg: rgba(245, 158, 11, 0.12);
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: var(--font);
+      background-color: var(--bg);
+      color: var(--text);
+      display: flex;
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+
+    /* SIDEBAR */
+    .sidebar {
+      width: 250px;
+      background: var(--sidebar-bg);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+      z-index: 100;
+    }
+
+    .brand {
+      padding: 1.25rem 1.2rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+    }
+
+    .brand-icon {
+      font-size: 1.4rem;
+    }
+
+    .brand-text h2 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: -0.3px;
+    }
+
+    .brand-text span {
+      font-size: 0.72rem;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-weight: 600;
+    }
+
+    .nav-section {
+      padding: 1rem 0.75rem;
+      flex-grow: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .nav-label {
+      font-size: 0.68rem;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+      padding: 0.5rem 0.75rem 0.25rem;
+      font-weight: 700;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.6rem 0.85rem;
+      color: var(--text-muted);
+      text-decoration: none;
+      border-radius: 0.45rem;
+      font-size: 0.88rem;
+      font-weight: 500;
+      transition: all 0.15s ease;
+    }
+
+    .nav-item:hover {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .nav-item.active {
+      color: #fff;
+      background: rgba(56, 189, 248, 0.15);
+      border-left: 3px solid var(--accent);
+      font-weight: 600;
+    }
+
+    .nav-item .icon {
+      font-size: 1.05rem;
+      width: 22px;
+      text-align: center;
+    }
+
+    .sidebar-footer {
+      padding: 1rem 1.2rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      background: rgba(0, 0, 0, 0.2);
+    }
+
+    /* MAIN WRAPPER */
+    .main-wrapper {
+      flex-grow: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      overflow-x: hidden;
+    }
+
+    /* TOPBAR */
+    .topbar {
+      height: 60px;
+      background: rgba(11, 15, 25, 0.8);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 1.5rem;
+      position: sticky;
+      top: 0;
+      z-index: 90;
+    }
+
+    .topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .page-title {
+      font-size: 1.15rem;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .badge-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.25rem 0.65rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      background: rgba(34, 197, 94, 0.15);
+      color: var(--green);
+      border: 1px solid rgba(34, 197, 94, 0.3);
+    }
+
+    .telemetry-pill {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      background: var(--card-bg);
+      padding: 0.25rem 0.75rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+    }
+
+    .user-pill {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.82rem;
+      color: var(--text);
+    }
+
+    .btn-logout {
+      color: var(--red);
+      text-decoration: none;
+      font-size: 0.8rem;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      border: 1px solid rgba(239, 68, 68, 0.2);
+      transition: background 0.15s;
+    }
+
+    .btn-logout:hover {
+      background: var(--red-bg);
+    }
+
+    /* CONTENT CONTAINER */
+    .content {
+      padding: 1.5rem;
+      max-width: 1440px;
+      width: 100%;
+      margin: 0 auto;
+      flex-grow: 1;
+    }
+
+    /* CARDS */
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      padding: 1.25rem;
+      margin-bottom: 1.5rem;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+    }
+
+    .grid-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .stat-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 0.65rem;
+      padding: 1.1rem;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .stat-card h4 {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 0.35rem;
+    }
+
+    .stat-card .val {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .stat-card .sub {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.35rem;
+    }
+
+    /* BUTTONS */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      padding: 0.5rem 0.95rem;
+      border-radius: 0.45rem;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: #1e293b;
+      color: #fff;
+      transition: all 0.15s ease;
+      text-decoration: none;
+    }
+
+    .btn:hover {
+      background: #334155;
+    }
+
+    .btn-primary {
+      background: #2563eb;
+      border-color: #3b82f6;
+    }
+
+    .btn-primary:hover {
+      background: #1d4ed8;
+    }
+
+    .btn-green {
+      background: #16a34a;
+      border-color: #22c55e;
+    }
+
+    .btn-green:hover {
+      background: #15803d;
+    }
+
+    .btn-amber {
+      background: #d97706;
+      border-color: #f59e0b;
+    }
+
+    .btn-amber:hover {
+      background: #b45309;
+    }
+
+    .btn-outline {
+      background: transparent;
+      border-color: var(--border);
+      color: var(--text);
+    }
+
+    .btn-outline:hover {
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .actions-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+      margin-bottom: 1.25rem;
+    }
+
+    /* BADGES */
+    .badge-acumular {
+      background: var(--green-bg);
+      color: var(--green);
+      border: 1px solid rgba(34, 197, 94, 0.3);
+      padding: 0.2rem 0.55rem;
+      border-radius: 4px;
+      font-size: 0.72rem;
+      font-weight: 700;
+    }
+
+    .badge-aguardar {
+      background: var(--amber-bg);
+      color: var(--amber);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      padding: 0.2rem 0.55rem;
+      border-radius: 4px;
+      font-size: 0.72rem;
+      font-weight: 700;
+    }
+
+    /* TABLES */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+
+    th {
+      background: #0d121f;
+      color: var(--text-muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 0.72rem;
+      letter-spacing: 0.5px;
+      padding: 0.75rem 0.85rem;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+    }
+
+    td {
+      padding: 0.75rem 0.85rem;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    tr:hover td {
+      background: var(--card-hover);
+    }
+
+    .tbl-input {
+      background: #090d16;
+      border: 1px solid var(--border);
+      color: #fff;
+      padding: 0.3rem 0.45rem;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      font-family: inherit;
+      width: 100%;
+    }
+
+    .tbl-input:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+    }
+
+    /* TOAST */
+    #toast-container {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      z-index: 1000;
+    }
+
+    .toast {
+      background: #1e293b;
+      border: 1px solid var(--border);
+      color: #fff;
+      padding: 0.75rem 1.1rem;
+      border-radius: 6px;
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+      font-size: 0.85rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      animation: fadeIn 0.2s ease;
+    }
+
+    .toast-success {
+      border-left: 4px solid var(--green);
+    }
+
+    .toast-error {
+      border-left: 4px solid var(--red);
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @media (max-width: 900px) {
+      body {
+        flex-direction: column;
+      }
+
+      .sidebar {
+        width: 100%;
+        height: auto;
+        position: relative;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .nav-section {
+        flex-direction: row;
+        flex-wrap: wrap;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <!-- SIDEBAR NAVEGAÇÃO -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-icon">📈</div>
+      <div class="brand-text">
+        <h2>Barsi Quant IA</h2>
+        <span>Dividends & Value</span>
+      </div>
+    </div>
+
+    <nav class="nav-section">
+      <div class="nav-label">Operação & Portfólio</div>
+      <a href="/" class="nav-item {{NAV_HOME}}"><span class="icon">⌂</span> Home / Cockpit</a>
+      <a href="/carteira" class="nav-item {{NAV_CARTEIRA}}"><span class="icon">💼</span> Carteira B.E.S.T.</a>
+      <a href="/aportes" class="nav-item {{NAV_APORTES}}"><span class="icon">📊</span> Aportes & Simulador</a>
+      <a href="/budget" class="nav-item {{NAV_BUDGET}}"><span class="icon">💰</span> Orçamento Fluxo</a>
+      <a href="/extratos" class="nav-item {{NAV_EXTRATOS}}"><span class="icon">📑</span> Extratos (OFX)</a>
+
+      <div class="nav-label" style="margin-top: 0.75rem;">Inteligência & Análise</div>
+      <a href="/insights" class="nav-item {{NAV_INSIGHTS}}"><span class="icon">🧠</span> Insights IA & RLHF</a>
+      <a href="/analytics" class="nav-item {{NAV_ANALYTICS}}"><span class="icon">📈</span> Análise & Gráficos</a>
+
+      <div class="nav-label" style="margin-top: 0.75rem;">Sistema</div>
+      <a href="/settings" class="nav-item {{NAV_SETTINGS}}"><span class="icon">⚙️</span> Configurações</a>
+      <a href="/admin" class="nav-item {{NAV_ADMIN}}"><span class="icon">🔐</span> Admin & Usuários</a>
+      <a href="/help" class="nav-item {{NAV_HELP}}"><span class="icon">❓</span> Ajuda & Barsi</a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div>Servidor: <strong>TV Box ARM64</strong></div>
+      <div style="color: var(--accent); margin-top: 2px;">● {{AI_PROVIDER}} Ativo</div>
+    </div>
+  </aside>
+
+  <!-- CONTEÚDO PRINCIPAL -->
+  <div class="main-wrapper">
+    <header class="topbar">
+      <div class="topbar-left">
+        <h1 class="page-title">{{PAGE_HEADING}}</h1>
+      </div>
+      <div class="topbar-right">
+        <span class="badge-status">● ONLINE</span>
+        <div class="telemetry-pill">{{FREE_MB}} MB livre | RSS {{RSS_MB}} MB</div>
+        <div class="user-pill">
+          <span>👤 {{USER_NAME}}</span>
+          <a href="/logout" class="btn-logout" title="Encerrar Sessão">Sair</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="content">
+      {{PAGE_CONTENT}}
+    </main>
+  </div>
+
+  <div id="toast-container"></div>
+
+  <script>
+    function showToast(msg, type = "success") {
+      const container = document.getElementById("toast-container");
+      const toast = document.createElement("div");
+      toast.className = `toast ${type === 'success' ? 'toast-success' : 'toast-error'}`;
+      toast.innerHTML = `<span>${type === 'success' ? '✅' : '❌'}</span> <span>${msg}</span>`;
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 300);
+      }, 3500);
+    }
+
+    function formatBRL(val) {
+      return (val || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    }
+
+    function formatPct(val) {
+      return ((val || 0)).toFixed(1) + '%';
+    }
+  </script>
+</body>
+
+</html>
+

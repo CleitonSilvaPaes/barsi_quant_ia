@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     tvbox_ip: str = Field(default_factory=lambda: os.getenv("BARSI_TVBOX_IP", ""))
     tvbox_user: str = Field(default_factory=lambda: os.getenv("BARSI_TVBOX_USER", ""))
     tvbox_pass: str = Field(default_factory=lambda: os.getenv("BARSI_TVBOX_PASS", ""))
-    tvbox_home: str = Field(default_factory=lambda: os.getenv("BARSI_TVBOX_HOME", "/opt/barsi_quant_ia"))
+    tvbox_home: str = Field(default_factory=lambda: os.getenv("BARSI_TVBOX_HOME", "/home/cleiton/barsi_quant_ia"))
 
     # Restrições de Concorrência e Hardware (TV Box)
     max_concurrency: int = 3
