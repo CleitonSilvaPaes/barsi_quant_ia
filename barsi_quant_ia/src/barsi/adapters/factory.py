@@ -70,8 +70,32 @@ class AdapterFactory:
 
     @staticmethod
     def create_notification_adapter(cfg: Settings) -> NotificationsPort:
-        from barsi.adapters.notifications import TelegramNotifier, NoOpNotifier
+        from barsi.adapters.notifications import (
+            TelegramNotifier,
+            NoOpNotifier,
+            WhatsAppCallMeBotNotifier,
+            WhatsAppEvolutionNotifier,
+            MultiNotifier,
+        )
+        notifiers: list[NotificationsPort] = []
+
         if cfg.telegram_alerts_enabled and cfg.telegram_bot_token and cfg.telegram_chat_id:
-            return TelegramNotifier(bot_token=cfg.telegram_bot_token, chat_id=cfg.telegram_chat_id)
+            notifiers.append(TelegramNotifier(bot_token=cfg.telegram_bot_token, chat_id=cfg.telegram_chat_id))
+
+        if cfg.whatsapp_alerts_enabled:
+            if cfg.whatsapp_provider == "callmebot" and cfg.whatsapp_phone and cfg.whatsapp_apikey:
+                notifiers.append(WhatsAppCallMeBotNotifier(phone=cfg.whatsapp_phone, api_key=cfg.whatsapp_apikey))
+            elif cfg.whatsapp_provider == "evolution" and cfg.whatsapp_evolution_url and cfg.whatsapp_phone:
+                notifiers.append(WhatsAppEvolutionNotifier(
+                    base_url=cfg.whatsapp_evolution_url,
+                    instance=cfg.whatsapp_evolution_instance,
+                    api_key=cfg.whatsapp_apikey,
+                    recipient=cfg.whatsapp_phone,
+                ))
+
+        if len(notifiers) == 1:
+            return notifiers[0]
+        elif len(notifiers) > 1:
+            return MultiNotifier(notifiers)
         return NoOpNotifier()
 

@@ -5,6 +5,8 @@ services:
     build: .
     container_name: barsi_quant_worker
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
       - BARSI_ENV=production
       - BARSI_AI_PROVIDER=rule_engine
@@ -12,16 +14,17 @@ services:
     volumes:
       - ./memory:/app/memory
       - ./cache:/app/cache
-      - ./credentials.json:/app/credentials.json:ro
+      - ./extratos:/app/extratos
     ports:
       - "8000:8000"
     deploy:
       resources:
         limits:
-          memory: 250M
+          memory: 350M
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 5s
       retries: 3
+
 

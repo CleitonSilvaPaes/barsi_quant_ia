@@ -109,8 +109,8 @@ ssh SEU_USUARIO@SEU_IP
 ```bash
 git clone <seu-repo> /opt/barsi_quant_ia
 cd /opt/barsi_quant_ia
-chmod +x scripts/install_tvbox.sh
-./scripts/install_tvbox.sh
+chmod +x scripts/deploy/tvbox/install_tvbox.sh
+./scripts/deploy/tvbox/install_tvbox.sh
 ```
 O script cuidará de:
 * Instalar pacotes de sistema (`python3-venv`, `cron`, `jq`);
@@ -127,7 +127,7 @@ O script cuidará de:
 2. Compartilhe sua planilha do Google Sheets com o email da Service Account gerada.
 3. Execute o script de migração:
 ```bash
-python scripts/migrate_xlsx_to_sheets.py carteira_barsi_quant_ia.xlsx credentials.json
+python scripts/migrations/migrate_xlsx_to_sheets.py carteira_barsi_quant_ia.xlsx credentials.json
 ```
 
 ---

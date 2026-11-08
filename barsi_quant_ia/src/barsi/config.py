@@ -74,5 +74,13 @@ class Settings(BaseSettings):
     telegram_bot_token: str = Field(default_factory=lambda: os.getenv("BARSI_TELEGRAM_BOT_TOKEN", ""))
     telegram_chat_id: str = Field(default_factory=lambda: os.getenv("BARSI_TELEGRAM_CHAT_ID", ""))
 
+    # Alertas Proativos (WhatsApp)
+    whatsapp_alerts_enabled: bool = False
+    whatsapp_provider: Literal["callmebot", "evolution"] = "callmebot"
+    whatsapp_phone: str = Field(default_factory=lambda: os.getenv("BARSI_WHATSAPP_PHONE", ""))
+    whatsapp_apikey: str = Field(default_factory=lambda: os.getenv("BARSI_WHATSAPP_APIKEY", ""))
+    whatsapp_evolution_url: str = Field(default_factory=lambda: os.getenv("BARSI_WHATSAPP_EVOLUTION_URL", "http://localhost:8080"))
+    whatsapp_evolution_instance: str = Field(default_factory=lambda: os.getenv("BARSI_WHATSAPP_EVOLUTION_INSTANCE", "barsi"))
+
 settings = Settings()
 

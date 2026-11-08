@@ -4,7 +4,13 @@ import respx
 import httpx
 import json
 from barsi.ports.notifications import NotificationsPort
-from barsi.adapters.notifications import TelegramNotifier, NoOpNotifier
+from barsi.adapters.notifications import (
+    TelegramNotifier,
+    NoOpNotifier,
+    WhatsAppCallMeBotNotifier,
+    WhatsAppEvolutionNotifier,
+    MultiNotifier,
+)
 from barsi.adapters.factory import AdapterFactory
 from barsi.config import Settings
 from barsi.domain.models import Position, NewsSummary, InsightResult
@@ -79,6 +85,62 @@ async def test_telegram_notifier_network_failure():
     assert ok is False
 
 
+@pytest.mark.asyncio
+async def test_whatsapp_callmebot_missing_credentials():
+    notifier = WhatsAppCallMeBotNotifier(phone="", api_key="")
+    ok = await notifier.notify("Teste", "Corpo")
+    assert ok is False
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_whatsapp_callmebot_success():
+    phone = "5511999999999"
+    api_key = "123456"
+    route = respx.get("https://api.callmebot.com/whatsapp.php").respond(status_code=200, text="Message Queued")
+    notifier = WhatsAppCallMeBotNotifier(phone=phone, api_key=api_key)
+
+    ok = await notifier.notify("Alerta Barsi", "BBAS3 em zona de aporte", level="alert")
+    assert ok is True
+    assert route.called
+    req = route.calls.last.request
+    assert "phone=5511999999999" in str(req.url)
+    assert "apikey=123456" in str(req.url)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_whatsapp_evolution_success():
+    base_url = "http://localhost:8080"
+    instance = "barsi"
+    url = f"{base_url}/message/sendText/{instance}"
+    route = respx.post(url).respond(status_code=201, json={"status": "SUCCESS"})
+    notifier = WhatsAppEvolutionNotifier(
+        base_url=base_url,
+        instance=instance,
+        api_key="secret_evo_key",
+        recipient="5511988888888",
+    )
+
+    ok = await notifier.notify("Alerta Barsi", "ITUB4 em zona de aporte", level="alert")
+    assert ok is True
+    assert route.called
+    req = route.calls.last.request
+    assert req.headers["apikey"] == "secret_evo_key"
+
+
+@pytest.mark.asyncio
+async def test_multi_notifier_dispatches_to_all():
+    mock1 = MockNotifier()
+    mock2 = MockNotifier()
+    multi = MultiNotifier([mock1, mock2])
+
+    ok = await multi.notify("Título Multi", "Corpo Multi", level="info")
+    assert ok is True
+    assert len(mock1.notifications) == 1
+    assert len(mock2.notifications) == 1
+
+
 def test_adapter_factory_notification_fallback():
     # Desativado por default -> NoOp
     cfg = Settings(telegram_alerts_enabled=False)
@@ -98,6 +160,29 @@ def test_adapter_factory_notification_fallback():
     )
     adapter_active = AdapterFactory.create_notification_adapter(cfg_active)
     assert isinstance(adapter_active, TelegramNotifier)
+
+    # WhatsApp CallMeBot
+    cfg_wa = Settings(
+        whatsapp_alerts_enabled=True,
+        whatsapp_provider="callmebot",
+        whatsapp_phone="5511999999999",
+        whatsapp_apikey="123456",
+    )
+    adapter_wa = AdapterFactory.create_notification_adapter(cfg_wa)
+    assert isinstance(adapter_wa, WhatsAppCallMeBotNotifier)
+
+    # Ambos ativados -> MultiNotifier
+    cfg_multi = Settings(
+        telegram_alerts_enabled=True,
+        telegram_bot_token="tok_test",
+        telegram_chat_id="chat_test",
+        whatsapp_alerts_enabled=True,
+        whatsapp_provider="callmebot",
+        whatsapp_phone="5511999999999",
+        whatsapp_apikey="123456",
+    )
+    adapter_multi = AdapterFactory.create_notification_adapter(cfg_multi)
+    assert isinstance(adapter_multi, MultiNotifier)
 
 
 class DummyMarket:
