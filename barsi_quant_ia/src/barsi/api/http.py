@@ -742,9 +742,42 @@ async def export_xlsx(request: Request):
         raise HTTPException(status_code=400, detail="Nenhuma posição no SQLite para exportar.")
     
     from barsi.adapters.sheets.xlsx_adapter import XLSXAdapter
-    xlsx_path = os.path.join(os.path.dirname(__file__), "../../../carteira_barsi_quant_ia.xlsx")
+    import openpyxl
+
+    xlsx_path = getattr(settings, "local_xlsx_path", None) or "carteira_barsi_quant_ia.xlsx"
+    if not os.path.isabs(xlsx_path):
+        for candidate in [
+            xlsx_path,
+            os.path.join("barsi_quant_ia", xlsx_path),
+            os.path.join(os.path.dirname(__file__), "../../../", xlsx_path),
+            os.path.join(os.path.dirname(__file__), "../../../barsi_quant_ia", xlsx_path),
+        ]:
+            if os.path.exists(candidate):
+                xlsx_path = os.path.abspath(candidate)
+                break
+        else:
+            xlsx_path = os.path.abspath(xlsx_path)
+
     if not os.path.exists(xlsx_path):
-        xlsx_path = "carteira_barsi_quant_ia.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Screener_BEST_Custodia"
+        headers = [
+            "Ticker", "Setor", "Empresa", "Qtd Antes", "Qtd Aporte",
+            "Qtd Total", "Preço Médio", "Preço Atual", "Div Proj",
+            "Preço Teto", "Margem Seg", "DY", "Valor Total", "Meta %",
+            "Total Aporte", "Status", "Teto Manual"
+        ]
+        for col_idx, h in enumerate(headers, start=1):
+            ws.cell(row=9, column=col_idx, value=h)
+        for idx, p in enumerate(positions):
+            r = p.row_index if (p.row_index and p.row_index >= 10) else (10 + idx)
+            ws[f"A{r}"] = p.ticker
+            ws[f"B{r}"] = p.setor
+            ws[f"C{r}"] = p.empresa
+        wb.save(xlsx_path)
+        wb.close()
+
     adapter = XLSXAdapter(xlsx_path)
     await adapter.update_positions(positions)
     return FileResponse(xlsx_path, filename="carteira_barsi_quant_ia.xlsx", media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")

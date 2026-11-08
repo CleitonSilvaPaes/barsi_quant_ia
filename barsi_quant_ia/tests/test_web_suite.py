@@ -258,30 +258,42 @@ def test_export_sheets_rbac_leitor_blocked(auth_client):
     assert "não possui permissão" in res.json()["detail"]
 
 def test_export_xlsx_endpoint(auth_client, tmp_path, monkeypatch):
-    """Caminho B: Valida exportação sob demanda em formato Excel (.xlsx)."""
+    """Caminho B: Valida exportação sob demanda em formato Excel (.xlsx), criando arquivo limpo se não existir."""
     import os
+    import openpyxl
     repo = BudgetRepository(settings.sqlite_db_path)
     repo.save_positions([
-        Position(ticker="BBAS3", row_index=10, preco_atual=17.13, div_proj=2.30, status_barsi=AcaoBarsi.ACUMULAR)
+        Position(ticker="BBAS3", empresa="Banco do Brasil", setor="Bancos", row_index=10, preco_atual=17.13, div_proj=2.30, status_barsi=AcaoBarsi.ACUMULAR)
     ])
 
-    test_xlsx = str(tmp_path / "carteira_barsi_quant_ia.xlsx")
-    with open(test_xlsx, "wb") as f:
-        f.write(b"fake_xlsx_content")
+    # Aponta para um arquivo inexistente no tmp_path para validar a criação automática
+    fresh_xlsx = str(tmp_path / "fresh_export.xlsx")
+    assert not os.path.exists(fresh_xlsx)
 
-    class FakeXLSXAdapter:
-        def __init__(self, path):
-            self.path = path
-        async def update_positions(self, positions):
-            pass
-
-    monkeypatch.setattr("barsi.adapters.sheets.xlsx_adapter.XLSXAdapter", FakeXLSXAdapter)
-    
-    # Redireciona o path do endpoint para o test_xlsx
-    monkeypatch.setattr("os.path.exists", lambda p: True)
+    monkeypatch.setattr(settings, "local_xlsx_path", fresh_xlsx)
 
     res = auth_client.get("/api/export/xlsx")
     assert res.status_code == 200
     assert "spreadsheetml" in res.headers["content-type"]
+    assert os.path.exists(fresh_xlsx)
+
+    # Valida estrutura do arquivo Excel gerado
+    wb = openpyxl.load_workbook(fresh_xlsx)
+    assert "Screener_BEST_Custodia" in wb.sheetnames
+    ws = wb["Screener_BEST_Custodia"]
+    assert ws["A10"].value == "BBAS3"
+    assert ws["H10"].value == 17.13
+    assert ws["I10"].value == 2.30
+    wb.close()
+
+def test_export_xlsx_empty_db_returns_400(auth_client, tmp_path, monkeypatch):
+    """Caminho B: Se o banco SQLite não tiver posições, retorna erro 400 amigável."""
+    monkeypatch.setattr(BudgetRepository, "load_positions", lambda self: [])
+    fresh_xlsx = str(tmp_path / "never_created.xlsx")
+    monkeypatch.setattr(settings, "local_xlsx_path", fresh_xlsx)
+
+    res = auth_client.get("/api/export/xlsx")
+    assert res.status_code == 400
+    assert "Nenhuma posição no SQLite para exportar" in res.json()["detail"]
 
 

@@ -160,7 +160,25 @@ class XLSXAdapter(SheetsPort):
     async def update_positions(self, positions: List[Position], invalidate: bool = True) -> None:
         def _update():
             if not os.path.exists(self.file_path):
-                return
+                wb = openpyxl.Workbook()
+                ws = wb.active
+                ws.title = "Screener_BEST_Custodia"
+                headers = [
+                    "Ticker", "Setor", "Empresa", "Qtd Antes", "Qtd Aporte",
+                    "Qtd Total", "Preço Médio", "Preço Atual", "Div Proj",
+                    "Preço Teto", "Margem Seg", "DY", "Valor Total", "Meta %",
+                    "Total Aporte", "Status", "Teto Manual"
+                ]
+                for col_idx, h in enumerate(headers, start=1):
+                    ws.cell(row=9, column=col_idx, value=h)
+                for idx, p in enumerate(positions):
+                    r = p.row_index if (p.row_index and p.row_index >= 10) else (10 + idx)
+                    ws[f"A{r}"] = p.ticker
+                    ws[f"B{r}"] = p.setor
+                    ws[f"C{r}"] = p.empresa
+                wb.save(self.file_path)
+                wb.close()
+
             wb = openpyxl.load_workbook(self.file_path)
             sheet_names = wb.sheetnames
             if "Screener_BEST_Custodia" in sheet_names:
@@ -168,6 +186,12 @@ class XLSXAdapter(SheetsPort):
                 for p in positions:
                     r = p.row_index
                     qtd_tot = p.qtd_antes + p.qtd_aporte
+                    if not ws[f"A{r}"].value:
+                        ws[f"A{r}"] = p.ticker
+                    if not ws[f"B{r}"].value:
+                        ws[f"B{r}"] = p.setor
+                    if not ws[f"C{r}"].value:
+                        ws[f"C{r}"] = p.empresa
                     ws[f"D{r}"] = p.qtd_antes
                     ws[f"E{r}"] = p.qtd_aporte
                     ws[f"F{r}"] = qtd_tot
