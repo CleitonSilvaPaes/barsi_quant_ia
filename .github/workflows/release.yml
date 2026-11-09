@@ -18,7 +18,6 @@ jobs:
           fetch-depth: 0
 
       - name: Generate changelog
-        id: changelog
         run: |
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
           if [ -z "$PREV_TAG" ]; then
@@ -26,18 +25,18 @@ jobs:
           else
             RANGE="$PREV_TAG..HEAD"
           fi
-          echo "changelog<<EOF" >> $GITHUB_OUTPUT
-          git log $RANGE --pretty=format:"- %s (%h)" --no-merges >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          echo "## 🚀 O que mudou nesta versão" > release_notes.md
+          echo "" >> release_notes.md
+          git log "$RANGE" --pretty=format:"- %s (%h)" --no-merges >> release_notes.md
+          echo "" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "---" >> release_notes.md
+          echo "### 📺 Deploy na TV Box" >> release_notes.md
+          echo "Este release foi sincronizado e deployado automaticamente na TV Box via Tailscale." >> release_notes.md
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          body: |
-            ## Mudanças
-            ${{ steps.changelog.outputs.changelog }}
-
-            ## Deploy
-            Este release foi sincronizado e deployado automaticamente na TV Box.
+          body_path: release_notes.md
           draft: false
           prerelease: false
