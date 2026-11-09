@@ -57,7 +57,7 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.TVBOX_SSH_KEY }}" > ~/.ssh/id_deploy
           chmod 600 ~/.ssh/id_deploy
-          DETECTED=$(ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_deploy -o ConnectTimeout=8 ${{ secrets.TVBOX_USER }}@${{ secrets.TVBOX_HOST }} "systemctl show -p WorkingDirectory --value barsi-api.service 2>/dev/null || true")
+          DETECTED=$(ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_deploy -o ConnectTimeout=8 ${{ secrets.TVBOX_USER }}@${{ secrets.TVBOX_HOST }} 'DIR=$(systemctl show -p WorkingDirectory --value barsi-api.service 2>/dev/null || true); [ -n "$DIR" ] && [ -d "$DIR" ] && echo "$DIR" || true')
           rm -f ~/.ssh/id_deploy
           if [ -n "$DETECTED" ]; then
             TARGET="$DETECTED"
