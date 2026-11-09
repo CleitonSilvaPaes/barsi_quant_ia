@@ -46,7 +46,7 @@ def migrar(xlsx_path: str, credentials_path: str, spreadsheet_title: str = "Cart
 
     # 4. Atualiza em lote no Google Sheets
     ws_sheet.update(range_name="A1:N22", values=dados_matriz)
-    print(f"[SUCESSO] Dados migrados com sucesso para o Google Sheets!")
+    print("[SUCESSO] Dados migrados com sucesso para o Google Sheets!")
     print(f"Acesse em: https://docs.google.com/spreadsheets/d/{sh.id}")
 
 if __name__ == "__main__":

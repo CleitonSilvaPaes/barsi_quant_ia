@@ -53,7 +53,11 @@ def test_sigmoid_numerical_stability():
 
 
 def test_dividend_sustainability_scorer(tmp_path):
-    """Valida o cálculo do score DSS e a categorização por badge."""
+    """Valida o cálculo do score DSS e a categorização por badge com pesos treinados."""
+    from barsi.training.train_dss import train_full_pipeline
+    weights_file = str(tmp_path / "test_weights.json")
+    train_full_pipeline(db_path=None, output_path=weights_file, use_system_data=False)
+
     p = Position(
         ticker="BBAS3",
         row_index=10,
@@ -63,7 +67,7 @@ def test_dividend_sustainability_scorer(tmp_path):
         margem_seguranca=72.7,
         qtd_antes=100
     )
-    scorer = DividendSustainabilityScorer.get()
+    scorer = DividendSustainabilityScorer(weights_path=weights_file)
     res = scorer.score(p, extras={"perenidade": 0.95, "roe": 0.22, "anos_pagando": 10})
 
     assert "score" in res

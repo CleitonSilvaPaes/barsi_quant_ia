@@ -48,7 +48,29 @@ jobs:
           tags: tag:ci
 
       # ─────────────────────────────────────────────────────────
-      # 2. Backup do código e SQLite ANTES de mexer em qualquer arquivo
+      # 2. Detecta WorkingDirectory remoto diretamente do systemd
+      # ─────────────────────────────────────────────────────────
+      - name: Detect remote working directory
+        id: detect
+        shell: bash
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.TVBOX_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          DETECTED=$(ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_deploy -o ConnectTimeout=8 ${{ secrets.TVBOX_USER }}@${{ secrets.TVBOX_HOST }} "systemctl show -p WorkingDirectory --value barsi-api.service 2>/dev/null || true")
+          rm -f ~/.ssh/id_deploy
+          if [ -n "$DETECTED" ]; then
+            TARGET="$DETECTED"
+          elif [ -n "${{ secrets.TVBOX_HOME }}" ]; then
+            TARGET="${{ secrets.TVBOX_HOME }}"
+          else
+            TARGET="/home/${{ secrets.TVBOX_USER }}/barsi_quant_ia"
+          fi
+          echo "📂 Diretório remoto resolvido: $TARGET"
+          echo "dir=$TARGET" >> "$GITHUB_OUTPUT"
+
+      # ─────────────────────────────────────────────────────────
+      # 3. Backup do código e SQLite ANTES de mexer em qualquer arquivo
       # ─────────────────────────────────────────────────────────
       - name: Backup code and SQLite (rollback safety)
         uses: appleboy/ssh-action@v1
@@ -58,9 +80,8 @@ jobs:
           key: ${{ secrets.TVBOX_SSH_KEY }}
           script: |
             set -e
-            TARGET_DIR="${{ env.TARGET_DIR }}"
-            SYS_DIR=$(systemctl show -p WorkingDirectory --value barsi-api.service 2>/dev/null || true)
-            [ -n "$SYS_DIR" ] && [ -d "$SYS_DIR" ] && TARGET_DIR="$SYS_DIR"
+            TARGET_DIR="${{ steps.detect.outputs.dir }}"
+            echo "📂 Usando diretório de trabalho: $TARGET_DIR"
             cd "$TARGET_DIR"
 
             # 1. Backup do SQLite
@@ -75,20 +96,20 @@ jobs:
             echo "✅ Código anterior preservado em $TARGET_DIR/memory/barsi_code_prev"
 
       # ─────────────────────────────────────────────────────────
-      # 3. Sync do código fonte via rsync (delta transfer)
+      # 4. Sync do código fonte via rsync (delta transfer)
       # ─────────────────────────────────────────────────────────
       - name: Deploy code via rsync
         uses: burnett01/rsync-deployments@7.0.1
         with:
           switches: -avz --delete --exclude='__pycache__' --exclude='*.pyc'
           path: barsi_quant_ia/src/barsi/
-          remote_path: ${{ secrets.TVBOX_HOME != '' && secrets.TVBOX_HOME || format('/home/{0}/barsi_quant_ia', secrets.TVBOX_USER) }}/src/barsi/
+          remote_path: ${{ steps.detect.outputs.dir }}/src/barsi/
           remote_host: ${{ secrets.TVBOX_HOST }}
           remote_user: ${{ secrets.TVBOX_USER }}
           remote_key: ${{ secrets.TVBOX_SSH_KEY }}
 
       # ─────────────────────────────────────────────────────────
-      # 4. Restart + health check
+      # 5. Restart + health check
       # ─────────────────────────────────────────────────────────
       - name: Restart & Health Check
         uses: appleboy/ssh-action@v1
@@ -127,7 +148,7 @@ jobs:
             exit 1
 
       # ─────────────────────────────────────────────────────────
-      # 5. Rollback total em caso de falha (Código + Banco)
+      # 6. Rollback total em caso de falha (Código + Banco)
       # ─────────────────────────────────────────────────────────
       - name: Rollback on failure
         if: failure()
@@ -138,9 +159,8 @@ jobs:
           key: ${{ secrets.TVBOX_SSH_KEY }}
           script: |
             echo "🚨 Deploy falhou — iniciando rollback total do código e banco"
-            TARGET_DIR="${{ env.TARGET_DIR }}"
-            SYS_DIR=$(systemctl show -p WorkingDirectory --value barsi-api.service 2>/dev/null || true)
-            [ -n "$SYS_DIR" ] && [ -d "$SYS_DIR" ] && TARGET_DIR="$SYS_DIR"
+            TARGET_DIR="${{ steps.detect.outputs.dir }}"
+            [ -z "$TARGET_DIR" ] && TARGET_DIR="/home/${{ secrets.TVBOX_USER }}/barsi_quant_ia"
             cd "$TARGET_DIR"
 
             # 1. Restaura CÓDIGO anterior
@@ -163,7 +183,7 @@ jobs:
             sudo systemctl restart barsi-api.service || true
 
       # ─────────────────────────────────────────────────────────
-      # 6. Limpeza de backup temporário em caso de sucesso
+      # 7. Limpeza de backup temporário em caso de sucesso
       # ─────────────────────────────────────────────────────────
       - name: Cleanup code backup on success
         if: success()
@@ -173,14 +193,13 @@ jobs:
           username: ${{ secrets.TVBOX_USER }}
           key: ${{ secrets.TVBOX_SSH_KEY }}
           script: |
-            TARGET_DIR="${{ env.TARGET_DIR }}"
-            SYS_DIR=$(systemctl show -p WorkingDirectory --value barsi-api.service 2>/dev/null || true)
-            [ -n "$SYS_DIR" ] && [ -d "$SYS_DIR" ] && TARGET_DIR="$SYS_DIR"
+            TARGET_DIR="${{ steps.detect.outputs.dir }}"
+            [ -z "$TARGET_DIR" ] && TARGET_DIR="/home/${{ secrets.TVBOX_USER }}/barsi_quant_ia"
             rm -rf "$TARGET_DIR/memory/barsi_code_prev" 2>/dev/null || true
             echo "🧹 Backup temporário de código limpo com sucesso."
 
       # ─────────────────────────────────────────────────────────
-      # 7. Notificação Telegram
+      # 8. Notificação Telegram
       # ─────────────────────────────────────────────────────────
       - name: Notify Telegram
         if: always()

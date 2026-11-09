@@ -45,10 +45,11 @@ if ! command -v cloudflared &> /dev/null; then
 fi
 
 # 5. Criar ambiente virtual Python e instalar pacote
-APP_DIR="${BARSI_TVBOX_HOME:-/home/$USER/barsi_quant_ia}"
-echo "[5/6] Configurando aplicação em $APP_DIR..."
+USER_NAME="${BARSI_TVBOX_USER:-$USER}"
+APP_DIR="${BARSI_TVBOX_HOME:-/home/$USER_NAME/barsi_quant_ia}"
+echo "[5/6] Configurando aplicação em $APP_DIR para usuário $USER_NAME..."
 sudo mkdir -p "$APP_DIR"
-sudo chown -R "$USER:$USER" "$APP_DIR"
+sudo chown -R "$USER_NAME:$USER_NAME" "$APP_DIR"
 
 if [ ! -d "$APP_DIR/.venv" ]; then
     python3 -m venv "$APP_DIR/.venv"
@@ -59,7 +60,6 @@ fi
 
 # 6. Criar e habilitar serviço systemd
 echo "[6/6] Configurando Systemd Service e Timer..."
-USER_NAME="${BARSI_TVBOX_USER:-$USER}"
 cat << EOF | sudo tee /etc/systemd/system/barsi.service
 [Unit]
 Description=Sistema Previdenciario Barsi API & Worker
