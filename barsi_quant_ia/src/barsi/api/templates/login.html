@@ -20,6 +20,7 @@
     <form method="POST" action="/login">
       <input type="text" name="username" placeholder="Usuário" required />
       <input type="password" name="password" placeholder="Senha" required />
+      <input type="text" name="totp_code" placeholder="Código 2FA (TOTP de 6 dígitos se ativo)" maxlength="6" style="letter-spacing: 2px; text-align: center;" />
       <button type="submit">Entrar no Painel</button>
     </form>
   </div>

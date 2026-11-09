@@ -30,7 +30,7 @@
           <th style="text-align: center;">Status</th>
         </tr>
       </thead>
-      <tbody>
+      <tbody id="transacoes-body">
         <tr>
           <td>06/11/2026</td>
           <td><strong>Compra Ações BBAS3 (18 cotas)</strong></td>
@@ -45,22 +45,6 @@
           <td>Salário / Entradas</td>
           <td>Entrada</td>
           <td style="text-align: right; color: var(--green); font-weight:600;">+ R$ 4.440,00</td>
-          <td style="text-align: center;"><span class="badge-acumular">CONCILIADO</span></td>
-        </tr>
-        <tr>
-          <td>05/11/2026</td>
-          <td><strong>Pagamento Aluguel Moradia</strong></td>
-          <td>Moradia</td>
-          <td>Despesa Fixa</td>
-          <td style="text-align: right; color: var(--red); font-weight:600;">- R$ 849,46</td>
-          <td style="text-align: center;"><span class="badge-acumular">CONCILIADO</span></td>
-        </tr>
-        <tr>
-          <td>04/11/2026</td>
-          <td><strong>SUPERMERCADO ARCHER</strong></td>
-          <td>Despesas Variáveis</td>
-          <td>Despesa Variável</td>
-          <td style="text-align: right; color: var(--red); font-weight:600;">- R$ 242,10</td>
           <td style="text-align: center;"><span class="badge-acumular">CONCILIADO</span></td>
         </tr>
       </tbody>
@@ -118,5 +102,38 @@
       showToast("Erro na sincronização", "error");
     }
   }
+
+  async function carregarExtratos() {
+    try {
+      const res = await fetch("/api/extratos/transacoes?limit=50");
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data || !data.transacoes || data.transacoes.length === 0) return;
+
+      const tbody = document.getElementById("transacoes-body");
+      tbody.innerHTML = "";
+      data.transacoes.forEach(t => {
+        const isCredit = t.tipo === "CREDIT";
+        const valColor = isCredit ? "var(--green)" : "var(--red)";
+        const sinal = isCredit ? "+" : "-";
+        const valFormatted = (t.valor || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+        tbody.innerHTML += `
+          <tr>
+            <td>${t.data}</td>
+            <td><strong>${t.descricao}</strong></td>
+            <td>${t.categoria || 'Geral'}</td>
+            <td>${t.origem || 'CONTA'}</td>
+            <td style="text-align: right; color: ${valColor}; font-weight:600;">${sinal} ${valFormatted}</td>
+            <td style="text-align: center;"><span class="badge-acumular">CONCILIADO</span></td>
+          </tr>
+        `;
+      });
+      showToast(`${data.transacoes.length} transações carregadas.`);
+    } catch (e) {
+      console.warn("Erro ao buscar transações:", e);
+    }
+  }
+
+  document.addEventListener("DOMContentLoaded", carregarExtratos);
 </script>
 

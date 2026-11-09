@@ -87,6 +87,7 @@ INIT_BUDGET_SCHEMA_SQL = """
         feedback_usuario    TEXT DEFAULT '',
         insight_atual       TEXT DEFAULT '',
         teto_manual         INTEGER DEFAULT 0,
+        custo_medio         REAL DEFAULT 0.0,
         updated_at          TEXT DEFAULT (datetime('now'))
     );
 
@@ -173,6 +174,22 @@ INIT_BUDGET_SCHEMA_SQL = """
         expires_at   TEXT NOT NULL,
         updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- 13. Dividendos Reais Recebidos (P0: dividends_received)
+    CREATE TABLE IF NOT EXISTS dividends_received (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticker           TEXT NOT NULL,
+        data_pagamento   TEXT NOT NULL, -- 'YYYY-MM-DD'
+        mes_ano          TEXT NOT NULL, -- 'YYYY-MM'
+        valor_total      REAL NOT NULL CHECK (valor_total >= 0),
+        valor_por_cota   REAL NOT NULL DEFAULT 0.0,
+        quantidade       INTEGER NOT NULL DEFAULT 0,
+        tipo             TEXT NOT NULL DEFAULT 'DIVIDENDO', -- 'DIVIDENDO' | 'JCP' | 'RENDIMENTO'
+        fonte            TEXT NOT NULL DEFAULT 'manual',    -- 'manual' | 'ofx' | 'b3'
+        created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_dividends_ticker ON dividends_received(ticker, data_pagamento);
+    CREATE INDEX IF NOT EXISTS idx_dividends_mes ON dividends_received(mes_ano);
 """
 
 DEFAULT_KEYWORDS: List[Tuple[str, str, str, int]] = [
@@ -288,6 +305,8 @@ class BudgetRepository:
                 cols_pos = [r["name"] for r in conn.execute("PRAGMA table_info(positions)").fetchall()]
                 if "teto_manual" not in cols_pos:
                     conn.execute("ALTER TABLE positions ADD COLUMN teto_manual INTEGER DEFAULT 0")
+                if "custo_medio" not in cols_pos:
+                    conn.execute("ALTER TABLE positions ADD COLUMN custo_medio REAL DEFAULT 0.0")
             except Exception:
                 pass
         self.seed_default_keywords()
@@ -542,8 +561,8 @@ class BudgetRepository:
                     INSERT INTO positions (
                         ticker, empresa, setor, qtd_antes, qtd_aporte,
                         preco_atual, div_proj, preco_teto, margem_seguranca,
-                        feedback_usuario, insight_atual, teto_manual, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                        feedback_usuario, insight_atual, teto_manual, custo_medio, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                     ON CONFLICT(ticker) DO UPDATE SET
                         empresa = excluded.empresa,
                         setor = excluded.setor,
@@ -556,11 +575,13 @@ class BudgetRepository:
                         feedback_usuario = excluded.feedback_usuario,
                         insight_atual = excluded.insight_atual,
                         teto_manual = excluded.teto_manual,
+                        custo_medio = excluded.custo_medio,
                         updated_at = datetime('now')
                 """, (
                     p.ticker, p.empresa, p.setor, p.qtd_antes, p.qtd_aporte,
                     p.preco_atual, p.div_proj, p.preco_teto, p.margem_seguranca,
-                    p.feedback_usuario, p.insight_atual, 1 if getattr(p, "teto_manual", False) else 0
+                    p.feedback_usuario, p.insight_atual, 1 if getattr(p, "teto_manual", False) else 0,
+                    float(getattr(p, "custo_medio", 0.0) or 0.0)
                 ))
                 count += cur.rowcount
         return count
@@ -576,6 +597,7 @@ class BudgetRepository:
             positions = []
             for idx, r in enumerate(rows, start=10):
                 teto_man = bool(r["teto_manual"]) if "teto_manual" in r.keys() else False
+                c_medio = float(r["custo_medio"] or 0.0) if "custo_medio" in r.keys() else 0.0
                 q_antes = r["qtd_antes"] or 0
                 q_aporte = r["qtd_aporte"] or 0
                 p_atual = float(r["preco_atual"] or 0.0)
@@ -595,7 +617,8 @@ class BudgetRepository:
                     total_aporte=round(q_aporte * p_atual, 2),
                     feedback_usuario=r["feedback_usuario"] or "",
                     insight_atual=r["insight_atual"] or "",
-                    teto_manual=teto_man
+                    teto_manual=teto_man,
+                    custo_medio=c_medio
                 ))
             return positions
 
@@ -979,3 +1002,151 @@ class BudgetRepository:
                 except Exception:
                     pass
             return (positions if positions else None), is_stale
+
+    # ------------------------------------------------------------------ #
+    # Rastreamento de Dividendos Reais (P0: dividends_received)
+    # ------------------------------------------------------------------ #
+    def record_dividend_received(
+        self,
+        ticker: str,
+        data_pagamento: str,
+        valor_total: float,
+        valor_por_cota: float = 0.0,
+        quantidade: int = 0,
+        tipo: str = "DIVIDENDO",
+        fonte: str = "manual"
+    ) -> int:
+        """Registra um dividendo real recebido no SQLite."""
+        ticker = ticker.strip().upper()
+        mes_ano = data_pagamento[:7] if len(data_pagamento) >= 7 else datetime.now().strftime("%Y-%m")
+        with self._conn() as c:
+            cur = c.execute("""
+                INSERT INTO dividends_received (
+                    ticker, data_pagamento, mes_ano, valor_total, valor_por_cota,
+                    quantidade, tipo, fonte, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            """, (ticker, data_pagamento, mes_ano, valor_total, valor_por_cota, quantidade, tipo, fonte))
+            return cur.lastrowid
+
+    def list_dividends_received(
+        self,
+        ticker: Optional[str] = None,
+        mes_ano: Optional[str] = None,
+        year: Optional[int] = None,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """Lista registros de proventos reais recebidos com filtros flexíveis."""
+        query = "SELECT * FROM dividends_received WHERE 1=1"
+        params = []
+        if ticker:
+            query += " AND ticker = ?"
+            params.append(ticker.strip().upper())
+        if mes_ano:
+            query += " AND mes_ano = ?"
+            params.append(mes_ano)
+        if year:
+            query += " AND mes_ano LIKE ?"
+            params.append(f"{year}-%")
+        query += " ORDER BY data_pagamento DESC, id DESC LIMIT ?"
+        params.append(limit)
+
+        with self._conn() as c:
+            rows = c.execute(query, params).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_dividends_summary_by_month(self, months: int = 12) -> List[Dict[str, Any]]:
+        """Retorna proventos agrupados por mês para os últimos N meses."""
+        with self._conn() as c:
+            rows = c.execute("""
+                SELECT mes_ano, SUM(valor_total) as total_mes, COUNT(*) as qtd_lancamentos
+                FROM dividends_received
+                GROUP BY mes_ano
+                ORDER BY mes_ano DESC
+                LIMIT ?
+            """, (months,)).fetchall()
+            results = [dict(r) for r in rows]
+            results.reverse()
+            return results
+
+    def get_total_dividends_received(self, year: Optional[int] = None) -> float:
+        """Retorna o valor total de dividendos recebidos no ano ou histórico."""
+        query = "SELECT COALESCE(SUM(valor_total), 0.0) FROM dividends_received WHERE 1=1"
+        params = []
+        if year:
+            query += " AND mes_ano LIKE ?"
+            params.append(f"{year}-%")
+        with self._conn() as c:
+            val = c.execute(query, params).fetchone()[0]
+            return round(float(val), 2)
+
+    # ------------------------------------------------------------------ #
+    # Orçamento & Transações Conciliadas (Onda 2)
+    # ------------------------------------------------------------------ #
+    def list_transacoes(
+        self,
+        mes_ano: Optional[str] = None,
+        categoria: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Retorna transações bancárias/cartão persistidas com filtros."""
+        query = "SELECT * FROM transacoes WHERE 1=1"
+        params = []
+        if mes_ano:
+            query += " AND mes_ano = ?"
+            params.append(mes_ano)
+        if categoria:
+            query += " AND categoria = ?"
+            params.append(categoria)
+        query += " ORDER BY data DESC, id DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+
+        with self._conn() as c:
+            rows = c.execute(query, params).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_budget_overview(self, mes_ano: Optional[str] = None) -> Dict[str, Any]:
+        """Calcula a visão consolidada de Orçamento (Previsto vs Realizado) do mês."""
+        if not mes_ano:
+            mes_ano = datetime.now().strftime("%Y-%m")
+
+        recurring = self.get_all_expenses(mes_ano)
+        with self._conn() as c:
+            # Gastos reais por categoria no mês via tabela transacoes
+            rows = c.execute("""
+                SELECT categoria,
+                       SUM(CASE WHEN tipo = 'DEBIT' THEN valor ELSE 0 END) as total_debito,
+                       SUM(CASE WHEN tipo = 'CREDIT' THEN valor ELSE 0 END) as total_credito
+                FROM transacoes
+                WHERE mes_ano = ?
+                GROUP BY categoria
+            """, (mes_ano,)).fetchall()
+            realizado_map = {r["categoria"]: float(r["total_debito"] or 0.0) for r in rows}
+            creditos_map = {r["categoria"]: float(r["total_credito"] or 0.0) for r in rows}
+
+        total_entradas_real = sum(c for cat, c in creditos_map.items() if "SALÁRIO" in cat.upper() or "RECEITA" in cat.upper() or "ENTRADA" in cat.upper())
+        total_saidas_real = sum(realizado_map.values())
+        
+        # Consolida itens comparativos
+        all_cats = sorted(set(list(recurring.keys()) + list(realizado_map.keys())))
+        items = []
+        for cat in all_cats:
+            previsto = recurring.get(cat, 0.0)
+            realizado = realizado_map.get(cat, 0.0)
+            delta = round(realizado - previsto, 2)
+            items.append({
+                "categoria": cat,
+                "previsto": previsto,
+                "realizado": realizado,
+                "delta": delta,
+                "status": "CONFORME" if abs(delta) < 1.0 else ("ECONOMIA" if delta < 0 else "ATENÇÃO")
+            })
+
+        return {
+            "mes_ano": mes_ano,
+            "total_entradas": round(total_entradas_real if total_entradas_real > 0 else 4440.0, 2),
+            "total_saidas": round(total_saidas_real, 2),
+            "saldo_livre": round((total_entradas_real if total_entradas_real > 0 else 4440.0) - total_saidas_real, 2),
+            "items": items
+        }
+

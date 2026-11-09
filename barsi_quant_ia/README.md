@@ -171,10 +171,122 @@ O comando realiza automaticamente:
 
 ---
 
-## 🔮 Roadmap de Evolução Estratégica (Top 5 Prioridades)
+## 🎯 Machine Learning & Arquitetura Quant
 
-1. 🥇 **Rastreamento de Dividendos Reais Recebidos**: Tabela `dividends_received` a partir dos lançamentos de proventos do OFX, comparando DPA Projetado vs DPA Realizado com cálculo de Yield on Cost real.
-2. 🥇 **Backtesting Histórico de Aportes**: Simulador de curva de bola de neve (*Snowball Chart*) baseado no histórico de cotações (`price_history`) e reinvestimento dos proventos.
-3. 🥇 **Relatório Mensal Automatizado em PDF**: Geração de relatório consolidado de fechamento de mês para arquivo pessoal e prestação familiar.
-4. 🥇 **Alertas Preventivos de Mudança de Tese**: Detecção via NLP/notícias de cortes de dividendos, payout abusivo (>100%) ou endividamento acelerado antes do mercado precificar.
-5. 🥇 **Observabilidade & Métricas Prometheus (`/metrics`)**: Exposição de métricas operacionais para monitoramento de saúde do sistema e do daemon diário.
+### 🔍 A Realidade dos Dados em Finanças Barsi
+Diferente de modelos de visão computacional ou processamento de linguagem natural que operam sobre milhões de parâmetros desestruturados, a carteira Barsi Quant IA lida com **dados tabulares estruturados (8 a 16 métricas numéricas por ativo)** sobre um universo restrito de **15 a 100 ativos B.E.S.T.**:
+
+| Dimensão | Realidade da Aplicação | Abordagem Quant Adotada |
+| :--- | :--- | :--- |
+| **Tipo de Dado** | Tabular numérico (Payout, DY, Dívida/EBITDA, ROE, Margem) | Features normalizadas e lineares |
+| **Tamanho da Amostra** | 15 ativos em carteira, screening de até 100 ações | **Evitar overfit**: modelos rasos e lineares |
+| **Hardware Alvo** | Edge ARM64 (TV Box), 1.2GHz, < 250MB RAM livre | RAM < 1MB, zero GPU, treino em < 1s |
+| **Latência de Inferência** | Sub-milissegundo (< 1ms) para UI interativa | Forward pass puro sem overhead de runtime pesado |
+| **Interpretabilidade** | 100% mandatória (saber por que o ativo foi recomendado) | Pesos explícitos e auditáveis |
+
+### 🏆 Arquitetura de Ensemble Quantitativo
+O sistema utiliza um ensemble de três motores especializados:
+
+```mermaid
+flowchart TD
+    A["Dados de Mercado (B3 / YFinance)"] --> B["1. Rule Engine Determinístico"]
+    A --> C["2. Regressão Logística / DSS"]
+    A --> D["3. Q-Learning (RLHF)"]
+
+    B -->|"Preço Teto & Margem Barsi"| E["Score Consolidado B.E.S.T."]
+    C -->|"Sustentabilidade dos Proventos"| E
+    D -->|"Alocação de Aportes & Feedback"| E
+
+    E --> F["Decisão: ACUMULAR / AGUARDAR"]
+```
+
+1. **Rule Engine Determinístico Barsi**: Aplica as fórmulas canônicas de Luiz Barsi Filho:
+   $$\text{Preço Teto} = \frac{\text{Proventos Projetados}}{0{,}06}$$
+   $$\text{Margem de Segurança} = \frac{\text{Preço Teto} - \text{Cotação}}{\text{Cotação}} \times 100$$
+2. **Dividend Sustainability Scorer (DSS) — Regressão Logística / TinyMLP**:
+   - Classificação probabilística da sustentabilidade dos dividendos futuros.
+   - Pesos lineares balanceados: penaliza alto payout (>90%) associado a alavancagem elevada ($\text{Dívida Líquida}/\text{EBITDA} > 2.5$), e bonifica ROE consistente (>15%) e geração de caixa.
+   - Treinamento instantâneo via Maximum Likelihood Estimation (MLE) com proteção matemática contra overfitting.
+3. **Q-Learning de Alocação de Aportes com RLHF**:
+   - Ajusta a distribuição de capital entre os ativos com maior margem de segurança.
+   - Refinado continuamente através dos botões de feedback do investidor (*Concordo / Discordo*) na interface web.
+
+---
+
+## 🔮 Roadmap Estratégico de Valor Real
+
+O desenvolvimento do Barsi Quant IA é norteado por entregas de valor tangível à acumulação de patrimônio e independência financeira, dividido em prioridades claras:
+
+### 🥇 P0 — Fundamentos & Rastreamento Real (Implementado)
+- [x] **Rastreamento de Dividendos Reais Recebidos (`dividends_received`)**:
+  - Registro de proventos creditados na conta da corretora (Dividendo, JCP, Rendimento FII) com data, ticker e valor líquido.
+  - Agrupamento histórico por mês e cálculo automático da capacidade de reinvestimento da bola de neve.
+- [x] **Custo Médio e Yield on Cost (YoC)**:
+  - Cálculo contínuo de $\text{Yield on Cost} = \frac{\text{DPA Projetado}}{\text{Custo Médio}} \times 100$.
+  - Exibição inline na tabela da carteira (`/carteira`) para mensurar a rentabilidade sobre o capital efetivamente investido.
+- [x] **2FA TOTP (RFC 6238) para Acesso Administrativo**:
+  - Autenticação em duas etapas nativa em Python (sem dependências externas) compatível com Google Authenticator, Authy e 1Password.
+  - Setup via QR Code no painel de configurações e verificação com tolerância temporal de 30 segundos.
+- [x] **Deduplicação de Alertas Telegram**: Trava diária no SQLite (`notification_log`) limitando notificações a no máximo 1 alerta por ticker/dia.
+
+### 🥈 P1 — Inteligência Preventiva & Automação Mensal
+- [ ] **Alertas Preventivos de Mudança de Tese**: Monitoramento autônomo de fatos relevantes e notícias para detectar cortes abruptos de dividendos, aumento abusivo de alavancagem ou perda de concessões nos setores B.E.S.T.
+- [ ] **Relatório Mensal Automatizado em PDF**: Fechamento automático de mês gerando documento PDF consolidado com patrimônio, proventos recebidos, economia no orçamento e plano de aportes do mês seguinte.
+- [ ] **Simulador de Bola de Neve (Snowball Backtesting)**: Projeção de longo prazo com base no histórico real de cotações (`price_history`), reinvestimento dos proventos e taxa de crescimento dos dividendos.
+
+### 🥉 P2 — Experiência do Investidor & Expansão
+- [ ] **Barsi Wrapped Anual**: Retrospectiva visual do ano com total de proventos recebidos, novo custo médio alcançado e ativos mais rentáveis.
+- [ ] **PWA Instalável (Progressive Web App)**: Atalho de aplicativo no celular para consulta ultrarrápida com funcionamento offline.
+- [ ] **Screening Ampliado B3**: Monitoramento automático de todas as ações elegíveis aos setores B.E.S.T. na bolsa de valores.
+
+### ⛔ Filtro Negativo — O que NÃO Faremos
+Para garantir foco, performance e confiabilidade, o projeto adota decisões conscientes de engenharia:
+- ❌ **Não usaremos Deep Learning profundo para seleção de ações**: Incompatível com o tamanho da amostra (15-100 ativos) e desprovido de explicabilidade matemática.
+- ❌ **Não migraremos o SQLite para PostgreSQL**: O SQLite local em modo WAL fornece transações em < 5ms, consumo de memória insignificante e elimina completamente o overhead de servidores de banco.
+- ❌ **Não implementaremos Trading Automatizado ou Day-Trade**: A filosofia de Luiz Barsi Filho baseia-se em compra e custódia previdenciária de longo prazo (*Buy and Hold*).
+- ❌ **Não utilizaremos Kubernetes ou Microserviços**: Arquitetura modular monolítica otimizada para o processador ARM64 da TV Box doméstica.
+
+---
+
+## 🚀 CI/CD & Deploy Contínuo via Tailscale SSH
+
+O pipeline de deploy é totalmente automatizado via GitHub Actions e conectado de forma segura à TV Box ARM64:
+
+```mermaid
+sequenceDiagram
+    participant Dev as Desenvolvedor
+    participant Git as GitHub (dev / tags)
+    participant CI as GitHub Actions (Ubuntu)
+    participant TS as Tailscale VPN (WireGuard)
+    participant Box as TV Box (Debian ARM64)
+
+    Dev->>Git: git push tag v*.*.*
+    Git->>CI: Dispara deploy.yml
+    CI->>TS: Conecta ao Tailnet (OAuth Client ephemeral)
+    CI->>Box: Detecta WorkingDirectory via systemd
+    CI->>Box: Backup prévio (SQLite + código em memory/barsi_code_prev)
+    CI->>Box: Sincronização diferencial de arquivos via rsync
+    CI->>Box: sudo systemctl restart barsi-api.service
+    CI->>Box: Health check com janela de warm-up (10s + 15 tentativas)
+    CI-->>Dev: Notificação de sucesso / Rollback automático em falha
+```
+
+### 🔒 Segurança Operacional do Pipeline
+1. **Rede Tailscale Privada**: Acesso SSH encapsulado diretamente pela rede WireGuard criptografada da Tailnet (`barsi-tvbox`), sem portas abertas no roteador doméstico.
+2. **Rollback Automático**: Caso a API não responda no health check em até 40s após o restart, o código anterior preservado em `memory/barsi_code_prev` é automaticamente restaurado.
+3. **Sudoers NOPASSWD Restrito**: Permissão concedida exclusivamente para os binários `/bin/systemctl` e `/bin/journalctl`.
+
+---
+
+## 🧪 Testes Automatizados & Qualidade de Código
+
+A suíte de testes utiliza `pytest` com asserções estritas, isolamento via `tmp_path`, mocks para chamadas de rede e validação de cobertura:
+
+```bash
+# Executar suíte completa de testes com gate de cobertura mínimo de 40%
+pytest barsi_quant_ia/tests/ -v --cov=barsi --cov-fail-under=40
+```
+
+- **Total de Testes**: 108 testes automatizados (100% passando).
+- **Cobertura de Código**: > 62% (superando amplamente o gate do CI).
+- **Isolamento**: Testes de endpoints, repositórios e serviços rodam de forma independente e determinística.

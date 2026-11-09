@@ -43,6 +43,25 @@ class Position(BaseModel):
     feedback_usuario: str = ""
     insight_atual: str = ""
     teto_manual: bool = False
+    custo_medio: float = 0.0
+
+    @property
+    def yield_on_cost(self) -> float:
+        if self.custo_medio and self.custo_medio > 0 and self.div_proj and self.div_proj > 0:
+            return round((self.div_proj / self.custo_medio) * 100.0, 2)
+        return 0.0
+
+class DividendReceived(BaseModel):
+    id: Optional[int] = None
+    ticker: str
+    data_pagamento: str  # YYYY-MM-DD
+    mes_ano: str         # YYYY-MM
+    valor_total: float
+    valor_por_cota: float = 0.0
+    quantidade: int = 0
+    tipo: str = "DIVIDENDO"  # DIVIDENDO | JCP | RENDIMENTO
+    fonte: str = "manual"    # manual | ofx | b3
+
 
 class SimuladorOrder(BaseModel):
     rank: int

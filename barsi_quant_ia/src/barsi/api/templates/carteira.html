@@ -58,6 +58,8 @@
           <th style="text-align: right;" onclick="ordenarPor('preco')" style="cursor:pointer;">Cotação ⬍</th>
           <th style="text-align: right;" onclick="ordenarPor('teto')" style="cursor:pointer;">Preço Teto ⬍</th>
           <th style="text-align: right;" onclick="ordenarPor('margem')" style="cursor:pointer;">Margem ⬍</th>
+          <th style="text-align: right; min-width: 85px;" onclick="ordenarPor('custo_medio')" style="cursor:pointer;">Custo Médio ⬍</th>
+          <th style="text-align: right; min-width: 75px;" onclick="ordenarPor('yield_on_cost')" style="cursor:pointer;">YoC ⬍</th>
           <th style="text-align: right; min-width: 85px;">DPA Proj.</th>
           <th style="text-align: right;" onclick="ordenarPor('valor_atual')" style="cursor:pointer;">Patrimônio Atual ⬍</th>
           <th style="text-align: right;" onclick="ordenarPor('total_aporte')" style="cursor:pointer;">Total Aporte ⬍</th>
@@ -67,7 +69,7 @@
         </tr>
       </thead>
       <tbody id="tbl-body">
-        <tr><td colspan="13" style="text-align:center; color: var(--text-muted);">Carregando ativos da carteira...</td></tr>
+        <tr><td colspan="15" style="text-align:center; color: var(--text-muted);">Carregando ativos da carteira...</td></tr>
       </tbody>
     </table>
   </div>
@@ -199,6 +201,12 @@
           <td style="text-align: right;">R$ ${p.teto.toFixed(2)}</td>
           <td style="text-align: right; color: ${margemColor}; font-weight: 700;">${p.margem.toFixed(1)}%</td>
           <td style="text-align: right;">
+            <input type="number" step="0.01" class="tbl-input input-cmedio" value="${(p.custo_medio || 0).toFixed(2)}" ${readOnlyAttr} style="width:75px; text-align:right;" title="Preço Médio de Aquisição" />
+          </td>
+          <td style="text-align: right; color: var(--green); font-weight: 600;" title="Yield on Cost: Proventos / Custo Médio">
+            ${p.yield_on_cost > 0 ? p.yield_on_cost.toFixed(2) + '%' : '-'}
+          </td>
+          <td style="text-align: right;">
             <input type="number" step="0.01" class="tbl-input input-dpa" value="${p.div_proj.toFixed(2)}" ${readOnlyAttr} style="width:75px; text-align:right;" />
           </td>
           <td style="text-align: right; font-weight: 600;" class="cell-patrimonio-atual">R$ ${valAtual.toFixed(2)}</td>
@@ -268,10 +276,11 @@
       const row_index = parseInt(r.getAttribute("data-row"));
       if (!ticker || isNaN(row_index)) return;
       const div_proj = parseFloat(r.querySelector(".input-dpa").value) || 0.0;
+      const custo_medio = parseFloat(r.querySelector(".input-cmedio") ? r.querySelector(".input-cmedio").value : 0) || 0.0;
       const qtd_antes = parseInt(r.querySelector(".input-qtd").value) || 0;
       const qtd_aporte = parseInt(r.querySelector(".input-aporte").value) || 0;
       const feedback = r.querySelector(".input-fb").value || "";
-      items.push({ ticker, row_index, div_proj, qtd_antes, qtd_aporte, feedback });
+      items.push({ ticker, row_index, div_proj, custo_medio, qtd_antes, qtd_aporte, feedback });
     });
 
     try {

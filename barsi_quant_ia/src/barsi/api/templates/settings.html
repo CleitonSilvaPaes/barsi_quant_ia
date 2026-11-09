@@ -62,6 +62,63 @@
 </div>
 
 <div class="card">
+  <h3 style="color: var(--accent); font-size: 1.05rem; margin-bottom: 0.5rem;">🔐 Autenticação em Duas Etapas (2FA TOTP RFC 6238)</h3>
+  <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">Proteja o acesso administrativo adicionando uma camada extra compatível com Google Authenticator, Authy e 1Password.</p>
+  
+  <div style="display:flex; gap:1rem; align-items:center; flex-wrap:wrap; margin-bottom:1rem;">
+    <button class="btn btn-primary" onclick="iniciarSetup2FA()">📱 Configurar Novo 2FA</button>
+    <button class="btn btn-outline" onclick="desativar2FA()">❌ Desativar 2FA</button>
+  </div>
+
+  <div id="totp-setup-box" style="display:none; background:#090d16; border:1px solid var(--border); border-radius:6px; padding:1.25rem; margin-top:1rem;">
+    <h4 style="color:#fff; margin-bottom:0.5rem;">1. Escaneie o QR Code no seu aplicativo autenticador:</h4>
+    <div style="display:flex; gap:1.5rem; align-items:center; flex-wrap:wrap; margin-bottom:1rem;">
+      <img id="totp-qr-img" src="" alt="QR Code 2FA" style="border-radius:6px; background:#fff; padding:6px; width:150px; height:150px;" />
+      <div>
+        <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.25rem;">Chave secreta manual:</div>
+        <code id="totp-secret-key" style="font-size:1rem; color:var(--accent); letter-spacing:1px; background:#1e293b; padding:0.25rem 0.5rem; border-radius:4px;"></code>
+      </div>
+    </div>
+    <h4 style="color:#fff; margin-bottom:0.5rem;">2. Digite o código de 6 dígitos gerado no app para confirmar:</h4>
+    <div style="display:flex; gap:0.5rem; align-items:center; max-width:320px;">
+      <input type="text" id="totp-confirm-code" class="tbl-input" placeholder="000000" maxlength="6" style="text-align:center; font-size:1.1rem; letter-spacing:3px;" />
+      <button class="btn btn-green" onclick="confirmarAtivacao2FA()">Confirmar & Ativar</button>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h3 style="color: var(--accent); font-size: 1.05rem; margin-bottom: 0.5rem;">💵 Lançamento de Dividendos Reais Recebidos (P0)</h3>
+  <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">Registre proventos creditados na conta da corretora para alimentar o histórico real e cálculo de Yield on Cost.</p>
+  
+  <form onsubmit="lancarDividendo(event)" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap:0.75rem; align-items:end;">
+    <div>
+      <label style="font-size:0.75rem; color:var(--text-muted);">TICKER</label>
+      <input type="text" id="div-ticker" class="tbl-input" placeholder="BBAS3" required style="text-transform:uppercase;" />
+    </div>
+    <div>
+      <label style="font-size:0.75rem; color:var(--text-muted);">DATA PAGTO</label>
+      <input type="date" id="div-data" class="tbl-input" required />
+    </div>
+    <div>
+      <label style="font-size:0.75rem; color:var(--text-muted);">VALOR TOTAL (R$)</label>
+      <input type="number" step="0.01" min="0.01" id="div-total" class="tbl-input" placeholder="150.00" required />
+    </div>
+    <div>
+      <label style="font-size:0.75rem; color:var(--text-muted);">TIPO</label>
+      <select id="div-tipo" class="tbl-input">
+        <option value="DIVIDENDO">Dividendo</option>
+        <option value="JCP">JCP</option>
+        <option value="RENDIMENTO">Rendimento FII</option>
+      </select>
+    </div>
+    <div>
+      <button type="submit" class="btn btn-green" style="width:100%; justify-content:center;">➕ Registrar Provento</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
   <h3 style="color: var(--accent); font-size: 1.05rem; margin-bottom: 0.5rem;">💾 Backup & Segurança de Dados</h3>
   <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.25rem;">Baixe uma cópia completa do banco SQLite com todo o histórico de análises, extratos e posições.</p>
 
@@ -157,6 +214,89 @@
       el.innerText = `❌ Erro: ${err}`;
       el.style.color = "var(--red)";
       showToast("Erro ao baixar histórico", "error");
+    }
+  }
+
+  async function iniciarSetup2FA() {
+    try {
+      const res = await fetch("/api/auth/2fa/setup", { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        document.getElementById("totp-setup-box").style.display = "block";
+        document.getElementById("totp-qr-img").src = data.qr_code_url;
+        document.getElementById("totp-secret-key").innerText = data.secret;
+        showToast("Escaneie o QR Code no seu aplicativo autenticador");
+      } else {
+        showToast(data.detail || "Erro ao iniciar 2FA", "error");
+      }
+    } catch (e) {
+      showToast("Erro de conexão ao configurar 2FA", "error");
+    }
+  }
+
+  async function confirmarAtivacao2FA() {
+    const code = document.getElementById("totp-confirm-code").value.trim();
+    if (!code || code.length !== 6) {
+      showToast("Digite o código de 6 dígitos gerado pelo app", "warning");
+      return;
+    }
+    try {
+      const res = await fetch("/api/auth/2fa/enable", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast("2FA (TOTP) ativado com sucesso!");
+        document.getElementById("totp-setup-box").style.display = "none";
+      } else {
+        showToast(data.detail || "Código inválido", "error");
+      }
+    } catch (e) {
+      showToast("Erro ao validar código 2FA", "error");
+    }
+  }
+
+  async function desativar2FA() {
+    if (!confirm("Deseja realmente desativar a autenticação em duas etapas?")) return;
+    try {
+      const res = await fetch("/api/auth/2fa/disable", { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        showToast("2FA desativado.");
+        document.getElementById("totp-setup-box").style.display = "none";
+      } else {
+        showToast(data.detail || "Erro ao desativar 2FA", "error");
+      }
+    } catch (e) {
+      showToast("Erro de rede", "error");
+    }
+  }
+
+  async function lancarDividendo(e) {
+    e.preventDefault();
+    const ticker = document.getElementById("div-ticker").value.trim().toUpperCase();
+    const data_pagamento = document.getElementById("div-data").value;
+    const valor_total = parseFloat(document.getElementById("div-total").value);
+    const tipo = document.getElementById("div-tipo").value;
+
+    try {
+      const res = await fetch("/api/dividends", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticker, data_pagamento, valor_total, tipo })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(`Provento de ${ticker} (R$ ${valor_total.toFixed(2)}) registrado!`);
+        document.getElementById("div-ticker").value = "";
+        document.getElementById("div-total").value = "";
+      } else {
+        showToast(data.detail || "Erro ao registrar dividendo", "error");
+      }
+    } catch (err) {
+      showToast("Erro na requisição: " + err, "error");
     }
   }
 

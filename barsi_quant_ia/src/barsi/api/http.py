@@ -56,7 +56,20 @@ class EditItem(BaseModel):
     qtd_aporte: Optional[int] = Field(default=None, ge=0)
     preco_teto: Optional[float] = Field(default=None, ge=0)
     teto_manual: Optional[bool] = None
+    custo_medio: Optional[float] = Field(default=None, ge=0)
     feedback: str = ""
+
+class DividendItem(BaseModel):
+    ticker: str
+    data_pagamento: str
+    valor_total: float = Field(..., gt=0)
+    valor_por_cota: Optional[float] = Field(default=0.0, ge=0)
+    quantidade: Optional[int] = Field(default=0, ge=0)
+    tipo: Optional[str] = "DIVIDENDO"
+    fonte: Optional[str] = "manual"
+
+class TotpConfirmRequest(BaseModel):
+    code: str
 
 class SaveEditsRequest(BaseModel):
     items: List[EditItem]
@@ -237,10 +250,16 @@ async def do_login(request: Request):
     params = urllib.parse.parse_qs(body)
     username = params.get("username", [""])[0].strip()
     password = params.get("password", [""])[0].strip()
+    totp_code = params.get("totp_code", [""])[0].strip()
 
     repo = get_user_repo()
     user = repo.authenticate(username, password)
     if user:
+        if user.get("totp_enabled"):
+            if not totp_code or not repo.verify_totp(user["id"], totp_code):
+                logger.warning("login_totp_failed", ip=client_ip, username=username)
+                return RedirectResponse(url="/login?error=Código+2FA+(TOTP)+inválido+ou+ausente&requires_2fa=1", status_code=303)
+
         _login_attempts.pop(client_ip, None)
         logger.info("login_success", ip=client_ip, username=username, role=user["role"])
         token = create_session_token(user["id"], user["username"], user["role"], settings.secret_key)
@@ -406,6 +425,8 @@ async def get_carteira(request: Request):
             "teto": round(p.preco_teto, 2),
             "margem": round(p.margem_seguranca, 1),
             "dy": round(p.dy, 2),
+            "custo_medio": round(getattr(p, "custo_medio", 0.0) or 0.0, 2),
+            "yield_on_cost": round(getattr(p, "yield_on_cost", 0.0) or 0.0, 2),
             "valor_atual": round((p.qtd_antes or 0) * p.preco_atual, 2),
             "valor_total": round(p.valor_total, 2),
             "total_aporte": round(p.total_aporte, 2),
@@ -435,6 +456,8 @@ async def save_carteira_edits(req: SaveEditsRequest, request: Request):
                 p.preco_atual = item.preco_atual
             if item.teto_manual is not None:
                 p.teto_manual = item.teto_manual
+            if item.custo_medio is not None and item.custo_medio >= 0:
+                p.custo_medio = item.custo_medio
             if item.preco_teto is not None and item.preco_teto > 0:
                 p.preco_teto = item.preco_teto
             if item.qtd_antes is not None:
@@ -459,6 +482,7 @@ async def save_carteira_edits(req: SaveEditsRequest, request: Request):
                 qtd_aporte=max(0, item.qtd_aporte or 0),
                 preco_teto=item.preco_teto or 0.0,
                 teto_manual=bool(item.teto_manual),
+                custo_medio=item.custo_medio or 0.0,
                 feedback_usuario=item.feedback
             )
             p.qtd_total = p.qtd_antes + p.qtd_aporte
@@ -763,7 +787,117 @@ async def list_admin_users(request: Request):
         raise HTTPException(status_code=403, detail="Acesso restrito a administradores")
     repo = get_user_repo()
     users = repo.list_users()
-    return [{"id": u["id"], "username": u["username"], "role": u["role"], "created_at": u.get("criado_em")} for u in users]
+    return [{
+        "id": u["id"],
+        "username": u["username"],
+        "role": u["role"],
+        "totp_enabled": bool(u.get("totp_enabled")),
+        "created_at": u.get("criado_em")
+    } for u in users]
+
+# ----------------- ROTAS 2FA (TOTP) RFC 6238 -----------------
+@app.post("/api/auth/2fa/setup")
+async def setup_2fa(request: Request):
+    """Inicia a configuração de 2FA gerando um segredo TOTP e URI para o usuário atual."""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Não autorizado")
+    repo = get_user_repo()
+    secret_b32, uri = repo.setup_totp(user["uid"])
+    return {
+        "ok": True,
+        "secret": secret_b32,
+        "uri": uri,
+        "qr_code_url": f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={urllib.parse.quote(uri)}"
+    }
+
+@app.post("/api/auth/2fa/enable")
+async def enable_2fa(req: TotpConfirmRequest, request: Request):
+    """Valida o código de 6 dígitos gerado no app e conclui a ativação do 2FA."""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Não autorizado")
+    repo = get_user_repo()
+    success = repo.confirm_and_enable_totp(user["uid"], req.code)
+    if not success:
+        raise HTTPException(status_code=400, detail="Código de 6 dígitos inválido ou expirado.")
+    return {"ok": True, "message": "2FA (TOTP) ativado com sucesso!"}
+
+@app.post("/api/auth/2fa/disable")
+async def disable_2fa(request: Request):
+    """Desativa o 2FA para o usuário atual."""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Não autorizado")
+    repo = get_user_repo()
+    repo.disable_totp(user["uid"])
+    return {"ok": True, "message": "2FA (TOTP) desativado."}
+
+# ----------------- ROTAS DE DIVIDENDOS REAIS (P0) -----------------
+@app.get("/api/dividends")
+async def get_dividends_endpoint(
+    request: Request,
+    ticker: Optional[str] = None,
+    mes_ano: Optional[str] = None,
+    year: Optional[int] = None
+):
+    """Retorna o histórico de proventos reais recebidos, agrupamentos mensais e total geral."""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Não autorizado")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    records = repo.list_dividends_received(ticker=ticker, mes_ano=mes_ano, year=year)
+    monthly_summary = repo.get_dividends_summary_by_month(months=12)
+    total = repo.get_total_dividends_received(year=year)
+    return {
+        "total": total,
+        "monthly_summary": monthly_summary,
+        "records": records
+    }
+
+@app.post("/api/dividends")
+async def record_dividend_endpoint(req: DividendItem, request: Request):
+    """Registra manualmente ou importa um dividendo real recebido no SQLite."""
+    require_role_action(request, action_type="edit")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    new_id = repo.record_dividend_received(
+        ticker=req.ticker,
+        data_pagamento=req.data_pagamento,
+        valor_total=req.valor_total,
+        valor_por_cota=req.valor_por_cota or 0.0,
+        quantidade=req.quantidade or 0,
+        tipo=req.tipo or "DIVIDENDO",
+        fonte=req.fonte or "manual"
+    )
+    return {"ok": True, "id": new_id, "ticker": req.ticker, "valor_total": req.valor_total}
+
+# ----------------- ROTAS DE ORÇAMENTO E EXTRATOS (ONDA 2) -----------------
+@app.get("/api/budget")
+@app.get("/api/budget/{mes_ano}")
+async def get_budget_endpoint(request: Request, mes_ano: Optional[str] = None):
+    """Retorna comparativo Previsto vs Realizado (Orçamento Barsi) com base em despesas e transações."""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Não autorizado")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    return repo.get_budget_overview(mes_ano=mes_ano)
+
+@app.get("/api/extratos/transacoes")
+async def get_transacoes_endpoint(
+    request: Request,
+    mes_ano: Optional[str] = None,
+    categoria: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0
+):
+    """Lista as transações bancárias/cartão persistidas no SQLite com paginação."""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Não autorizado")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    rows = repo.list_transacoes(mes_ano=mes_ano, categoria=categoria, limit=limit, offset=offset)
+    return {"transacoes": rows, "count": len(rows), "offset": offset}
+
 
 @app.post("/api/admin/users")
 async def create_admin_user(req: NewUserRequest, request: Request):
