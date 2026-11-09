@@ -122,15 +122,15 @@ jobs:
             echo "🔄 Reiniciando barsi-api.service..."
             sudo systemctl restart barsi-api.service
 
-            echo "⏳ Aguardando 3s..."
-            sleep 3
+            echo "⏳ Aguardando 10s para inicialização do Uvicorn no processador ARM64..."
+            sleep 10
 
             echo "🏥 Health check com validação de reinicialização fresca..."
-            for i in 1 2 3 4 5; do
+            for i in $(seq 1 15); do
               STATUS_CODE=$(curl -s -o /tmp/health_resp.json -w "%{http_code}" http://localhost:8000/health || echo "000")
               if [ "$STATUS_CODE" = "200" ]; then
                 UPTIME=$(python3 -c "import json; print(json.load(open('/tmp/health_resp.json')).get('uptime_sec', 999))" 2>/dev/null || echo 999)
-                if [ "$UPTIME" -lt 60 ]; then
+                if [ "$UPTIME" -lt 120 ]; then
                   echo "✅ Health check OK — novo processo ativo (uptime: ${UPTIME}s)"
                   python3 -m json.tool < /tmp/health_resp.json || true
                   exit 0
@@ -138,11 +138,11 @@ jobs:
                   echo "⚠️ Respondeu 200, mas uptime (${UPTIME}s) indica processo anterior; aguardando novo processo..."
                 fi
               fi
-              echo "⏳ Tentativa $i/5 falhou (status: $STATUS_CODE), aguardando 2s..."
+              echo "⏳ Tentativa $i/15 falhou (status: $STATUS_CODE), aguardando 2s..."
               sleep 2
             done
 
-            echo "❌ Health check falhou após 5 tentativas"
+            echo "❌ Health check falhou após 15 tentativas"
             sudo systemctl status barsi-api.service || true
             sudo journalctl -u barsi-api.service -n 30 --no-pager || true
             exit 1
