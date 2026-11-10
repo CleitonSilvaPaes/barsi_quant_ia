@@ -451,6 +451,16 @@ async def save_carteira_edits(req: SaveEditsRequest, request: Request):
     pos_map = {p.ticker: p for p in positions}
 
     for item in req.items:
+        preco_ref = item.preco_atual or (pos_map[item.ticker].preco_atual if item.ticker in pos_map else 0.0)
+        if item.div_proj > 0 and preco_ref > 0:
+            dy_calc = item.div_proj / preco_ref
+            if dy_calc > 0.35:
+                logger.warning("dy_implausible_rejected", ticker=item.ticker, div_proj=item.div_proj, preco=preco_ref, dy=dy_calc)
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"DPA Projetado R$ {item.div_proj:.2f} resulta em DY de {dy_calc:.1%} para {item.ticker} (máx 35%). Verifique se não digitou valor acumulado ou mensal incorreto."
+                )
+
         if item.ticker in pos_map:
             p = pos_map[item.ticker]
             p.div_proj = item.div_proj
@@ -901,6 +911,136 @@ async def get_transacoes_endpoint(
     repo = BudgetRepository(settings.sqlite_db_path)
     rows = repo.list_transacoes(mes_ano=mes_ano, categoria=categoria, limit=limit, offset=offset)
     return {"transacoes": rows, "count": len(rows), "offset": offset}
+
+# ----------------- WEBHOOK INTERATIVO TELEGRAM BOT -----------------
+@app.post("/api/telegram/webhook")
+async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
+    """Webhook do Telegram Bot para comandos interativos (/status, /radar, /proventos, /ticker, /run)."""
+    try:
+        data = await request.json()
+    except Exception:
+        return {"ok": False, "error": "invalid_json"}
+
+    msg = data.get("message") or data.get("edited_message") or {}
+    chat_id = str(msg.get("chat", {}).get("id") or "")
+    text = (msg.get("text") or "").strip()
+
+    if not chat_id or not text:
+        return {"ok": True}
+
+    # Whitelist estrita: só aceita mensagens do chat autorizado no .env
+    configured_chat = str(settings.telegram_chat_id or "").strip()
+    if not configured_chat or chat_id != configured_chat:
+        logger.warning("telegram_unauthorized_chat", chat_id=chat_id)
+        return {"ok": True}
+
+    cmd = text.split()[0].lower()
+    args = text.split()[1:]
+    repo = BudgetRepository(settings.sqlite_db_path)
+    bot_token = settings.telegram_bot_token
+
+    async def _send_reply(reply_text: str):
+        if not bot_token:
+            return
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                await client.post(url, json={
+                    "chat_id": chat_id,
+                    "text": reply_text,
+                    "parse_mode": "Markdown",
+                    "disable_web_page_preview": True
+                })
+        except Exception as err:
+            logger.error("telegram_reply_failed", error=str(err))
+
+    if cmd in ("/status", "/carteira"):
+        positions = await get_canonical_positions()
+        patrimonio = sum((p.qtd_antes or 0) * (p.preco_atual or 0.0) for p in positions)
+        proventos = sum(((p.qtd_antes or 0) + (p.qtd_aporte or 0)) * (p.div_proj or 0.0) for p in positions)
+        acumular = sum(1 for p in positions if p.status_barsi.value == "ACUMULAR")
+        resposta = (
+            f"💼 *Cockpit Barsi Quant IA*\n\n"
+            f"• *Patrimônio:* R$ {patrimonio:,.2f}\n"
+            f"• *Ativos Monitorados:* {len(positions)}\n"
+            f"• *Em Zona de Aporte:* {acumular}\n"
+            f"• *Proventos Proj. Ano:* R$ {proventos:,.2f}"
+        )
+        await _send_reply(resposta)
+
+    elif cmd == "/radar":
+        positions = await get_canonical_positions()
+        for p in positions:
+            atualizar_posicao_quant(p, p.preco_atual, p.div_proj)
+        acumular = [p for p in positions if p.status_barsi.value == "ACUMULAR"]
+        acumular.sort(key=lambda x: x.margem_seguranca, reverse=True)
+        if not acumular:
+            resposta = "🎯 *Radar B.E.S.T.*: Nenhum ativo abaixo do Preço Teto no momento."
+        else:
+            linhas = [f"• *{p.ticker}*: R$ {p.preco_atual:.2f} (Teto R$ {p.preco_teto:.2f} · Margem: +{p.margem_seguranca:.1f}%)" for p in acumular[:6]]
+            resposta = "🎯 *Radar B.E.S.T. (Top Oportunidades)*\n\n" + "\n".join(linhas)
+        await _send_reply(resposta)
+
+    elif cmd == "/proventos":
+        total_hist = repo.get_total_dividends_received()
+        ano_atual = datetime.now().year
+        total_ano = repo.get_total_dividends_received(year=ano_atual)
+        resposta = (
+            f"💵 *Histórico de Proventos Reais Recebidos*\n\n"
+            f"• *Total em {ano_atual}:* R$ {total_ano:,.2f}\n"
+            f"• *Acumulado Histórico:* R$ {total_hist:,.2f}"
+        )
+        await _send_reply(resposta)
+
+    elif cmd == "/ticker":
+        if not args:
+            await _send_reply("⚠️ Uso correto: `/ticker BBAS3`")
+        else:
+            t_alvo = args[0].strip().upper()
+            positions = await get_canonical_positions()
+            p = next((x for x in positions if x.ticker == t_alvo), None)
+            if not p:
+                await _send_reply(f"❌ Ativo *{t_alvo}* não encontrado na carteira.")
+            else:
+                atualizar_posicao_quant(p, p.preco_atual, p.div_proj)
+                resposta = (
+                    f"📊 *Análise Barsi: {p.ticker}*\n\n"
+                    f"• *Empresa:* {p.empresa or p.setor}\n"
+                    f"• *Cotação Atual:* R$ {p.preco_atual:.2f}\n"
+                    f"• *Preço Teto:* R$ {p.preco_teto:.2f}\n"
+                    f"• *Margem de Segurança:* {p.margem_seguranca:.1f}%\n"
+                    f"• *DPA Projetado:* R$ {p.div_proj:.2f}\n"
+                    f"• *Decisão Barsi:* `{p.status_barsi.value}`"
+                )
+                await _send_reply(resposta)
+
+    elif cmd == "/run":
+        await _send_reply("🚀 Ciclo de análise quantitativa disparado em segundo plano...")
+        async def _run_task():
+            summary = await get_sync_service().execute_run()
+            await _send_reply(
+                f"✅ *Ciclo Concluído com Sucesso!*\n\n"
+                f"• Ativos analisados: {summary.tickers_analyzed}\n"
+                f"• Em zona de aporte: {summary.actions_recommended.get('ACUMULAR', 0)}\n"
+                f"• Duração: {summary.duration_ms}ms"
+            )
+        background_tasks.add_task(_run_task)
+
+    else:
+        ajuda = (
+            "🤖 *Comandos do Barsi Quant Bot:*\n\n"
+            "• `/status` — Visão geral da carteira e patrimônio\n"
+            "• `/radar` — Ativos com maior margem de segurança\n"
+            "• `/proventos` — Total de dividendos recebidos\n"
+            "• `/ticker BBAS3` — Detalhes completos de um ativo\n"
+            "• `/run` — Disparar ciclo quantitativo B3 agora\n"
+            "• `/help` — Exibir este menu de ajuda"
+        )
+        await _send_reply(ajuda)
+
+    return {"ok": True}
+
 
 
 @app.post("/api/admin/users")

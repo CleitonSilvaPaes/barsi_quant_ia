@@ -1,4 +1,5 @@
 """Adapter de notícias utilizando Google News RSS (B3 / Proventos)."""
+import re
 import httpx
 import urllib.parse
 import xml.etree.ElementTree as ET
@@ -30,14 +31,23 @@ class GoogleNewsRSSAdapter(NewsPort):
             content = await _fetch()
             root = ET.fromstring(content)
             items = root.findall("./channel/item")
-            titles = []
+            snippets = []
             for item in items[:2]:
                 title = item.find("title")
+                desc = item.find("description")
+                parts = []
                 if title is not None and title.text:
-                    titles.append(title.text.strip())
+                    parts.append(title.text.strip())
+                if desc is not None and desc.text:
+                    clean_desc = re.sub(r'<[^>]+>', ' ', desc.text).strip()
+                    clean_desc = " ".join(clean_desc.split())
+                    if clean_desc and clean_desc not in (title.text if title is not None and title.text else ""):
+                        parts.append(clean_desc[:180])
+                if parts:
+                    snippets.append(" — ".join(parts))
 
-            if titles:
-                return NewsSummary(ticker=ticker, headlines=" | ".join(titles), source="google_rss")
+            if snippets:
+                return NewsSummary(ticker=ticker, headlines=" | ".join(snippets), source="google_rss")
         except Exception as exc:
             logger.warn("news_rss_fetch_failed", ticker=ticker, error=str(exc))
 

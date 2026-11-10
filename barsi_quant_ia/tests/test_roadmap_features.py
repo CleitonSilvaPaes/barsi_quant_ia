@@ -259,3 +259,73 @@ def test_totp_failure_counts_as_rate_limit_attempt(tmp_path, monkeypatch):
     assert resp_blocked.status_code == 303
     assert "Muitas+tentativas" in resp_blocked.headers.get("location", "")
 
+def test_save_carteira_implausible_dy_rejected(tmp_path, monkeypatch):
+    """Garante que DPA projetado que gere DY > 35% é rejeitado com HTTP 400 (evita bug de ITUB4/CMIG4 inflados)."""
+    test_db = str(tmp_path / "test_dy_sanity.db")
+    monkeypatch.setattr(settings, "sqlite_db_path", test_db)
+
+    token = create_session_token(1, "admin_user", "admin", settings.secret_key)
+    client.cookies.set("barsi_session", token)
+
+    # ITUB4 a R$ 40,00 com DPA de R$ 15,00 (DY = 37.5% > 35%) deve ser REJEITADO
+    resp = client.post("/api/carteira", json={
+        "items": [{
+            "ticker": "ITUB4",
+            "row_index": 10,
+            "preco_atual": 40.0,
+            "div_proj": 15.0,
+            "qtd_antes": 100
+        }]
+    })
+    assert resp.status_code == 400
+    assert "máx 35%" in resp.json()["detail"]
+
+    # ITUB4 a R$ 40,00 com DPA realista de R$ 2,40 (DY = 6%) deve ser ACEITO
+    resp_ok = client.post("/api/carteira", json={
+        "items": [{
+            "ticker": "ITUB4",
+            "row_index": 10,
+            "preco_atual": 40.0,
+            "div_proj": 2.40,
+            "qtd_antes": 100
+        }]
+    })
+    assert resp_ok.status_code == 200
+
+def test_telegram_webhook_flow(monkeypatch, tmp_path):
+    """Testa webhook interativo do Telegram com whitelist de chat e resposta aos comandos."""
+    test_db = str(tmp_path / "test_tg_db.db")
+    monkeypatch.setattr(settings, "sqlite_db_path", test_db)
+    monkeypatch.setattr(settings, "telegram_chat_id", "123456789")
+    monkeypatch.setattr(settings, "telegram_bot_token", "fake_bot_token")
+
+    repo = BudgetRepository(test_db)
+    repo.save_positions([
+        Position(ticker="BBAS3", row_index=10, preco_atual=25.0, div_proj=2.5, qtd_antes=100)
+    ])
+
+    # 1. Chat ID não autorizado é ignorado
+    resp_unauth = client.post("/api/telegram/webhook", json={
+        "message": {"chat": {"id": 9999999}, "text": "/status"}
+    })
+    assert resp_unauth.status_code == 200
+
+    # 2. Comando /status autorizado
+    resp_status = client.post("/api/telegram/webhook", json={
+        "message": {"chat": {"id": 123456789}, "text": "/status"}
+    })
+    assert resp_status.status_code == 200
+
+    # 3. Comando /radar autorizado
+    resp_radar = client.post("/api/telegram/webhook", json={
+        "message": {"chat": {"id": 123456789}, "text": "/radar"}
+    })
+    assert resp_radar.status_code == 200
+
+    # 4. Comando /ticker BBAS3 autorizado
+    resp_ticker = client.post("/api/telegram/webhook", json={
+        "message": {"chat": {"id": 123456789}, "text": "/ticker BBAS3"}
+    })
+    assert resp_ticker.status_code == 200
+
+

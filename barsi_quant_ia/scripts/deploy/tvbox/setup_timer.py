@@ -29,8 +29,9 @@ timer_content = """[Unit]
 Description=Timer para Execucao Barsi em Horario de Pregao (09h as 18h)
 
 [Timer]
-OnCalendar=Mon..Fri 09..18:00:00
+OnCalendar=Mon..Fri *-*-* 09,10,11,12,13,14,15,16,17,18:00:00
 Persistent=true
+RandomizedDelaySec=30
 
 [Install]
 WantedBy=timers.target

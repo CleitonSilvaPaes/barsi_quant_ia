@@ -4,6 +4,14 @@ import os
 from typing import List, Tuple
 from barsi.domain.quant_ai import StatisticalBarsiEngine
 
+# Constantes de calibração baseadas nas médias históricas dos setores B.E.S.T. da B3
+DEFAULT_PAYOUT_RATIO = 0.60       # Payout ratio médio sustentável (~60%)
+DEFAULT_DEBT_EBITDA_INV = 0.33    # Dívida Líquida/EBITDA normalizada (~2.0x)
+DEFAULT_ROE_NORMALIZED = 0.50     # Retorno sobre patrimônio líquido (~15% a.a.)
+DEFAULT_YEARS_PAYING = 0.50       # Histórico de pagamento consecutivo (meta 5 anos = 0.5)
+DEFAULT_VOL_INVERSE = 0.77        # Volatilidade inversa média de ações perenes
+
+
 
 def extract_training_data(db_path: str, min_examples: int = 3) -> Tuple[List[List[float]], List[float]]:
     """Extrai features e labels (0.0 / 1.0) a partir dos feedbacks do usuário registrados no SQLite."""
@@ -51,14 +59,14 @@ def extract_training_data(db_path: str, min_examples: int = 3) -> Tuple[List[Lis
             ).get("perenidade", 0.85)
 
             features = [
-                0.60,  # Payout ratio médio padrão
+                DEFAULT_PAYOUT_RATIO,
                 min(div_proj / max(preco, 0.01), 0.15) / 0.15,
-                0.33,  # Debt/EBITDA normalizado
-                0.50,  # ROE normalizado
+                DEFAULT_DEBT_EBITDA_INV,
+                DEFAULT_ROE_NORMALIZED,
                 perenidade,
                 min(max(margem / 100.0, -0.5), 1.0),
-                0.50,  # Anos de pagamento
-                0.77,  # Volatilidade inversa média
+                DEFAULT_YEARS_PAYING,
+                DEFAULT_VOL_INVERSE,
             ]
             X.append(features)
             y.append(label)
