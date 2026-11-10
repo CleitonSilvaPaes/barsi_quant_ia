@@ -452,7 +452,12 @@ async def save_carteira_edits(req: SaveEditsRequest, request: Request):
 
     for item in req.items:
         preco_ref = item.preco_atual or (pos_map[item.ticker].preco_atual if item.ticker in pos_map else 0.0)
-        if item.div_proj > 0 and preco_ref > 0:
+        if item.div_proj > 0:
+            if preco_ref <= 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Para {item.ticker}, informe preco_atual maior que zero antes de definir div_proj (necessário para validação de sanidade do DY)."
+                )
             dy_calc = item.div_proj / preco_ref
             if dy_calc > 0.35:
                 logger.warning("dy_implausible_rejected", ticker=item.ticker, div_proj=item.div_proj, preco=preco_ref, dy=dy_calc)
@@ -913,9 +918,19 @@ async def get_transacoes_endpoint(
     return {"transacoes": rows, "count": len(rows), "offset": offset}
 
 # ----------------- WEBHOOK INTERATIVO TELEGRAM BOT -----------------
+_telegram_run_lock = False
+
 @app.post("/api/telegram/webhook")
 async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
     """Webhook do Telegram Bot para comandos interativos (/status, /radar, /proventos, /ticker, /run)."""
+    # Valida secret token do Telegram caso configurado
+    expected_secret = (settings.telegram_webhook_secret or "").strip()
+    if expected_secret:
+        received_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "").strip()
+        if received_secret != expected_secret:
+            logger.warning("telegram_invalid_webhook_secret", ip=request.client.host if request.client else "")
+            raise HTTPException(status_code=403, detail="invalid_webhook_secret")
+
     try:
         data = await request.json()
     except Exception:
@@ -1016,15 +1031,30 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
                 await _send_reply(resposta)
 
     elif cmd == "/run":
+        global _telegram_run_lock
+        if _telegram_run_lock:
+            await _send_reply("⏳ Já existe uma análise quantitativa em andamento na TV Box. Por favor, aguarde.")
+            return {"ok": True}
+
+        _telegram_run_lock = True
         await _send_reply("🚀 Ciclo de análise quantitativa disparado em segundo plano...")
         async def _run_task():
-            summary = await get_sync_service().execute_run()
-            await _send_reply(
-                f"✅ *Ciclo Concluído com Sucesso!*\n\n"
-                f"• Ativos analisados: {summary.tickers_analyzed}\n"
-                f"• Em zona de aporte: {summary.actions_recommended.get('ACUMULAR', 0)}\n"
-                f"• Duração: {summary.duration_ms}ms"
-            )
+            global _telegram_run_lock
+            try:
+                summary = await get_sync_service().execute_run()
+                acumular_cnt = summary.actions_recommended.get("ACUMULAR", 0) if getattr(summary, "actions_recommended", None) else 0
+                await _send_reply(
+                    f"✅ *Ciclo Concluído com Sucesso!*\n\n"
+                    f"• Ativos analisados: {summary.tickers_analyzed}\n"
+                    f"• Em zona de aporte: {acumular_cnt}\n"
+                    f"• Duração: {summary.duration_ms}ms"
+                )
+            except Exception as e:
+                logger.error("telegram_run_task_failed", error=str(e))
+                await _send_reply(f"❌ Falha durante execução do ciclo: {str(e)}")
+            finally:
+                _telegram_run_lock = False
+
         background_tasks.add_task(_run_task)
 
     else:

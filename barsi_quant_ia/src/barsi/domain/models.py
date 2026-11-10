@@ -1,6 +1,6 @@
 """Modelos puros de domínio do Sistema Previdenciário Barsi."""
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Dict
 from datetime import datetime
 from enum import Enum
 
@@ -108,6 +108,7 @@ class RunSummary(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     tickers_analyzed: int = 0
     positions_updated: int = 0
+    actions_recommended: Dict[str, int] = Field(default_factory=dict)
     duration_ms: int = 0
     memory_peak_mb: float = 0.0
     errors: List[str] = Field(default_factory=list)

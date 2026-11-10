@@ -328,4 +328,92 @@ def test_telegram_webhook_flow(monkeypatch, tmp_path):
     })
     assert resp_ticker.status_code == 200
 
+def test_save_carteira_new_position_without_price_rejected(tmp_path, monkeypatch):
+    """Garante que nova posição com div_proj sem preco_atual informado é rejeitada para evitar bypass do DY check."""
+    test_db = str(tmp_path / "test_dy_new_pos.db")
+    monkeypatch.setattr(settings, "sqlite_db_path", test_db)
+
+    token = create_session_token(1, "admin_user", "admin", settings.secret_key)
+    client.cookies.set("barsi_session", token)
+
+    resp = client.post("/api/carteira", json={
+        "items": [{
+            "ticker": "NOVO3",
+            "row_index": 20,
+            "preco_atual": 0.0,
+            "div_proj": 5.0,
+            "qtd_antes": 50
+        }]
+    })
+    assert resp.status_code == 400
+    assert "informe preco_atual" in resp.json()["detail"].lower()
+
+def test_telegram_webhook_secret_token_validation(monkeypatch, tmp_path):
+    """Garante proteção de defense-in-depth via X-Telegram-Bot-Api-Secret-Token."""
+    test_db = str(tmp_path / "test_tg_secret.db")
+    monkeypatch.setattr(settings, "sqlite_db_path", test_db)
+    monkeypatch.setattr(settings, "telegram_chat_id", "123456789")
+    monkeypatch.setattr(settings, "telegram_webhook_secret", "segredo_secreto_super_forte_123")
+
+    # 1. Requisição sem o header secreto é rejeitada com HTTP 403
+    resp_no_secret = client.post(
+        "/api/telegram/webhook",
+        json={"message": {"chat": {"id": 123456789}, "text": "/status"}}
+    )
+    assert resp_no_secret.status_code == 403
+
+    # 2. Requisição com secret incorreto é rejeitada com HTTP 403
+    resp_bad_secret = client.post(
+        "/api/telegram/webhook",
+        headers={"X-Telegram-Bot-Api-Secret-Token": "secret_falso"},
+        json={"message": {"chat": {"id": 123456789}, "text": "/status"}}
+    )
+    assert resp_bad_secret.status_code == 403
+
+    # 3. Requisição com secret correto é aceita com HTTP 200
+    resp_ok = client.post(
+        "/api/telegram/webhook",
+        headers={"X-Telegram-Bot-Api-Secret-Token": "segredo_secreto_super_forte_123"},
+        json={"message": {"chat": {"id": 123456789}, "text": "/status"}}
+    )
+    assert resp_ok.status_code == 200
+
+@pytest.mark.asyncio
+async def test_telegram_webhook_run_command_success(monkeypatch, tmp_path):
+    """Garante que o comando /run no Telegram executa sem AttributeError e processa actions_recommended."""
+    test_db = str(tmp_path / "test_tg_run.db")
+    monkeypatch.setattr(settings, "sqlite_db_path", test_db)
+    monkeypatch.setattr(settings, "telegram_chat_id", "123456789")
+    monkeypatch.setattr(settings, "telegram_webhook_secret", "")
+
+    from barsi.domain.models import RunSummary
+    from barsi.api import http
+
+    class MockSyncService:
+        async def execute_run(self):
+            return RunSummary(
+                run_id="run_mock_123",
+                tickers_analyzed=10,
+                actions_recommended={"ACUMULAR": 4, "AGUARDAR": 6},
+                duration_ms=450
+            )
+
+    monkeypatch.setattr(http, "get_sync_service", lambda: MockSyncService())
+    http._telegram_run_lock = False
+
+    resp = client.post(
+        "/api/telegram/webhook",
+        json={"message": {"chat": {"id": 123456789}, "text": "/run"}}
+    )
+    assert resp.status_code == 200
+
+    # Segunda chamada consecutiva deve acionar o lock de concorrência
+    resp_locked = client.post(
+        "/api/telegram/webhook",
+        json={"message": {"chat": {"id": 123456789}, "text": "/run"}}
+    )
+    assert resp_locked.status_code == 200
+    http._telegram_run_lock = False
+
+
 

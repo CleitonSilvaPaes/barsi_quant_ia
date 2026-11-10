@@ -147,10 +147,15 @@ class SyncService:
         mem_info = psutil.Process().memory_info()
         rss_mb = round(mem_info.rss / (1024 * 1024), 2)
 
+        acumular_cnt = sum(1 for p in valid_positions if getattr(p.status_barsi, "value", str(p.status_barsi)) == "ACUMULAR")
+        aguardar_cnt = len(valid_positions) - acumular_cnt
+        actions_map = {"ACUMULAR": acumular_cnt, "AGUARDAR": aguardar_cnt}
+
         summary = RunSummary(
             run_id=run_id,
             tickers_analyzed=len(valid_positions),
             positions_updated=len(valid_positions) if not dry_run else 0,
+            actions_recommended=actions_map,
             duration_ms=duration_ms,
             memory_peak_mb=rss_mb,
             errors=errors

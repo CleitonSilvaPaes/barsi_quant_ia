@@ -75,6 +75,7 @@ class Settings(BaseSettings):
     telegram_alerts_enabled: bool = False
     telegram_bot_token: str = Field(default_factory=lambda: os.getenv("BARSI_TELEGRAM_BOT_TOKEN", ""))
     telegram_chat_id: str = Field(default_factory=lambda: os.getenv("BARSI_TELEGRAM_CHAT_ID", ""))
+    telegram_webhook_secret: str = Field(default_factory=lambda: os.getenv("BARSI_TELEGRAM_WEBHOOK_SECRET", ""))
 
     # Alertas Proativos (WhatsApp)
     whatsapp_alerts_enabled: bool = False
