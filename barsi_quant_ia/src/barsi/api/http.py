@@ -7,6 +7,7 @@ import urllib.request
 import urllib.parse
 from datetime import datetime
 from typing import List, Optional, Dict, Any
+from contextlib import asynccontextmanager
 import psutil
 from pydantic import BaseModel, Field
 from fastapi import FastAPI, Depends, HTTPException, Security, Request, Response, UploadFile, File, BackgroundTasks
@@ -24,16 +25,17 @@ from barsi.domain.models import RunSummary, Position, SimuladorOrder
 from barsi.domain.rules import atualizar_posicao_quant
 from barsi.infra.logging import logger
 
-app = FastAPI(title="Barsi Quant IA - Web Suite", version="2.0.0")
-security = HTTPBearer(auto_error=False)
-
-@app.on_event("startup")
-async def startup_event():
-    if settings.telegram_alerts_enabled and not (settings.telegram_webhook_secret or "").strip():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if settings.telegram_bot_token and not (settings.telegram_webhook_secret or "").strip():
         logger.warning(
             "telegram_webhook_secret_missing",
             hint="Configure BARSI_TELEGRAM_WEBHOOK_SECRET e secret_token no setWebhook para proteção extra contra spoofing."
         )
+    yield
+
+app = FastAPI(title="Barsi Quant IA - Web Suite", version="2.0.0", lifespan=lifespan)
+security = HTTPBearer(auto_error=False)
 
 START_TIME = time.time()
 LAST_RUN_SUMMARY: Optional[RunSummary] = None
