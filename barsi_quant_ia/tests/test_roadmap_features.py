@@ -51,7 +51,7 @@ def test_totp_crypto_and_verification():
     code_past = generate_totp_code(secret, timestamp=int(time.time()) - 3600)
     assert verify_totp_code(secret, code_past) is False
 
-    uri = get_totp_uri(secret, "cleiton")
+    uri = get_totp_uri(secret, "investidor_demo")
     assert uri.startswith("otpauth://totp/")
     assert secret in uri
 
