@@ -259,12 +259,21 @@
   }
 
   async function desativar2FA() {
-    if (!confirm("Deseja realmente desativar a autenticação em duas etapas?")) return;
+    const code = prompt("Digite seu código 2FA atual de 6 dígitos para confirmar a desativação:");
+    if (!code) return;
+    if (code.trim().length !== 6) {
+      showToast("O código precisa conter exatamente 6 dígitos", "warning");
+      return;
+    }
     try {
-      const res = await fetch("/api/auth/2fa/disable", { method: "POST" });
+      const res = await fetch("/api/auth/2fa/disable", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: code.trim() })
+      });
       const data = await res.json();
       if (res.ok) {
-        showToast("2FA desativado.");
+        showToast("2FA desativado com sucesso.");
         document.getElementById("totp-setup-box").style.display = "none";
       } else {
         showToast(data.detail || "Erro ao desativar 2FA", "error");

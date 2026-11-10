@@ -37,6 +37,7 @@ def test_position_custo_medio_and_yield_on_cost():
 
 def test_totp_crypto_and_verification():
     """Valida geração RFC 6238 de segredo, cálculo de 6 dígitos e validação com janela de tempo."""
+    import time
     secret = generate_totp_secret()
     assert len(secret) >= 26
     
@@ -46,8 +47,9 @@ def test_totp_crypto_and_verification():
     
     # Verificação com código correto
     assert verify_totp_code(secret, code) is True
-    # Verificação com código incorreto
-    assert verify_totp_code(secret, "000000" if code != "000000" else "111111") is False
+    # Verificação com código de 1 hora atrás (garantidamente fora da janela de tolerância de 30s)
+    code_past = generate_totp_code(secret, timestamp=int(time.time()) - 3600)
+    assert verify_totp_code(secret, code_past) is False
 
     uri = get_totp_uri(secret, "cleiton")
     assert uri.startswith("otpauth://totp/")
@@ -179,3 +181,81 @@ def test_api_dividends_and_budget_endpoints(tmp_path, monkeypatch):
     resp_ext = client.get("/api/extratos/transacoes")
     assert resp_ext.status_code == 200
     assert "transacoes" in resp_ext.json()
+
+def test_api_2fa_endpoints_and_disable_security(tmp_path, monkeypatch):
+    """Garante que a desativação do 2FA exige prova de posse (código TOTP válido)."""
+    test_db = str(tmp_path / "test_api_2fa.db")
+    monkeypatch.setattr(settings, "sqlite_db_path", test_db)
+    from barsi.api import http
+    monkeypatch.setattr(http, "_user_repo_cache", None)
+
+    repo = UserRepository(test_db)
+    repo.create_user("admin_2fa", "SenhaSegura123!", role="admin")
+    user = repo.get_by_username("admin_2fa")
+    user_id = user["id"]
+
+    token = create_session_token(user_id, "admin_2fa", "admin", settings.secret_key)
+    client.cookies.set("barsi_session", token)
+
+    # 1. Setup 2FA
+    res_setup = client.post("/api/auth/2fa/setup")
+    assert res_setup.status_code == 200
+    secret = res_setup.json()["secret"]
+
+    # 2. Ativação com código inválido falha
+    res_bad = client.post("/api/auth/2fa/enable", json={"code": "000000"})
+    assert res_bad.status_code == 400
+
+    # 3. Ativação com código válido
+    valid_code = generate_totp_code(secret)
+    res_ok = client.post("/api/auth/2fa/enable", json={"code": valid_code})
+    assert res_ok.status_code == 200
+    assert repo.is_totp_enabled(user_id) is True
+
+    # 4. Desativação sem código válido FALHA (mitigação da Vulnerabilidade Crítica #2)
+    res_dis_bad = client.post("/api/auth/2fa/disable", json={"code": "123456"})
+    assert res_dis_bad.status_code == 400
+    assert repo.is_totp_enabled(user_id) is True  # Permanece protegido!
+
+    # 5. Desativação com código válido sucede
+    res_dis_ok = client.post("/api/auth/2fa/disable", json={"code": valid_code})
+    assert res_dis_ok.status_code == 200
+    assert repo.is_totp_enabled(user_id) is False
+
+def test_totp_failure_counts_as_rate_limit_attempt(tmp_path, monkeypatch):
+    """Garante que tentativa de login com senha correta e TOTP incorreto ativa o rate limit (mitigação da Vulnerabilidade Crítica #1)."""
+    test_db = str(tmp_path / "test_rate_totp.db")
+    monkeypatch.setattr(settings, "sqlite_db_path", test_db)
+    from barsi.api import http
+    monkeypatch.setattr(http, "_user_repo_cache", None)
+    http._login_attempts.clear()
+
+    repo = UserRepository(test_db)
+    repo.create_user("vitima_2fa", "SenhaVazadaCorreta!", role="investidor")
+    user = repo.get_by_username("vitima_2fa")
+    user_id = user["id"]
+
+    # Ativa 2FA no usuário
+    secret, _ = repo.setup_totp(user_id)
+    repo.confirm_and_enable_totp(user_id, generate_totp_code(secret))
+    assert repo.is_totp_enabled(user_id) is True
+
+    # Realiza 5 tentativas com senha CORRETA mas TOTP ERRADO
+    for i in range(5):
+        resp = client.post(
+            "/login",
+            data={"username": "vitima_2fa", "password": "SenhaVazadaCorreta!", "totp_code": f"00000{i}"},
+            follow_redirects=False
+        )
+        assert resp.status_code == 303
+        assert "login_totp_failed" or "error=" in resp.headers.get("location", "")
+
+    # 6ª tentativa deve ser BLOQUEADA pelo rate limiter (Muitas+tentativas)
+    resp_blocked = client.post(
+        "/login",
+        data={"username": "vitima_2fa", "password": "SenhaVazadaCorreta!", "totp_code": "999999"},
+        follow_redirects=False
+    )
+    assert resp_blocked.status_code == 303
+    assert "Muitas+tentativas" in resp_blocked.headers.get("location", "")
+

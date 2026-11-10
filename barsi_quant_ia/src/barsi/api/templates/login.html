@@ -20,10 +20,28 @@
     <form method="POST" action="/login">
       <input type="text" name="username" placeholder="Usuário" required />
       <input type="password" name="password" placeholder="Senha" required />
-      <input type="text" name="totp_code" placeholder="Código 2FA (TOTP de 6 dígitos se ativo)" maxlength="6" style="letter-spacing: 2px; text-align: center;" />
+      <div id="totp_container" style="display:none;">
+        <input type="text" id="totp_field" name="totp_code" placeholder="Código 2FA (000000)" maxlength="6" style="letter-spacing: 3px; text-align: center; font-size: 1.1rem;" />
+      </div>
       <button type="submit">Entrar no Painel</button>
     </form>
+    <div style="text-align:center; margin-top:0.75rem;">
+      <a href="javascript:void(0)" id="toggle_totp_btn" onclick="toggleTotp()" style="color:#94a3b8; font-size:0.8rem; text-decoration:none;">Usar autenticação 2FA</a>
+    </div>
   </div>
+  <script>
+    function toggleTotp() {
+      const c = document.getElementById("totp_container");
+      const btn = document.getElementById("toggle_totp_btn");
+      if (c) c.style.display = "block";
+      const f = document.getElementById("totp_field");
+      if (f) f.focus();
+      if (btn) btn.style.display = "none";
+    }
+    if (window.location.search.includes("requires_2fa=1")) {
+      toggleTotp();
+    }
+  </script>
 </body>
 </html>
 

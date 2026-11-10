@@ -1142,11 +1142,14 @@ class BudgetRepository:
                 "status": "CONFORME" if abs(delta) < 1.0 else ("ECONOMIA" if delta < 0 else "ATENÇÃO")
             })
 
+        salario_previsto = self.get_expense_amount(mes_ano, "Salário / Renda Principal")
+        total_entradas = total_entradas_real if total_entradas_real > 0 else salario_previsto
+
         return {
             "mes_ano": mes_ano,
-            "total_entradas": round(total_entradas_real if total_entradas_real > 0 else 4440.0, 2),
+            "total_entradas": round(total_entradas, 2),
             "total_saidas": round(total_saidas_real, 2),
-            "saldo_livre": round((total_entradas_real if total_entradas_real > 0 else 4440.0) - total_saidas_real, 2),
+            "saldo_livre": round(total_entradas - total_saidas_real, 2),
             "items": items
         }
 

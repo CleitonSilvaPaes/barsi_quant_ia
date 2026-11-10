@@ -257,7 +257,9 @@ async def do_login(request: Request):
     if user:
         if user.get("totp_enabled"):
             if not totp_code or not repo.verify_totp(user["id"], totp_code):
-                logger.warning("login_totp_failed", ip=client_ip, username=username)
+                recent_attempts.append(now)
+                _login_attempts[client_ip] = recent_attempts
+                logger.warning("login_totp_failed", ip=client_ip, username=username, attempts=len(recent_attempts))
                 return RedirectResponse(url="/login?error=Código+2FA+(TOTP)+inválido+ou+ausente&requires_2fa=1", status_code=303)
 
         _login_attempts.pop(client_ip, None)
@@ -824,14 +826,16 @@ async def enable_2fa(req: TotpConfirmRequest, request: Request):
     return {"ok": True, "message": "2FA (TOTP) ativado com sucesso!"}
 
 @app.post("/api/auth/2fa/disable")
-async def disable_2fa(request: Request):
-    """Desativa o 2FA para o usuário atual."""
+async def disable_2fa(req: TotpConfirmRequest, request: Request):
+    """Desativa o 2FA para o usuário atual após validar o código TOTP vigente (proof-of-possession)."""
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Não autorizado")
     repo = get_user_repo()
+    if not repo.verify_totp(user["uid"], req.code):
+        raise HTTPException(status_code=400, detail="Código 2FA (TOTP) inválido ou expirado.")
     repo.disable_totp(user["uid"])
-    return {"ok": True, "message": "2FA (TOTP) desativado."}
+    return {"ok": True, "message": "2FA (TOTP) desativado com sucesso."}
 
 # ----------------- ROTAS DE DIVIDENDOS REAIS (P0) -----------------
 @app.get("/api/dividends")
