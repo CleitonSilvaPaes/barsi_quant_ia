@@ -394,11 +394,16 @@ async def test_telegram_webhook_run_command_success(monkeypatch, tmp_path):
             return RunSummary(
                 run_id="run_mock_123",
                 tickers_analyzed=10,
-                actions_recommended={"ACUMULAR": 4, "AGUARDAR": 6},
+                actions_recommended={"ACUMULAR": 4, "AGUARDAR": 6, "MANTER": 0},
                 duration_ms=450
             )
 
+    replies = []
+    async def mock_send_msg(token, chat_id, text):
+        replies.append(text)
+
     monkeypatch.setattr(http, "get_sync_service", lambda: MockSyncService())
+    monkeypatch.setattr(http, "send_telegram_message", mock_send_msg)
     http._telegram_run_lock = False
 
     resp = client.post(
@@ -406,14 +411,35 @@ async def test_telegram_webhook_run_command_success(monkeypatch, tmp_path):
         json={"message": {"chat": {"id": 123456789}, "text": "/run"}}
     )
     assert resp.status_code == 200
+    assert any("disparado em segundo plano" in r for r in replies)
+    assert any("Ciclo Concluído com Sucesso" in r for r in replies)
+    assert http._telegram_run_lock is False
 
-    # Segunda chamada consecutiva deve acionar o lock de concorrência
-    resp_locked = client.post(
-        "/api/telegram/webhook",
-        json={"message": {"chat": {"id": 123456789}, "text": "/run"}}
-    )
-    assert resp_locked.status_code == 200
-    http._telegram_run_lock = False
+def test_telegram_webhook_run_command_blocks_concurrent(monkeypatch, tmp_path):
+    """Garante que quando o lock está ativo, chamadas simultâneas ao /run são bloqueadas."""
+    test_db = str(tmp_path / "test_tg_lock.db")
+    monkeypatch.setattr(settings, "sqlite_db_path", test_db)
+    monkeypatch.setattr(settings, "telegram_chat_id", "123456789")
+    monkeypatch.setattr(settings, "telegram_webhook_secret", "")
+
+    from barsi.api import http
+
+    replies = []
+    async def mock_send_msg(token, chat_id, text):
+        replies.append(text)
+
+    monkeypatch.setattr(http, "send_telegram_message", mock_send_msg)
+
+    http._telegram_run_lock = True
+    try:
+        resp = client.post(
+            "/api/telegram/webhook",
+            json={"message": {"chat": {"id": 123456789}, "text": "/run"}}
+        )
+        assert resp.status_code == 200
+        assert any("Já existe uma análise quantitativa em andamento" in r for r in replies)
+    finally:
+        http._telegram_run_lock = False
 
 
 

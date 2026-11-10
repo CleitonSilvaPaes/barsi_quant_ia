@@ -27,6 +27,14 @@ from barsi.infra.logging import logger
 app = FastAPI(title="Barsi Quant IA - Web Suite", version="2.0.0")
 security = HTTPBearer(auto_error=False)
 
+@app.on_event("startup")
+async def startup_event():
+    if settings.telegram_alerts_enabled and not (settings.telegram_webhook_secret or "").strip():
+        logger.warning(
+            "telegram_webhook_secret_missing",
+            hint="Configure BARSI_TELEGRAM_WEBHOOK_SECRET e secret_token no setWebhook para proteção extra contra spoofing."
+        )
+
 START_TIME = time.time()
 LAST_RUN_SUMMARY: Optional[RunSummary] = None
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
@@ -920,6 +928,23 @@ async def get_transacoes_endpoint(
 # ----------------- WEBHOOK INTERATIVO TELEGRAM BOT -----------------
 _telegram_run_lock = False
 
+async def send_telegram_message(bot_token: str, chat_id: str, reply_text: str):
+    """Envia mensagem assíncrona de resposta para o Telegram Bot."""
+    if not bot_token:
+        return
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            await client.post(url, json={
+                "chat_id": chat_id,
+                "text": reply_text,
+                "parse_mode": "Markdown",
+                "disable_web_page_preview": True
+            })
+    except Exception as err:
+        logger.error("telegram_reply_failed", error=str(err))
+
 @app.post("/api/telegram/webhook")
 async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
     """Webhook do Telegram Bot para comandos interativos (/status, /radar, /proventos, /ticker, /run)."""
@@ -955,20 +980,7 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
     bot_token = settings.telegram_bot_token
 
     async def _send_reply(reply_text: str):
-        if not bot_token:
-            return
-        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-        try:
-            import httpx
-            async with httpx.AsyncClient(timeout=8.0) as client:
-                await client.post(url, json={
-                    "chat_id": chat_id,
-                    "text": reply_text,
-                    "parse_mode": "Markdown",
-                    "disable_web_page_preview": True
-                })
-        except Exception as err:
-            logger.error("telegram_reply_failed", error=str(err))
+        await send_telegram_message(bot_token, chat_id, reply_text)
 
     if cmd in ("/status", "/carteira"):
         positions = await get_canonical_positions()
