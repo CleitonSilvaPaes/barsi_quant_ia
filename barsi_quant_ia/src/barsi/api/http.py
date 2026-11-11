@@ -1142,8 +1142,11 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
         elif len(args) == 2 and args[1] in ("on", "off"):
             alert_type, state = args[0], args[1]
             enabled = state == "on"
-            repo.set_notification_enabled(alert_type, enabled, updated_by=f"telegram:{chat_id}")
-            await _send_reply(f"✅ `{alert_type}` agora está {'🟢 ON' if enabled else '🔴 OFF'}.")
+            try:
+                repo.set_notification_enabled(alert_type, enabled, updated_by=f"telegram:{chat_id}")
+                await _send_reply(f"✅ `{alert_type}` agora está {'🟢 ON' if enabled else '🔴 OFF'}.")
+            except ValueError as e:
+                await _send_reply(f"⚠️ {e}")
         else:
             await _send_reply("⚠️ Uso: `/notifications`, `/notifications on|off`, `/notifications <tipo> on|off`")
 
@@ -1553,7 +1556,10 @@ async def set_notification_pref(req: NotifPrefUpdate, request: Request):
     if req.alert_type == "all":
         count = repo.set_all_notifications_enabled(req.enabled, updated_by=user_name)
         return {"ok": True, "alert_type": "all", "enabled": req.enabled, "updated": count}
-    repo.set_notification_enabled(req.alert_type, req.enabled, updated_by=user_name)
+    try:
+        repo.set_notification_enabled(req.alert_type, req.enabled, updated_by=user_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return {"ok": True, "alert_type": req.alert_type, "enabled": req.enabled}
 
 @app.get("/health")

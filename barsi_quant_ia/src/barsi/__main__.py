@@ -31,6 +31,7 @@ def run(
         from barsi.adapters.history.budget_repository import BudgetRepository
         repo = BudgetRepository(settings.sqlite_db_path)
         notify_radar = radar
+        force_radar = radar and not if_due
 
         # Se --if-due, valida scheduler ANTES de criar Adapters (economia de recursos)
         if if_due:
@@ -40,6 +41,7 @@ def run(
                 typer.echo(f"[i] Run não devida: {reason}")
                 return
             notify_radar = repo.is_notification_enabled("radar_summary")
+            force_radar = False
 
         market = AdapterFactory.create_market_adapter(settings)
         news = AdapterFactory.create_news_adapter(settings)
@@ -58,7 +60,12 @@ def run(
             budget_repo=repo,
             max_concurrency=settings.max_concurrency
         )
-        summary = await service.execute_run(dry_run=dry_run, target_ticker=ticker, notify_radar=notify_radar)
+        summary = await service.execute_run(
+            dry_run=dry_run,
+            target_ticker=ticker,
+            notify_radar=notify_radar,
+            force_radar=force_radar
+        )
         typer.echo(f"\n[OK] Run concluída! ID: {summary.run_id}")
         typer.echo(f"     Ativos analisados: {summary.tickers_analyzed}")
         typer.echo(f"     Duração: {summary.duration_ms} ms | RAM RSS: {summary.memory_peak_mb} MB")
@@ -359,7 +366,8 @@ def pull_db(
 def scheduler_install(
     ip: Optional[str] = typer.Option(None, "--ip", help="IP da TV Box na rede (lê de BARSI_TVBOX_IP se nulo)"),
     user: Optional[str] = typer.Option(None, "--user", help="Usuário SSH (lê de BARSI_TVBOX_USER se nulo)"),
-    password: Optional[str] = typer.Option(None, "--pass", help="Senha SSH (lê de BARSI_TVBOX_PASS se nulo)")
+    password: Optional[str] = typer.Option(None, "--pass", help="Senha SSH (lê de BARSI_TVBOX_PASS se nulo)"),
+    venv_python: str = typer.Option(".venv/bin/python", "--venv-python", help="Caminho do python no venv da TV Box (relativo a ~/barsi_quant_ia ou absoluto)")
 ):
     """Reinstala o barsi-sync.timer como heartbeat de 5 min com execução condicional --if-due."""
     import getpass, paramiko
@@ -372,6 +380,7 @@ def scheduler_install(
     target_pass = password or settings.tvbox_pass or getpass.getpass(f"Senha SSH para {target_user}@{target_ip}: ")
 
     remote_home = _resolve_tvbox_home(target_user)
+    python_bin = venv_python if venv_python.startswith("/") else f"{remote_home}/{venv_python}"
     typer.echo(f"[+] Conectando em {target_user}@{target_ip} para instalar scheduler heartbeat...")
 
     service_content = f"""[Unit]
@@ -383,7 +392,7 @@ Wants=network-online.target
 Type=oneshot
 User={target_user}
 WorkingDirectory={remote_home}
-ExecStart={remote_home}/.venv/bin/python -m barsi run --if-due
+ExecStart={python_bin} -m barsi run --if-due
 StandardOutput=journal
 StandardError=journal
 MemoryMax=250M

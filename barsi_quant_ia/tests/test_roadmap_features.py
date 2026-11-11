@@ -826,6 +826,120 @@ def test_cli_run_if_due_skips_when_not_due(tmp_path, monkeypatch):
     assert result.exit_code == 0
     assert "Run não devida: disabled" in result.output
 
+def test_scheduler_dedup_with_real_iso_format(tmp_path):
+    """Garante que dedup funciona com timestamps ISO (formato real do SQLiteHistoryAdapter)."""
+    import sqlite3
+    repo = BudgetRepository(str(tmp_path / "t.db"))
+    segunda_10h = datetime(2026, 11, 9, 10, 0)
+
+    # Grava no formato REAL (isoformat com 'T'), simulando SQLiteHistoryAdapter.record_run
+    run_time = (segunda_10h - timedelta(minutes=5)).isoformat()
+    with sqlite3.connect(repo.db_path) as c:
+        c.execute(
+            "INSERT INTO runs (run_id, timestamp, duration_ms, tickers_analyzed, memory_peak_mb, errors) "
+            "VALUES (?, ?, 100, 10, 110, '')",
+            ("recent", run_time),
+        )
+
+    # 1. Dentro da janela de 20 min -> deve pular
+    should_run, reason = repo.is_run_due(now=segunda_10h)
+    assert should_run is False
+    assert reason == "already_ran_recently"
+
+    # 2. Na hora seguinte (11:00) -> NÃO deve bloquear (janela expirada)
+    onze_horas = segunda_10h.replace(hour=11)
+    should_run_11, reason_11 = repo.is_run_due(now=onze_horas)
+    assert should_run_11 is True, f"Falso positivo de dedup com timestamp ISO: {reason_11}"
+
+def test_notification_prefs_invalid_alert_type_rejected(tmp_path, monkeypatch):
+    """Garante que tipos desconhecidos de notificação são rejeitados."""
+    test_db = str(tmp_path / "test_notif_val.db")
+    monkeypatch.setattr(settings, "sqlite_db_path", test_db)
+    repo = BudgetRepository(test_db)
+
+    with pytest.raises(ValueError, match="alert_type inválido"):
+        repo.set_notification_enabled("tipo_fantasma", True)
+
+    token = create_session_token(1, "admin_user", "admin", settings.secret_key)
+    client.cookies.set("barsi_session", token)
+    res = client.post("/api/notifications/preferences", json={"alert_type": "fantasma", "enabled": True})
+    assert res.status_code == 400
+    assert "alert_type inválido" in res.json()["detail"]
+
+@pytest.mark.asyncio
+async def test_send_hourly_radar_summary_force_parameter(tmp_path):
+    """Garante que force=True envia radar mesmo com radar_summary desabilitado nas preferências."""
+    from barsi.services.sync_service import SyncService
+    from barsi.domain.models import MarketQuote, NewsSummary, InsightResult
+
+    test_db = str(tmp_path / "test_force_radar.db")
+    repo = BudgetRepository(test_db)
+    # Desabilita preferência de radar
+    repo.set_notification_enabled("radar_summary", False)
+
+    pos = Position(
+        ticker="BBAS3",
+        row_index=2,
+        empresa="Banco do Brasil",
+        setor="Bancos",
+        preco_atual=20.00,
+        preco_teto=35.00,
+        div_proj=2.10,
+        status_barsi="ACUMULAR",
+        margem_seguranca=42.8,
+        qtd_antes=100
+    )
+    repo.save_positions([pos])
+
+    notifications = []
+    class MockNotifier:
+        async def notify(self, title, body, level="info"):
+            notifications.append((title, body, level))
+            return True
+
+    class MockMarket:
+        async def get_quote(self, ticker: str):
+            return MarketQuote(ticker=ticker, price=20.00)
+
+    class MockNews:
+        async def get_latest_news(self, ticker: str):
+            return NewsSummary(ticker=ticker, headlines="")
+
+    class MockAI:
+        async def generate_insight(self, *args, **kwargs):
+            return InsightResult(ticker="BBAS3", insight="Bom ativo", acao_sugerida="ACUMULAR", provider="rule_engine")
+
+    class MockSheets:
+        async def load_positions(self): return []
+        async def update_positions(self, p): pass
+
+    class MockHistory:
+        async def get_last_analysis(self, t): return None
+        async def save_analysis(self, **kw): pass
+        async def record_run(self, s): pass
+
+    service = SyncService(
+        market=MockMarket(),
+        news=MockNews(),
+        ai=MockAI(),
+        sheets=MockSheets(),
+        history=MockHistory(),
+        notifier=MockNotifier(),
+        budget_repo=repo
+    )
+
+    # 1. Sem force (ex: automação periódica): respeita preferência desabilitada
+    await service.execute_run(dry_run=False, notify_radar=True, force_radar=False)
+    radar_msgs = [m for m in notifications if "Radar" in m[0]]
+    assert len(radar_msgs) == 0
+
+    # 2. Com force=True (ex: CLI manual --radar): sobrepõe e envia
+    await service.execute_run(dry_run=False, notify_radar=True, force_radar=True)
+    radar_msgs_forced = [m for m in notifications if "Radar" in m[0]]
+    assert len(radar_msgs_forced) == 1
+    assert "BBAS3" in radar_msgs_forced[0][1]
+
+
 
 
 

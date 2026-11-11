@@ -98,7 +98,8 @@ class SyncService:
         self,
         dry_run: bool = False,
         target_ticker: Optional[str] = None,
-        notify_radar: bool = False
+        notify_radar: bool = False,
+        force_radar: bool = False
     ) -> RunSummary:
         start_time = time.time()
         run_id = str(uuid.uuid4())
@@ -195,7 +196,7 @@ class SyncService:
 
             if notify_radar and valid_positions:
                 try:
-                    await self.send_hourly_radar_summary(valid_positions)
+                    await self.send_hourly_radar_summary(valid_positions, force=force_radar)
                 except Exception as exc:
                     logger.warning("hourly_radar_failed", error=str(exc))
 
@@ -209,11 +210,11 @@ class SyncService:
         )
         return summary
 
-    async def send_hourly_radar_summary(self, positions: Optional[List[Position]] = None) -> bool:
+    async def send_hourly_radar_summary(self, positions: Optional[List[Position]] = None, force: bool = False) -> bool:
         """Envia resumo consolidado com o top 5 de oportunidades para canais de notificação."""
         if not self.notifier:
             return False
-        if self.budget_repo and not self.budget_repo.is_notification_enabled("radar_summary"):
+        if not force and self.budget_repo and not self.budget_repo.is_notification_enabled("radar_summary"):
             return False
         if positions is None:
             positions = self.budget_repo.load_positions() if self.budget_repo else []

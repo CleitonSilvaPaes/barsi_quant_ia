@@ -317,6 +317,8 @@ DEFAULT_NOTIFICATION_PREFS: List[Tuple[str, int]] = [
     ("radar_summary",  1),   # resumo horário consolidado
 ]
 
+VALID_ALERT_TYPES = {alert_type for alert_type, _ in DEFAULT_NOTIFICATION_PREFS}
+
 class BudgetRepository:
     """Leitura e escrita de orçamento no SQLite. Sem I/O de rede, sem dependência do Google Sheets."""
 
@@ -691,6 +693,8 @@ class BudgetRepository:
 
     def set_notification_enabled(self, alert_type: str, enabled: bool, updated_by: Optional[str] = None) -> None:
         """Ativa ou desativa um tipo de notificação específico."""
+        if alert_type not in VALID_ALERT_TYPES:
+            raise ValueError(f"alert_type inválido: '{alert_type}'. Válidos: {sorted(VALID_ALERT_TYPES)}")
         with self._conn() as c:
             c.execute("""
                 INSERT INTO notification_preferences (alert_type, enabled, updated_at, updated_by)
@@ -825,14 +829,14 @@ class BudgetRepository:
         # Dedup: se rodou nos últimos 20 min, não roda de novo
         with self._conn() as c:
             if now is not None:
-                cutoff = (now - timedelta(minutes=20)).strftime("%Y-%m-%d %H:%M:%S")
+                cutoff = (now - timedelta(minutes=20)).isoformat(sep=" ")
                 row = c.execute(
-                    "SELECT 1 FROM runs WHERE timestamp >= ? LIMIT 1",
+                    "SELECT 1 FROM runs WHERE datetime(timestamp) >= datetime(?) LIMIT 1",
                     (cutoff,),
                 ).fetchone()
             else:
                 row = c.execute(
-                    "SELECT 1 FROM runs WHERE timestamp >= datetime('now', '-20 minutes') LIMIT 1"
+                    "SELECT 1 FROM runs WHERE datetime(timestamp) >= datetime('now', '-20 minutes') LIMIT 1"
                 ).fetchone()
             if row:
                 return False, "already_ran_recently"
