@@ -6,12 +6,15 @@ import asyncio
 import urllib.request
 import urllib.parse
 from datetime import datetime
+import io
+import sqlite3
+import pandas as pd
 from typing import List, Optional, Dict, Any
 from contextlib import asynccontextmanager
 import psutil
 from pydantic import BaseModel, Field
 from fastapi import FastAPI, Depends, HTTPException, Security, Request, Response, UploadFile, File, BackgroundTasks
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, FileResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, FileResponse, StreamingResponse
 from fastapi.security import HTTPBearer
 
 from barsi.config import settings
@@ -109,6 +112,15 @@ class NewUserRequest(BaseModel):
     username: str
     password: str
     role: str = "leitor"
+
+class ArtifactCreateRequest(BaseModel):
+    name: str
+    description: Optional[str] = ""
+    chart_type: str = "bar"
+    data_source: str
+    fields: List[str]
+    filters: Optional[Dict[str, Any]] = None
+    visible_in: Optional[List[str]] = Field(default_factory=lambda: ["analytics"])
 
 def get_sync_service() -> SyncService:
     market = AdapterFactory.create_market_adapter(settings)
@@ -819,6 +831,95 @@ async def get_analytics_data(request: Request, months: int = 12):
         "setores": setores,
         "dividendos": dividendos
     }
+
+# ----------------- ARTEFATOS PERSONALIZADOS (RELATÓRIOS DINÂMICOS) -----------------
+@app.get("/api/artifacts/sources")
+async def get_artifact_sources(request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Não autorizado")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    return repo.get_available_data_sources()
+
+@app.get("/api/artifacts")
+async def list_artifacts(request: Request, visible_in: Optional[str] = None):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Não autorizado")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    items = repo.list_custom_artifacts(visible_in=visible_in)
+    return {"items": items}
+
+@app.post("/api/artifacts")
+async def create_artifact(request: Request, payload: ArtifactCreateRequest):
+    user = require_role_action(request, action_type="edit")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    try:
+        artifact_id = repo.create_custom_artifact(
+            name=payload.name,
+            chart_type=payload.chart_type,
+            data_source=payload.data_source,
+            fields=payload.fields,
+            description=payload.description,
+            filters=payload.filters,
+            visible_in=payload.visible_in
+        )
+        return {"ok": True, "id": artifact_id, "message": "Artefato criado com sucesso"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=400, detail=f"Já existe um artefato com o nome '{payload.name}'")
+
+@app.delete("/api/artifacts/{artifact_id}")
+async def delete_artifact(request: Request, artifact_id: int):
+    user = require_role_action(request, action_type="edit")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    deleted = repo.delete_custom_artifact(artifact_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Artefato não encontrado")
+    return {"ok": True, "message": "Artefato excluído com sucesso"}
+
+@app.get("/api/artifacts/{artifact_id}/data")
+async def get_artifact_data(request: Request, artifact_id: int):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Não autorizado")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    try:
+        return repo.get_custom_artifact_data(artifact_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@app.get("/api/artifacts/{artifact_id}/export")
+async def export_artifact_excel(request: Request, artifact_id: int):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Não autorizado")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    try:
+        data = repo.get_custom_artifact_data(artifact_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    rows = data.get("rows") or []
+    if rows:
+        df = pd.DataFrame(rows)
+    else:
+        df = pd.DataFrame(columns=data.get("fields") or ["dados"])
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="Dados", index=False)
+    output.seek(0)
+
+    safe_name = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in data.get("name", f"artefato_{artifact_id}"))
+    filename = f"{safe_name}_{artifact_id}.xlsx"
+
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
 
 @app.get("/api/admin/users")
 async def list_admin_users(request: Request):

@@ -219,6 +219,20 @@ INIT_BUDGET_SCHEMA_SQL = """
         updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
         updated_by    TEXT
     );
+
+    -- 17. Definições de Artefatos Personalizados (Relatórios Dinâmicos)
+    CREATE TABLE IF NOT EXISTS custom_artifacts (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        name          TEXT NOT NULL UNIQUE,
+        description   TEXT,
+        chart_type    TEXT NOT NULL,
+        data_source   TEXT NOT NULL,
+        fields        TEXT NOT NULL,
+        filters       TEXT,
+        visible_in    TEXT NOT NULL DEFAULT '["analytics"]',
+        created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
 """
 
 DEFAULT_KEYWORDS: List[Tuple[str, str, str, int]] = [
@@ -318,6 +332,86 @@ DEFAULT_NOTIFICATION_PREFS: List[Tuple[str, int]] = [
 ]
 
 VALID_ALERT_TYPES = {alert_type for alert_type, _ in DEFAULT_NOTIFICATION_PREFS}
+
+VALID_CHART_TYPES = {"line", "bar", "doughnut", "pie"}
+
+VALID_DATA_SOURCES: Dict[str, Any] = {
+    "positions": {
+        "name": "Posições da Carteira",
+        "table": "positions",
+        "allowed_fields": {
+            "ticker": "ticker",
+            "empresa": "empresa",
+            "setor": "setor",
+            "preco_atual": "preco_atual",
+            "preco_teto": "preco_teto",
+            "margem_seguranca": "margem_seguranca",
+            "div_proj": "div_proj",
+            "qtd_antes": "qtd_antes",
+            "qtd_aporte": "qtd_aporte",
+            "custo_medio": "custo_medio",
+            "valor_mercado": "((COALESCE(qtd_antes, 0) + COALESCE(qtd_aporte, 0)) * COALESCE(preco_atual, 0.0))",
+        },
+        "default_order": "margem_seguranca DESC",
+    },
+    "portfolio_snapshots": {
+        "name": "Evolução do Patrimônio (Snapshots)",
+        "table": "portfolio_snapshots",
+        "allowed_fields": {
+            "data_snapshot": "data_snapshot",
+            "patrimonio_total": "patrimonio_total",
+            "cotas_totais": "cotas_totais",
+            "dividendos_mes": "dividendos_mes",
+            "aporte_planejado": "aporte_planejado",
+            "rentabilidade_mes": "rentabilidade_mes",
+        },
+        "default_order": "data_snapshot ASC",
+    },
+    "dividends_received": {
+        "name": "Dividendos Recebidos",
+        "table": "dividends_received",
+        "allowed_fields": {
+            "ticker": "ticker",
+            "data_pagamento": "data_pagamento",
+            "mes_ano": "mes_ano",
+            "valor_total": "valor_total",
+            "valor_por_cota": "valor_por_cota",
+            "quantidade": "quantidade",
+            "tipo": "tipo",
+            "fonte": "fonte",
+        },
+        "default_order": "data_pagamento ASC",
+    },
+    "dividends": {
+        "name": "Dividendos Recebidos",
+        "table": "dividends_received",
+        "allowed_fields": {
+            "ticker": "ticker",
+            "data_pagamento": "data_pagamento",
+            "mes_ano": "mes_ano",
+            "valor_total": "valor_total",
+            "valor_por_cota": "valor_por_cota",
+            "quantidade": "quantidade",
+            "tipo": "tipo",
+            "fonte": "fonte",
+        },
+        "default_order": "data_pagamento ASC",
+    },
+    "transacoes": {
+        "name": "Transações / Fluxo Financeiro",
+        "table": "transacoes",
+        "allowed_fields": {
+            "data": "data",
+            "mes_ano": "mes_ano",
+            "tipo": "tipo",
+            "valor": "valor",
+            "descricao": "descricao",
+            "categoria": "categoria",
+            "origem": "origem",
+        },
+        "default_order": "data ASC",
+    },
+}
 
 class BudgetRepository:
     """Leitura e escrita de orçamento no SQLite. Sem I/O de rede, sem dependência do Google Sheets."""
@@ -1380,4 +1474,276 @@ class BudgetRepository:
             "saldo_livre": round(total_entradas - total_saidas_real, 2),
             "items": items
         }
+
+    # -------------------------------------------------------------
+    # GESTÃO DE ARTEFATOS PERSONALIZADOS (RELATÓRIOS DINÂMICOS)
+    # -------------------------------------------------------------
+    def get_available_data_sources(self) -> Dict[str, Any]:
+        """Retorna fontes de dados e metadados de campos permitidos para construção de artefatos."""
+        return {
+            "positions": {
+                "name": "Posições da Carteira",
+                "fields": [
+                    {"id": "ticker", "name": "Ticker (ex: BBAS3)", "type": "string"},
+                    {"id": "empresa", "name": "Empresa", "type": "string"},
+                    {"id": "setor", "name": "Setor (B.E.S.T.)", "type": "string"},
+                    {"id": "preco_atual", "name": "Preço Atual (R$)", "type": "number"},
+                    {"id": "preco_teto", "name": "Preço Teto Barsi (R$)", "type": "number"},
+                    {"id": "margem_seguranca", "name": "Margem de Segurança (%)", "type": "number"},
+                    {"id": "div_proj", "name": "Dividendo Projetado (R$)", "type": "number"},
+                    {"id": "qtd_antes", "name": "Quantidade de Ações", "type": "number"},
+                    {"id": "custo_medio", "name": "Custo Médio (R$)", "type": "number"},
+                    {"id": "valor_mercado", "name": "Valor de Mercado (R$)", "type": "number"},
+                ],
+            },
+            "portfolio_snapshots": {
+                "name": "Evolução Histórica do Patrimônio",
+                "fields": [
+                    {"id": "data_snapshot", "name": "Data do Snapshot", "type": "string"},
+                    {"id": "patrimonio_total", "name": "Patrimônio Total (R$)", "type": "number"},
+                    {"id": "cotas_totais", "name": "Total de Cotas/Ações", "type": "number"},
+                    {"id": "dividendos_mes", "name": "Dividendos no Mês (R$)", "type": "number"},
+                    {"id": "aporte_planejado", "name": "Aporte Planejado (R$)", "type": "number"},
+                    {"id": "rentabilidade_mes", "name": "Rentabilidade Mês (%)", "type": "number"},
+                ],
+            },
+            "dividends_received": {
+                "name": "Dividendos Recebidos",
+                "fields": [
+                    {"id": "ticker", "name": "Ticker", "type": "string"},
+                    {"id": "mes_ano", "name": "Mês/Ano (YYYY-MM)", "type": "string"},
+                    {"id": "data_pagamento", "name": "Data Pagamento", "type": "string"},
+                    {"id": "valor_total", "name": "Valor Total Recebido (R$)", "type": "number"},
+                    {"id": "valor_por_cota", "name": "Valor por Cota (R$)", "type": "number"},
+                    {"id": "quantidade", "name": "Quantidade de Cotas", "type": "number"},
+                    {"id": "tipo", "name": "Tipo (Dividendo/JCP)", "type": "string"},
+                ],
+            },
+            "transacoes": {
+                "name": "Transações / Fluxo Financeiro",
+                "fields": [
+                    {"id": "mes_ano", "name": "Mês/Ano", "type": "string"},
+                    {"id": "categoria", "name": "Categoria", "type": "string"},
+                    {"id": "data", "name": "Data", "type": "string"},
+                    {"id": "tipo", "name": "Tipo (CREDIT/DEBIT)", "type": "string"},
+                    {"id": "origem", "name": "Origem (CONTA/CARTAO)", "type": "string"},
+                    {"id": "valor", "name": "Valor (R$)", "type": "number"},
+                ],
+            },
+        }
+
+    def create_custom_artifact(
+        self,
+        name: str,
+        chart_type: str,
+        data_source: str,
+        fields: List[str],
+        description: Optional[str] = None,
+        filters: Optional[Dict[str, Any]] = None,
+        visible_in: Optional[List[str]] = None
+    ) -> int:
+        """Cria uma nova definição de artefato dinâmico com validação estrita de fontes e colunas."""
+        name = (name or "").strip()
+        if not name:
+            raise ValueError("Nome do artefato é obrigatório")
+
+        chart_type = (chart_type or "").lower().strip()
+        if chart_type not in VALID_CHART_TYPES:
+            raise ValueError(f"Tipo de gráfico inválido: {chart_type}. Permitidos: {sorted(list(VALID_CHART_TYPES))}")
+
+        data_source = (data_source or "").lower().strip()
+        if data_source not in VALID_DATA_SOURCES:
+            raise ValueError(f"Fonte de dados inválida: {data_source}. Permitidas: {sorted(list(VALID_DATA_SOURCES.keys()))}")
+
+        if not fields or not isinstance(fields, list):
+            raise ValueError("Lista de campos não pode ser vazia")
+
+        allowed = VALID_DATA_SOURCES[data_source]["allowed_fields"]
+        invalid_fields = [f for f in fields if f not in allowed]
+        if invalid_fields:
+            raise ValueError(f"Campos inválidos para '{data_source}': {invalid_fields}. Permitidos: {list(allowed.keys())}")
+
+        visible = visible_in if (visible_in is not None and isinstance(visible_in, list) and len(visible_in) > 0) else ["analytics"]
+        fields_json = json.dumps(fields)
+        filters_json = json.dumps(filters or {})
+        visible_json = json.dumps(visible)
+
+        with self._conn() as conn:
+            cursor = conn.execute(
+                """INSERT INTO custom_artifacts 
+                   (name, description, chart_type, data_source, fields, filters, visible_in, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+                (name, description or "", chart_type, data_source, fields_json, filters_json, visible_json)
+            )
+            return cursor.lastrowid
+
+    def list_custom_artifacts(self, visible_in: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Lista os artefatos cadastrados, com filtro opcional por página de exibição."""
+        with self._conn() as conn:
+            rows = conn.execute("SELECT * FROM custom_artifacts ORDER BY id ASC").fetchall()
+            result = []
+            for r in rows:
+                try:
+                    vis = json.loads(r["visible_in"]) if r["visible_in"] else ["analytics"]
+                except Exception:
+                    vis = ["analytics"]
+                if visible_in and visible_in not in vis:
+                    continue
+                try:
+                    flds = json.loads(r["fields"]) if r["fields"] else []
+                except Exception:
+                    flds = []
+                try:
+                    flts = json.loads(r["filters"]) if r["filters"] else {}
+                except Exception:
+                    flts = {}
+                result.append({
+                    "id": r["id"],
+                    "name": r["name"],
+                    "description": r["description"] or "",
+                    "chart_type": r["chart_type"],
+                    "data_source": r["data_source"],
+                    "fields": flds,
+                    "filters": flts,
+                    "visible_in": vis,
+                    "created_at": r["created_at"],
+                    "updated_at": r["updated_at"],
+                })
+            return result
+
+    def get_custom_artifact(self, artifact_id: int) -> Optional[Dict[str, Any]]:
+        """Busca definição de um artefato pelo ID."""
+        with self._conn() as conn:
+            row = conn.execute("SELECT * FROM custom_artifacts WHERE id = ?", (artifact_id,)).fetchone()
+            if not row:
+                return None
+            try:
+                vis = json.loads(row["visible_in"]) if row["visible_in"] else ["analytics"]
+            except Exception:
+                vis = ["analytics"]
+            try:
+                flds = json.loads(row["fields"]) if row["fields"] else []
+            except Exception:
+                flds = []
+            try:
+                flts = json.loads(row["filters"]) if row["filters"] else {}
+            except Exception:
+                flts = {}
+            return {
+                "id": row["id"],
+                "name": row["name"],
+                "description": row["description"] or "",
+                "chart_type": row["chart_type"],
+                "data_source": row["data_source"],
+                "fields": flds,
+                "filters": flts,
+                "visible_in": vis,
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+
+    def delete_custom_artifact(self, artifact_id: int) -> bool:
+        """Exclui um artefato pelo ID."""
+        with self._conn() as conn:
+            cursor = conn.execute("DELETE FROM custom_artifacts WHERE id = ?", (artifact_id,))
+            return cursor.rowcount > 0
+
+    def get_custom_artifact_data(self, artifact_id: int) -> Dict[str, Any]:
+        """Executa a consulta SQL parametrizada de forma segura e prepara dados para Chart.js e Excel."""
+        art = self.get_custom_artifact(artifact_id)
+        if not art:
+            raise ValueError(f"Artefato {artifact_id} não encontrado")
+
+        source_cfg = VALID_DATA_SOURCES.get(art["data_source"])
+        if not source_cfg:
+            raise ValueError(f"Fonte '{art['data_source']}' inválida")
+
+        table = source_cfg["table"]
+        allowed = source_cfg["allowed_fields"]
+        chart_type = art["chart_type"]
+        fields = art["fields"]
+
+        label_field = fields[0]
+        metric_fields = fields[1:] if len(fields) > 1 else []
+
+        # Determina agrupamento se gráfico circular ou se label for categórico com métrica numérica
+        should_group = (
+            chart_type in ("doughnut", "pie") or
+            (label_field in ("setor", "categoria", "tipo", "origem", "mes_ano") and bool(metric_fields))
+        )
+
+        where_parts = []
+        params = []
+        filters = art.get("filters") or {}
+        for k, v in filters.items():
+            if k in allowed and v is not None and str(v).strip() != "":
+                where_parts.append(f"{k} = ?")
+                params.append(v)
+
+        if should_group:
+            select_parts = [f"{allowed[label_field]} AS {label_field}"]
+            for m in metric_fields:
+                expr = allowed[m]
+                select_parts.append(f"SUM({expr}) AS {m}")
+            sql = f"SELECT {', '.join(select_parts)} FROM {table}"
+            if where_parts:
+                sql += " WHERE " + " AND ".join(where_parts)
+            sql += f" GROUP BY {allowed[label_field]}"
+            if metric_fields:
+                sql += f" ORDER BY {metric_fields[0]} DESC"
+        else:
+            select_parts = []
+            for f in fields:
+                expr = allowed[f]
+                select_parts.append(f"{expr} AS {f}" if expr != f else f)
+            sql = f"SELECT {', '.join(select_parts)} FROM {table}"
+            if where_parts:
+                sql += " WHERE " + " AND ".join(where_parts)
+            order = source_cfg.get("default_order")
+            if order:
+                sql += f" ORDER BY {order}"
+
+        sql += " LIMIT 150"
+
+        with self._conn() as conn:
+            raw_rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+        labels: List[str] = []
+        values: List[float] = []
+        datasets: List[Dict[str, Any]] = []
+
+        if raw_rows:
+            labels = [str(r.get(label_field, "")) for r in raw_rows]
+            active_metrics = metric_fields if metric_fields else [label_field]
+            for m in active_metrics:
+                m_vals = []
+                for r in raw_rows:
+                    val = r.get(m)
+                    try:
+                        m_vals.append(round(float(val), 2) if val is not None else 0.0)
+                    except (ValueError, TypeError):
+                        m_vals.append(0.0)
+                datasets.append({
+                    "label": m.replace("_", " ").title(),
+                    "data": m_vals,
+                    "field": m,
+                })
+                if not values:
+                    values = m_vals
+
+        return {
+            "id": art["id"],
+            "name": art["name"],
+            "description": art["description"],
+            "chart_type": art["chart_type"],
+            "data_source": art["data_source"],
+            "fields": fields,
+            "filters": art["filters"],
+            "visible_in": art["visible_in"],
+            "labels": labels,
+            "values": values,
+            "datasets": datasets,
+            "rows": raw_rows,
+        }
+
 

@@ -36,11 +36,11 @@
   </div>
 </div>
 
-<div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem;">
+<div class="responsive-grid-2-1">
   <!-- Gráfico 1: Curva de Evolução Patrimonial -->
   <div class="card" style="margin:0;">
     <h3 style="color: var(--accent); font-size: 1.05rem; margin-bottom: 1rem;" id="title-equity-chart">📈 Curva de Evolução Patrimonial (Últimos 12 Meses)</h3>
-    <div style="height: 300px; position: relative;">
+    <div class="chart-container">
       <canvas id="chart-equity"></canvas>
     </div>
   </div>
@@ -49,17 +49,17 @@
   <div class="card" style="margin:0;">
     <h3 style="color: var(--accent); font-size: 1.05rem; margin-bottom: 0.35rem;">🥧 Concentração por Setor</h3>
     <div id="pie-caption" style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.8rem;">Visualizando carteira atual (clique em qualquer ponto da curva para filtrar)</div>
-    <div style="height: 300px; position: relative;">
+    <div class="chart-container">
       <canvas id="chart-setores"></canvas>
     </div>
   </div>
 </div>
 
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem;">
+<div class="responsive-grid-1-1">
   <!-- Gráfico 2: Proventos Realizados vs Projetados -->
   <div class="card" style="margin:0;">
     <h3 style="color: var(--accent); font-size: 1.05rem; margin-bottom: 1rem;">💰 Dividendos Mensais (Realizado vs Projetado)</h3>
-    <div style="height: 260px; position: relative;">
+    <div class="chart-container">
       <canvas id="chart-dividendos"></canvas>
     </div>
   </div>
@@ -109,10 +109,105 @@
   </div>
 </div>
 
+<!-- ============================================================== -->
+<!-- SEÇÃO DE ARTEFATOS & RELATÓRIOS DINÂMICOS PERSONALIZADOS       -->
+<!-- ============================================================== -->
+<div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2rem; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.5rem;">
+  <div>
+    <h2 style="margin: 0; font-size: 1.25rem; color: #fff;">🎨 Artefatos & Relatórios Dinâmicos Personalizados</h2>
+    <span style="font-size: 0.8rem; color: var(--text-muted);">Construa visões analíticas sob medida, exporte para Excel e renderize gráficos interativos</span>
+  </div>
+  <div>
+    <button class="btn btn-primary" onclick="toggleArtifactBuilder()">➕ Criar Novo Artefato</button>
+  </div>
+</div>
+
+<!-- FORMULÁRIO BUILDER DO ARTEFATO (COLLAPSIBLE) -->
+<div id="artifact-builder-card" class="card" style="display: none; border-left: 4px solid var(--accent); margin-bottom: 1.5rem;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+    <h3 style="color: var(--accent); font-size: 1.05rem; margin: 0;">🛠️ Construtor de Artefato Personalizado</h3>
+    <button class="btn btn-outline" style="padding: 0.2rem 0.5rem;" onclick="toggleArtifactBuilder()">✖ Fechar</button>
+  </div>
+  <form id="artifact-form" onsubmit="salvarArtefato(event)">
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
+      <div>
+        <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.3rem;">Nome do Artefato *</label>
+        <input type="text" id="art-name" class="tbl-input" placeholder="ex: Margem de Segurança por Ticker" required />
+      </div>
+      <div>
+        <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.3rem;">Tipo de Gráfico *</label>
+        <select id="art-chart" class="tbl-input" required>
+          <option value="bar">📊 Barras (Bar)</option>
+          <option value="line">📈 Linhas (Line)</option>
+          <option value="doughnut">🍩 Rosca (Doughnut)</option>
+          <option value="pie">🥧 Pizza (Pie)</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.3rem;">Fonte de Dados *</label>
+        <select id="art-source" class="tbl-input" onchange="atualizarCamposFonte()" required>
+          <option value="positions">💼 Posições da Carteira (positions)</option>
+          <option value="portfolio_snapshots">📈 Evolução Histórica (portfolio_snapshots)</option>
+          <option value="dividends_received">💰 Dividendos Recebidos (dividends_received)</option>
+          <option value="transacoes">💳 Transações / Fluxo (transacoes)</option>
+        </select>
+      </div>
+    </div>
+
+    <div style="margin-bottom: 1rem;">
+      <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.3rem;">Descrição (opcional)</label>
+      <input type="text" id="art-desc" class="tbl-input" placeholder="Contexto ou objetivo deste relatório dinâmico" />
+    </div>
+
+    <div style="margin-bottom: 1rem;">
+      <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.4rem;">Campos Visíveis (o 1º selecionado será o Rótulo/Eixo X e os demais Métricas Numéricas) *</label>
+      <div id="art-fields-container" style="display: flex; flex-wrap: wrap; gap: 0.75rem; background: #070a12; padding: 0.75rem; border-radius: 6px; border: 1px solid var(--border);"></div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1.25rem;">
+      <div>
+        <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.3rem;">Filtro por Ticker (opcional)</label>
+        <input type="text" id="art-filter-ticker" class="tbl-input" placeholder="ex: BBAS3" />
+      </div>
+      <div>
+        <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.3rem;">Filtro por Mês/Ano (opcional)</label>
+        <input type="text" id="art-filter-mes" class="tbl-input" placeholder="ex: 2026-11" />
+      </div>
+      <div>
+        <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.3rem;">Exibir em:</label>
+        <div style="display: flex; gap: 1rem; align-items: center; padding-top: 0.35rem;">
+          <label style="font-size: 0.82rem; display: flex; align-items: center; gap: 0.3rem; color: var(--text);">
+            <input type="checkbox" id="art-vis-analytics" value="analytics" checked /> Analytics
+          </label>
+          <label style="font-size: 0.82rem; display: flex; align-items: center; gap: 0.3rem; color: var(--text);">
+            <input type="checkbox" id="art-vis-home" value="home" /> Home
+          </label>
+          <label style="font-size: 0.82rem; display: flex; align-items: center; gap: 0.3rem; color: var(--text);">
+            <input type="checkbox" id="art-vis-carteira" value="carteira" /> Carteira
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+      <button type="submit" class="btn btn-green">💾 Salvar Artefato</button>
+      <button type="button" class="btn btn-outline" onclick="toggleArtifactBuilder()">Cancelar</button>
+    </div>
+  </form>
+</div>
+
+<!-- GRID DE ARTEFATOS RENDERIZADOS DINAMICAMENTE -->
+<div id="custom-artifacts-container" class="responsive-grid-artifacts"></div>
+<div id="no-artifacts-msg" style="display: none; text-align: center; padding: 2rem; color: var(--text-muted); background: var(--card-bg); border: 1px dashed var(--border); border-radius: 8px; margin-bottom: 1.5rem;">
+  Nenhum artefato personalizado exibido para esta página. Clique em <strong>➕ Criar Novo Artefato</strong> acima para montar seu primeiro relatório.
+</div>
+
 <script>
   let chartEquity = null;
   let chartSetores = null;
   let chartDividendos = null;
+  let customChartInstances = {};
+  let artifactSourcesCache = null;
 
   async function carregarAnalytics() {
     const meses = document.getElementById("periodo-select") ? document.getElementById("periodo-select").value : 12;
@@ -250,6 +345,7 @@
       return `${parts[1]}/${parts[0].slice(2)}`;
     });
     const values = snapshots.map(s => s.patrimonio_total);
+    const isMobile = window.innerWidth < 600;
 
     chartEquity = new Chart(ctx, {
       type: 'line',
@@ -263,7 +359,7 @@
           fill: true,
           tension: 0.35,
           borderWidth: 3,
-          pointRadius: 4,
+          pointRadius: isMobile ? 3 : 4,
           pointBackgroundColor: '#38bdf8'
         }]
       },
@@ -280,11 +376,22 @@
           }
         },
         scales: {
-          x: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } },
-          y: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8', callback: v => 'R$ ' + (v/1000).toFixed(0) + 'k' } }
+          x: { 
+            grid: { color: '#1e293b' }, 
+            ticks: { color: '#94a3b8', font: { size: isMobile ? 9 : 11 } } 
+          },
+          y: { 
+            grid: { color: '#1e293b' }, 
+            ticks: { 
+              color: '#94a3b8', 
+              font: { size: isMobile ? 9 : 11 },
+              callback: v => 'R$ ' + (v/1000).toFixed(0) + 'k' 
+            } 
+          }
         },
         plugins: {
-          legend: { display: false }
+          legend: { display: false },
+          tooltip: { mode: 'index', intersect: false }
         }
       }
     });
@@ -297,6 +404,7 @@
 
     const labels = Object.keys(setores);
     const values = Object.values(setores);
+    const isMobile = window.innerWidth < 600;
 
     const palette = [
       '#2563eb', '#16a34a', '#d97706', '#9333ea', '#06b6d4', '#e11d48',
@@ -321,8 +429,14 @@
         plugins: {
           legend: {
             position: 'bottom',
-            labels: { color: '#cbd5e1', font: { size: 11 } }
-          }
+            labels: { 
+              color: '#cbd5e1', 
+              font: { size: isMobile ? 10 : 11 },
+              boxWidth: isMobile ? 10 : 12,
+              padding: isMobile ? 6 : 10
+            }
+          },
+          tooltip: { intersect: true }
         }
       }
     });
@@ -335,6 +449,7 @@
     const labels = dividendos.map(d => d.mes);
     const real = dividendos.map(d => d.realizado);
     const proj = dividendos.map(d => d.projetado);
+    const isMobile = window.innerWidth < 600;
 
     chartDividendos = new Chart(ctx, {
       type: 'bar',
@@ -349,17 +464,318 @@
         responsive: true,
         maintainAspectRatio: false,
         scales: {
-          x: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } },
-          y: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8', callback: v => 'R$ ' + v } }
+          x: { 
+            grid: { color: '#1e293b' }, 
+            ticks: { color: '#94a3b8', font: { size: isMobile ? 9 : 11 } } 
+          },
+          y: { 
+            grid: { color: '#1e293b' }, 
+            ticks: { 
+              color: '#94a3b8', 
+              font: { size: isMobile ? 9 : 11 },
+              callback: v => 'R$ ' + v 
+            } 
+          }
         },
         plugins: {
-          legend: { labels: { color: '#cbd5e1' } }
+          legend: { 
+            labels: { 
+              color: '#cbd5e1', 
+              font: { size: isMobile ? 10 : 12 } 
+            } 
+          },
+          tooltip: { mode: 'index', intersect: false }
         }
       }
     });
   }
 
+  // ==============================================================
+  // GESTÃO & RENDERIZAÇÃO DOS ARTEFATOS PERSONALIZADOS
+  // ==============================================================
+  async function carregarFontesArtefatos() {
+    if (artifactSourcesCache) return artifactSourcesCache;
+    try {
+      const res = await fetch("/api/artifacts/sources");
+      if (res.ok) {
+        artifactSourcesCache = await res.json();
+      }
+    } catch (e) {
+      console.warn("Falha ao carregar fontes de artefatos:", e);
+    }
+    return artifactSourcesCache;
+  }
+
+  async function toggleArtifactBuilder() {
+    const el = document.getElementById("artifact-builder-card");
+    if (!el) return;
+    if (el.style.display === "none" || !el.style.display) {
+      el.style.display = "block";
+      await atualizarCamposFonte();
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else {
+      el.style.display = "none";
+    }
+  }
+
+  async function atualizarCamposFonte() {
+    const src = document.getElementById("art-source").value;
+    const sources = await carregarFontesArtefatos();
+    const container = document.getElementById("art-fields-container");
+    if (!container) return;
+
+    container.innerHTML = "";
+    const fields = (sources && sources[src]) ? sources[src].fields : [];
+    if (!fields.length) {
+      container.innerHTML = `<span style="font-size:0.8rem; color:var(--text-muted);">Nenhum campo disponível para esta fonte.</span>`;
+      return;
+    }
+
+    fields.forEach((f, idx) => {
+      const isDefaultChecked = idx < 2;
+      const label = document.createElement("label");
+      label.style.display = "inline-flex";
+      label.style.alignItems = "center";
+      label.style.gap = "0.35rem";
+      label.style.fontSize = "0.82rem";
+      label.style.color = "var(--text)";
+      label.style.cursor = "pointer";
+      label.innerHTML = `
+        <input type="checkbox" name="art_field" value="${f.id}" ${isDefaultChecked ? "checked" : ""} />
+        <span>${f.name}</span>
+      `;
+      container.appendChild(label);
+    });
+  }
+
+  async function salvarArtefato(e) {
+    e.preventDefault();
+    const name = document.getElementById("art-name").value.trim();
+    const chart_type = document.getElementById("art-chart").value;
+    const data_source = document.getElementById("art-source").value;
+    const description = document.getElementById("art-desc").value.trim();
+
+    const checkedFields = Array.from(document.querySelectorAll("input[name='art_field']:checked")).map(cb => cb.value);
+    if (!checkedFields.length) {
+      showToast("Selecione ao menos um campo para o relatório", "error");
+      return;
+    }
+
+    const filters = {};
+    const t = document.getElementById("art-filter-ticker").value.trim();
+    if (t) filters["ticker"] = t.toUpperCase();
+    const m = document.getElementById("art-filter-mes").value.trim();
+    if (m) filters["mes_ano"] = m;
+
+    const visible_in = [];
+    if (document.getElementById("art-vis-analytics").checked) visible_in.push("analytics");
+    if (document.getElementById("art-vis-home").checked) visible_in.push("home");
+    if (document.getElementById("art-vis-carteira").checked) visible_in.push("carteira");
+    if (!visible_in.length) visible_in.push("analytics");
+
+    try {
+      const res = await fetch("/api/artifacts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          chart_type,
+          data_source,
+          description,
+          fields: checkedFields,
+          filters,
+          visible_in
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || "Erro ao salvar artefato");
+      }
+      showToast("Artefato salvo com sucesso!", "success");
+      document.getElementById("artifact-form").reset();
+      document.getElementById("artifact-builder-card").style.display = "none";
+      await carregarArtefatos();
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  }
+
+  async function carregarArtefatos() {
+    const container = document.getElementById("custom-artifacts-container");
+    const emptyMsg = document.getElementById("no-artifacts-msg");
+    if (!container) return;
+
+    // Destrói instâncias anteriores
+    Object.values(customChartInstances).forEach(c => {
+      try { c.destroy(); } catch (e) {}
+    });
+    customChartInstances = {};
+
+    try {
+      const res = await fetch("/api/artifacts?visible_in=analytics");
+      if (!res.ok) return;
+      const json = await res.json();
+      const items = json.items || [];
+
+      if (!items.length) {
+        container.innerHTML = "";
+        if (emptyMsg) emptyMsg.style.display = "block";
+        return;
+      }
+
+      if (emptyMsg) emptyMsg.style.display = "none";
+      container.innerHTML = "";
+
+      for (const art of items) {
+        const card = document.createElement("div");
+        card.className = "card";
+        card.style.margin = "0";
+        card.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
+            <div>
+              <div style="display:flex; align-items:center; gap:0.5rem;">
+                <h3 style="color: var(--accent); font-size: 1.05rem; margin: 0;">${art.name}</h3>
+                <span class="badge-acumular" style="text-transform:uppercase; font-size:0.68rem;">${art.chart_type}</span>
+              </div>
+              <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.25rem;">
+                ${art.description || `Fonte: ${art.data_source} | Campos: ${art.fields.join(', ')}`}
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <a href="/api/artifacts/${art.id}/export" class="btn btn-outline" style="padding: 0.25rem 0.6rem; font-size: 0.75rem;" title="Exportar para planilha Excel (.xlsx)">
+                📥 Excel
+              </a>
+              <button class="btn btn-logout" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;" onclick="excluirArtefato(${art.id}, '${art.name}')" title="Excluir este artefato">
+                🗑️
+              </button>
+            </div>
+          </div>
+          <div class="chart-container">
+            <canvas id="canvas-art-${art.id}"></canvas>
+          </div>
+        `;
+        container.appendChild(card);
+
+        // Busca dados e renderiza o gráfico de cada artefato
+        try {
+          const dRes = await fetch(`/api/artifacts/${art.id}/data`);
+          if (dRes.ok) {
+            const dData = await dRes.json();
+            renderCustomArtifactChart(art, dData);
+          }
+        } catch (e) {
+          console.warn(`Erro ao carregar dados do artefato ${art.id}:`, e);
+        }
+      }
+    } catch (err) {
+      console.warn("Falha ao listar artefatos:", err);
+    }
+  }
+
+  function renderCustomArtifactChart(art, data) {
+    const canvasId = `canvas-art-${art.id}`;
+    const canvasEl = document.getElementById(canvasId);
+    if (!canvasEl) return;
+    const ctx = canvasEl.getContext("2d");
+
+    const isMobile = window.innerWidth < 600;
+    const palette = [
+      '#38bdf8', '#22c55e', '#f59e0b', '#ec4899', '#8b5cf6',
+      '#2563eb', '#14b8a6', '#f97316', '#a855f7', '#06b6d4'
+    ];
+
+    const chartType = art.chart_type || 'bar';
+    let datasets = [];
+
+    if (chartType === 'doughnut' || chartType === 'pie') {
+      const bgColors = data.labels.map((_, i) => palette[i % palette.length]);
+      datasets = [{
+        data: data.values || [],
+        backgroundColor: bgColors,
+        borderColor: '#111827',
+        borderWidth: 2
+      }];
+    } else {
+      datasets = (data.datasets && data.datasets.length) ? data.datasets.map((ds, idx) => {
+        const color = palette[idx % palette.length];
+        return {
+          label: ds.label,
+          data: ds.data,
+          borderColor: color,
+          backgroundColor: chartType === 'line' ? 'rgba(56, 189, 248, 0.12)' : color,
+          fill: chartType === 'line',
+          tension: 0.35,
+          borderWidth: chartType === 'line' ? 2 : 1,
+          borderRadius: chartType === 'bar' ? 4 : 0,
+          pointRadius: chartType === 'line' ? (isMobile ? 3 : 4) : 0
+        };
+      }) : [{
+        label: art.name,
+        data: data.values || [],
+        borderColor: '#38bdf8',
+        backgroundColor: '#38bdf8',
+        borderRadius: 4
+      }];
+    }
+
+    const options = {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          display: chartType !== 'bar' || (data.datasets && data.datasets.length > 1),
+          position: (chartType === 'doughnut' || chartType === 'pie') ? 'bottom' : 'top',
+          labels: {
+            color: '#cbd5e1',
+            font: { size: isMobile ? 9 : 11 },
+            boxWidth: isMobile ? 10 : 12
+          }
+        },
+        tooltip: {
+          mode: (chartType === 'doughnut' || chartType === 'pie') ? 'nearest' : 'index',
+          intersect: chartType === 'doughnut' || chartType === 'pie'
+        }
+      }
+    };
+
+    if (chartType === 'line' || chartType === 'bar') {
+      options.scales = {
+        x: {
+          grid: { color: '#1e293b' },
+          ticks: { color: '#94a3b8', font: { size: isMobile ? 8 : 10 }, maxRotation: 45 }
+        },
+        y: {
+          grid: { color: '#1e293b' },
+          ticks: { color: '#94a3b8', font: { size: isMobile ? 8 : 10 } }
+        }
+      };
+    }
+
+    customChartInstances[art.id] = new Chart(ctx, {
+      type: chartType,
+      data: {
+        labels: data.labels || [],
+        datasets: datasets
+      },
+      options: options
+    });
+  }
+
+  async function excluirArtefato(id, name) {
+    if (!confirm(`Deseja realmente excluir o artefato "${name}"?`)) return;
+    try {
+      const res = await fetch(`/api/artifacts/${id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Erro ao excluir artefato");
+      showToast("Artefato excluído com sucesso!", "success");
+      await carregarArtefatos();
+    } catch (e) {
+      showToast(e.message, "error");
+    }
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     carregarAnalytics();
+    carregarArtefatos();
   });
 </script>

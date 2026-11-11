@@ -47,7 +47,7 @@
     <h3 style="color: var(--accent); font-size: 1.05rem;">📈 Evolução do Patrimônio (Últimos 12 Meses)</h3>
     <a href="/analytics" style="color: var(--accent); font-size: 0.8rem; text-decoration: none;">Ver análise completa →</a>
   </div>
-  <div style="height: 280px; position: relative;">
+  <div class="chart-container" style="height: 280px;">
     <canvas id="chart-patrimonio"></canvas>
   </div>
 </div>
@@ -78,8 +78,18 @@
   </div>
 </div>
 
+<!-- Seção de Artefatos Dinâmicos Personalizados na Home -->
+<div id="home-artifacts-section" style="display: none; margin-top: 1.5rem;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+    <h3 style="color: var(--accent); font-size: 1.05rem; margin: 0;">🎨 Relatórios & Artefatos Personalizados</h3>
+    <a href="/analytics" style="color: var(--accent); font-size: 0.8rem; text-decoration: none;">Gerenciar no Analytics →</a>
+  </div>
+  <div id="home-artifacts-container" class="responsive-grid-artifacts"></div>
+</div>
+
 <script>
   let chartPatrimonio = null;
+  let homeArtifactCharts = {};
 
   async function carregarHome() {
     try {
@@ -189,6 +199,107 @@
     }
   }
 
-  window.addEventListener("DOMContentLoaded", carregarHome);
+  async function carregarArtefatosHome() {
+    const sec = document.getElementById("home-artifacts-section");
+    const container = document.getElementById("home-artifacts-container");
+    if (!sec || !container) return;
+
+    Object.values(homeArtifactCharts).forEach(c => {
+      try { c.destroy(); } catch (e) {}
+    });
+    homeArtifactCharts = {};
+
+    try {
+      const res = await fetch("/api/artifacts?visible_in=home");
+      if (!res.ok) return;
+      const data = await res.json();
+      const items = data.items || [];
+      if (!items.length) {
+        sec.style.display = "none";
+        return;
+      }
+      sec.style.display = "block";
+      container.innerHTML = "";
+
+      for (const art of items) {
+        const card = document.createElement("div");
+        card.className = "card";
+        card.style.margin = "0";
+        card.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+            <div>
+              <h4 style="color: var(--accent); font-size: 0.95rem; margin: 0;">${art.name}</h4>
+              <span style="font-size: 0.72rem; color: var(--text-muted);">${art.description || art.data_source}</span>
+            </div>
+            <a href="/api/artifacts/${art.id}/export" class="btn btn-outline" style="padding: 0.2rem 0.5rem; font-size: 0.75rem;">📥 Excel</a>
+          </div>
+          <div class="chart-container" style="height: 240px;">
+            <canvas id="home-art-canvas-${art.id}"></canvas>
+          </div>
+        `;
+        container.appendChild(card);
+
+        const dRes = await fetch(`/api/artifacts/${art.id}/data`);
+        if (dRes.ok) {
+          const dData = await dRes.json();
+          renderHomeArtifactChart(art, dData);
+        }
+      }
+    } catch (e) {
+      console.warn("Falha ao carregar artefatos na Home:", e);
+    }
+  }
+
+  function renderHomeArtifactChart(art, data) {
+    const canvas = document.getElementById(`home-art-canvas-${art.id}`);
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const palette = ['#38bdf8', '#22c55e', '#f59e0b', '#ec4899', '#8b5cf6', '#2563eb'];
+    const chartType = art.chart_type || 'bar';
+    let datasets = [];
+
+    if (chartType === 'doughnut' || chartType === 'pie') {
+      datasets = [{
+        data: data.values || [],
+        backgroundColor: data.labels.map((_, i) => palette[i % palette.length]),
+        borderColor: '#111827',
+        borderWidth: 2
+      }];
+    } else {
+      datasets = (data.datasets && data.datasets.length) ? data.datasets.map((ds, idx) => ({
+        label: ds.label,
+        data: ds.data,
+        borderColor: palette[idx % palette.length],
+        backgroundColor: palette[idx % palette.length],
+        borderRadius: 4
+      })) : [{
+        label: art.name,
+        data: data.values || [],
+        borderColor: '#38bdf8',
+        backgroundColor: '#38bdf8',
+        borderRadius: 4
+      }];
+    }
+
+    homeArtifactCharts[art.id] = new Chart(ctx, {
+      type: chartType,
+      data: { labels: data.labels || [], datasets: datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            display: chartType !== 'bar' || (data.datasets && data.datasets.length > 1),
+            labels: { color: '#cbd5e1', font: { size: 10 } }
+          }
+        }
+      }
+    });
+  }
+
+  window.addEventListener("DOMContentLoaded", () => {
+    carregarHome();
+    carregarArtefatosHome();
+  });
 </script>
 

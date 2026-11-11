@@ -940,6 +940,194 @@ async def test_send_hourly_radar_summary_force_parameter(tmp_path):
     assert "BBAS3" in radar_msgs_forced[0][1]
 
 
+def test_custom_artifacts_repository_crud_and_validation(tmp_path):
+    """Testa ciclo de vida completo de Artefatos Personalizados no BudgetRepository."""
+    db_file = str(tmp_path / "artifacts_test.db")
+    repo = BudgetRepository(db_file)
+
+    # 1. Criação com sucesso
+    art_id = repo.create_custom_artifact(
+        name="Ranking Margem de Segurança",
+        chart_type="bar",
+        data_source="positions",
+        fields=["ticker", "margem_seguranca"],
+        description="Ativos ordenados pela margem de segurança",
+        filters={"setor": "Bancos"},
+        visible_in=["analytics", "carteira"]
+    )
+    assert art_id > 0
+
+    # 2. Listagem geral e com filtro visible_in
+    all_arts = repo.list_custom_artifacts()
+    assert len(all_arts) == 1
+    assert all_arts[0]["name"] == "Ranking Margem de Segurança"
+    assert all_arts[0]["fields"] == ["ticker", "margem_seguranca"]
+
+    in_analytics = repo.list_custom_artifacts(visible_in="analytics")
+    assert len(in_analytics) == 1
+    in_home = repo.list_custom_artifacts(visible_in="home")
+    assert len(in_home) == 0
+    in_carteira = repo.list_custom_artifacts(visible_in="carteira")
+    assert len(in_carteira) == 1
+
+    # 3. Consulta por ID
+    art = repo.get_custom_artifact(art_id)
+    assert art is not None
+    assert art["chart_type"] == "bar"
+    assert art["data_source"] == "positions"
+
+    # 4. Validação de erros
+    with pytest.raises(ValueError, match="Tipo de gráfico inválido"):
+        repo.create_custom_artifact(
+            name="Invalido", chart_type="scatter", data_source="positions", fields=["ticker"]
+        )
+
+    with pytest.raises(ValueError, match="Fonte de dados inválida"):
+        repo.create_custom_artifact(
+            name="Invalido2", chart_type="line", data_source="tabela_inexistente", fields=["ticker"]
+        )
+
+    with pytest.raises(ValueError, match="Campos inválidos"):
+        repo.create_custom_artifact(
+            name="Invalido3", chart_type="line", data_source="positions", fields=["campo_falso_sql_injection"]
+        )
+
+    # 5. Exclusão
+    deleted = repo.delete_custom_artifact(art_id)
+    assert deleted is True
+    assert repo.get_custom_artifact(art_id) is None
+
+
+def test_custom_artifacts_data_query_and_aggregation(tmp_path):
+    """Valida consulta SQL parametrizada e agregação para gráficos e exportação."""
+    db_file = str(tmp_path / "artifacts_data_test.db")
+    repo = BudgetRepository(db_file)
+
+    # Popula dados de teste em positions
+    positions = [
+        Position(ticker="BBAS3", row_index=1, empresa="Banco do Brasil", setor="Bancos", preco_atual=28.0, div_proj=2.8, preco_teto=46.6, margem_seguranca=66.4, qtd_antes=100),
+        Position(ticker="SANB11", row_index=2, empresa="Santander", setor="Bancos", preco_atual=27.0, div_proj=2.1, preco_teto=35.0, margem_seguranca=29.6, qtd_antes=50),
+        Position(ticker="CPLE6", row_index=3, empresa="Copel", setor="Energia", preco_atual=10.0, div_proj=0.8, preco_teto=13.3, margem_seguranca=33.0, qtd_antes=200),
+    ]
+    repo.save_positions(positions)
+
+    # Artefato 1: Barras Ticker x Margem
+    art_id1 = repo.create_custom_artifact(
+        name="Margem por Ticker",
+        chart_type="bar",
+        data_source="positions",
+        fields=["ticker", "margem_seguranca"],
+        visible_in=["analytics"]
+    )
+    data1 = repo.get_custom_artifact_data(art_id1)
+    assert len(data1["labels"]) == 3
+    assert "BBAS3" in data1["labels"]
+    assert len(data1["datasets"]) == 1
+    assert data1["datasets"][0]["label"] == "Margem Seguranca"
+    assert len(data1["rows"]) == 3
+
+    # Artefato 2: Doughnut Setor x Valor de Mercado (agregação SUM)
+    art_id2 = repo.create_custom_artifact(
+        name="Patrimônio por Setor",
+        chart_type="doughnut",
+        data_source="positions",
+        fields=["setor", "valor_mercado"],
+        visible_in=["analytics"]
+    )
+    data2 = repo.get_custom_artifact_data(art_id2)
+    assert "Bancos" in data2["labels"]
+    assert "Energia" in data2["labels"]
+    # Bancos: BBAS3 (100 * 28 = 2800) + SANB11 (50 * 27 = 1350) = 4150.0
+    # Energia: CPLE6 (200 * 10 = 2000.0)
+    bancos_val = [r["valor_mercado"] for r in data2["rows"] if r["setor"] == "Bancos"][0]
+    assert bancos_val == 4150.0
+
+
+def test_custom_artifacts_api_endpoints_and_excel_export(tmp_path, monkeypatch):
+    """Testa endpoints REST FastAPI para CRUD de artefatos e exportação de planilha Excel."""
+    import io
+    import openpyxl
+    test_client = TestClient(app)
+    test_client.cookies.clear()
+    db_file = str(tmp_path / "artifacts_api_test.db")
+    repo = BudgetRepository(db_file)
+    monkeypatch.setattr(settings, "sqlite_db_path", db_file)
+
+    # Popula posições para teste
+    positions = [
+        Position(ticker="BBAS3", row_index=1, empresa="Banco do Brasil", setor="Bancos", preco_atual=28.0, div_proj=2.8, preco_teto=46.6, margem_seguranca=66.4, qtd_antes=100),
+    ]
+    repo.save_positions(positions)
+
+    # 1. Usuário não autenticado -> 401
+    res_unauth = test_client.get("/api/artifacts")
+    assert res_unauth.status_code == 401
+
+    # 2. Usuário Leitor -> pode listar, mas não criar nem deletar (403)
+    leitor_token = create_session_token(1, "leitor_user", "leitor", settings.secret_key)
+    res_sources = test_client.get("/api/artifacts/sources", cookies={"barsi_session": leitor_token})
+    assert res_sources.status_code == 200
+    assert "positions" in res_sources.json()
+
+    res_forbidden = test_client.post(
+        "/api/artifacts",
+        json={"name": "Tentativa Leitor", "chart_type": "bar", "data_source": "positions", "fields": ["ticker"]},
+        cookies={"barsi_session": leitor_token}
+    )
+    assert res_forbidden.status_code == 403
+
+    # 3. Usuário Investidor / Admin -> cria com sucesso
+    admin_token = create_session_token(2, "admin_user", "admin", settings.secret_key)
+    res_create = test_client.post(
+        "/api/artifacts",
+        json={
+            "name": "Radar Oportunidades",
+            "chart_type": "bar",
+            "data_source": "positions",
+            "fields": ["ticker", "margem_seguranca", "preco_atual"],
+            "description": "Ativos da carteira",
+            "visible_in": ["analytics", "home"]
+        },
+        cookies={"barsi_session": admin_token}
+    )
+    assert res_create.status_code == 200
+    art_id = res_create.json()["id"]
+
+    # 4. Listagem
+    res_list = test_client.get("/api/artifacts?visible_in=analytics", cookies={"barsi_session": admin_token})
+    assert res_list.status_code == 200
+    assert len(res_list.json()["items"]) == 1
+
+    # 5. Dados do gráfico
+    res_data = test_client.get(f"/api/artifacts/{art_id}/data", cookies={"barsi_session": admin_token})
+    assert res_data.status_code == 200
+    data_json = res_data.json()
+    assert data_json["labels"] == ["BBAS3"]
+    assert len(data_json["datasets"]) == 2
+
+    # 6. Exportação para Excel (.xlsx)
+    res_export = test_client.get(f"/api/artifacts/{art_id}/export", cookies={"barsi_session": admin_token})
+    assert res_export.status_code == 200
+    assert "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" in res_export.headers["content-type"]
+    assert f"Radar_Oportunidades_{art_id}.xlsx" in res_export.headers.get("content-disposition", "")
+
+    # Valida que o payload retornado é um arquivo XLSX válido que openpyxl consegue abrir
+    excel_bytes = io.BytesIO(res_export.content)
+    wb = openpyxl.load_workbook(excel_bytes)
+    sheet = wb.active
+    assert sheet.title == "Dados"
+    # Cabeçalhos na primeira linha
+    headers = [cell.value for cell in sheet[1]]
+    assert "ticker" in headers
+    assert "margem_seguranca" in headers
+
+    # 7. Exclusão
+    res_del = test_client.delete(f"/api/artifacts/{art_id}", cookies={"barsi_session": admin_token})
+    assert res_del.status_code == 200
+    assert res_del.json()["ok"] is True
+
+
+
 
 
 
