@@ -146,9 +146,11 @@ def extratos(
 def sync_tvbox(
     ip: Optional[str] = typer.Option(None, "--ip", help="IP da TV Box na rede (lê de BARSI_TVBOX_IP se nulo)"),
     user: Optional[str] = typer.Option(None, "--user", help="Usuário SSH (lê de BARSI_TVBOX_USER se nulo)"),
-    password: Optional[str] = typer.Option(None, "--pass", help="Senha SSH (lê de BARSI_TVBOX_PASS se nulo)")
+    password: Optional[str] = typer.Option(None, "--pass", help="Senha SSH (lê de BARSI_TVBOX_PASS se nulo)"),
+    upload_db: bool = typer.Option(False, "--upload-db", help="Enviar banco SQLite e XLSX local para TV Box (ATENÇÃO: sobrescreve dados na TV Box!)"),
+    no_extratos: bool = typer.Option(False, "--no-extratos", help="Não enviar extratos OFX")
 ):
-    """Sincroniza todos os fontes, modelos, templates e extratos da máquina local para a TV Box."""
+    """Sincroniza código fonte, templates e configurações para a TV Box (preserva dados SQLite por padrão)."""
     import os, glob, getpass, paramiko
     from scp import SCPClient
 
@@ -209,13 +211,16 @@ def sync_tvbox(
             out.channel.recv_exit_status()
 
         with SCPClient(ssh.get_transport()) as scp:
-            # 1. Extratos
-            typer.echo(f"    - Sincronizando extratos bancários (.ofx) para {remote_home}...")
-            for f in extratos_list:
-                try:
-                    scp.put(f, f"{remote_home}/extratos/{os.path.basename(f)}")
-                except Exception as e:
-                    typer.echo(f"    [!] Aviso ao enviar extrato {f}: {e}")
+            # 1. Extratos (opcional)
+            if not no_extratos:
+                typer.echo(f"    - Sincronizando extratos bancários (.ofx) para {remote_home}...")
+                for f in extratos_list:
+                    try:
+                        scp.put(f, f"{remote_home}/extratos/{os.path.basename(f)}")
+                    except Exception as e:
+                        typer.echo(f"    [!] Aviso ao enviar extrato {f}: {e}")
+            else:
+                typer.echo("    ℹ️  Extratos bancários preservados (--no-extratos ativo).")
 
             # 2. Código fonte principal (inclui templates HTML)
             typer.echo(f"    - Sincronizando código fonte e templates HTML para {remote_home}...")
@@ -248,27 +253,30 @@ def sync_tvbox(
                 except Exception:
                     pass
 
-            # 6. Banco SQLite local consolidado com histórico e paridade
-            db_candidates = ["memory/barsi_memory.db", "barsi_quant_ia/memory/barsi_memory.db"]
-            for db_cand in db_candidates:
-                if os.path.exists(db_cand):
-                    try:
-                        typer.echo(f"    - Sincronizando banco SQLite ({db_cand}) com histórico e paridade...")
-                        scp.put(db_cand, f"{remote_home}/memory/barsi_memory.db")
-                        break
-                    except Exception as e:
-                        typer.echo(f"    [!] Aviso ao sincronizar SQLite memory DB: {e}")
+            # 6. Banco SQLite e Excel (somente com flag explícita --upload-db)
+            if upload_db:
+                typer.echo("    ⚠️  [ATENÇÃO] Flag --upload-db ativa: Enviando banco SQLite e Excel local para TV Box...")
+                db_candidates = ["memory/barsi_memory.db", "barsi_quant_ia/memory/barsi_memory.db"]
+                for db_cand in db_candidates:
+                    if os.path.exists(db_cand):
+                        try:
+                            typer.echo(f"    - Sobrescrevendo banco SQLite ({db_cand}) na TV Box...")
+                            scp.put(db_cand, f"{remote_home}/memory/barsi_memory.db")
+                            break
+                        except Exception as e:
+                            typer.echo(f"    [!] Aviso ao sincronizar SQLite memory DB: {e}")
 
-            # 7. Excel local espelhado
-            xlsx_candidates = ["carteira_barsi_quant_ia.xlsx", "barsi_quant_ia/carteira_barsi_quant_ia.xlsx"]
-            for xlsx_cand in xlsx_candidates:
-                if os.path.exists(xlsx_cand):
-                    try:
-                        typer.echo("    - Sincronizando carteira Excel (.xlsx)...")
-                        scp.put(xlsx_cand, f"{remote_home}/carteira_barsi_quant_ia.xlsx")
-                        break
-                    except Exception as e:
-                        typer.echo(f"    [!] Aviso ao sincronizar XLSX: {e}")
+                xlsx_candidates = ["carteira_barsi_quant_ia.xlsx", "barsi_quant_ia/carteira_barsi_quant_ia.xlsx"]
+                for xlsx_cand in xlsx_candidates:
+                    if os.path.exists(xlsx_cand):
+                        try:
+                            typer.echo("    - Sobrescrevendo carteira Excel (.xlsx) na TV Box...")
+                            scp.put(xlsx_cand, f"{remote_home}/carteira_barsi_quant_ia.xlsx")
+                            break
+                        except Exception as e:
+                            typer.echo(f"    [!] Aviso ao sincronizar XLSX: {e}")
+            else:
+                typer.echo("    🛡️  [Path B] Banco SQLite e XLSX remotos preservados na TV Box (use --upload-db para forçar upload).")
 
     typer.echo("    - Reiniciando serviço barsi-api na TV Box...")
     stdin, stdout, stderr = ssh.exec_command("sudo systemctl restart barsi-api.service", get_pty=True)
@@ -277,6 +285,51 @@ def sync_tvbox(
     stdout.channel.recv_exit_status()
     ssh.close()
     typer.echo("[✔] TV Box sincronizada com sucesso e serviço reiniciado!\n")
+
+@app.command()
+def pull_db(
+    ip: Optional[str] = typer.Option(None, "--ip", help="IP da TV Box na rede (lê de BARSI_TVBOX_IP se nulo)"),
+    user: Optional[str] = typer.Option(None, "--user", help="Usuário SSH (lê de BARSI_TVBOX_USER se nulo)"),
+    password: Optional[str] = typer.Option(None, "--pass", help="Senha SSH (lê de BARSI_TVBOX_PASS se nulo)")
+):
+    """Baixa o banco SQLite canônico da TV Box para o PC local com backup de segurança."""
+    import os, getpass, paramiko, shutil
+    from datetime import datetime
+    from scp import SCPClient
+
+    target_ip = ip or settings.tvbox_ip
+    target_user = user or settings.tvbox_user
+    if not target_ip or not target_user:
+        typer.echo("[!] Configure BARSI_TVBOX_IP e BARSI_TVBOX_USER no .env (ou passe --ip/--user)")
+        raise typer.Exit(code=1)
+    target_pass = password or settings.tvbox_pass or getpass.getpass(f"Senha SSH para {target_user}@{target_ip}: ")
+
+    typer.echo(f"\n[+] Conectando na TV Box ({target_user}@{target_ip}) para baixar SQLite canônico...")
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        ssh.connect(target_ip, username=target_user, password=target_pass, timeout=8)
+    except Exception as exc:
+        typer.echo(f"[!] Falha na conexão SSH com a TV Box: {exc}")
+        return
+
+    remote_home = f"/home/{target_user}/barsi_quant_ia"
+    remote_db = f"{remote_home}/memory/barsi_memory.db"
+    local_db = "memory/barsi_memory.db" if os.path.exists("memory") else "barsi_quant_ia/memory/barsi_memory.db"
+    os.makedirs(os.path.dirname(local_db), exist_ok=True)
+
+    # 1. Faz backup local antes de substituir
+    if os.path.exists(local_db):
+        bak_name = f"{local_db}.bak.{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        shutil.copy2(local_db, bak_name)
+        typer.echo(f"    - Backup local criado: {bak_name}")
+
+    with SCPClient(ssh.get_transport()) as scp:
+        typer.echo(f"    - Baixando {remote_db} -> {local_db}...")
+        scp.get(remote_db, local_db)
+
+    ssh.close()
+    typer.echo(f"[✔] Banco SQLite baixado com sucesso da TV Box para {local_db}!\n")
 
 @app.command()
 def tvbox(
