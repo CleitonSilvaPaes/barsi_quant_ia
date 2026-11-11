@@ -760,6 +760,64 @@ class BudgetRepository:
                 ))
             return positions
 
+    def reconcile_ofx_to_positions(self, resumos: Dict[str, Any]) -> int:
+        """Concilia transações de aporte do OFX com as posições em aberto na carteira.
+
+        Regra:
+        - Itera sobre os resumos mensais do OFX.
+        - Para cada ativo presente em `detalhes_ativos` com valor > 0:
+          - Se o ativo existe na carteira:
+            - Se `qtd_aporte > 0`, a ordem em aberto foi liquidada:
+              `qtd_antes += qtd_aporte`
+              `qtd_aporte = 0`
+            - Senão (compra avulsa sem ordem prévia):
+              se `preco_atual > 0`:
+                `qtd_est = int(valor_compra // preco_atual)`
+                se `qtd_est > 0`:
+                  `qtd_antes += qtd_est`
+            - Recalcula `qtd_total`, `valor_total`, `total_aporte`.
+            - Registra o ticker como atualizado.
+        - Persiste as alterações no SQLite se houver ativos atualizados.
+        """
+        positions_list = self.load_positions()
+        if not positions_list:
+            return 0
+
+        positions = {p.ticker.upper(): p for p in positions_list}
+        updated_tickers = set()
+
+        for mes, resumo in resumos.items():
+            detalhes = getattr(resumo, "detalhes_ativos", None)
+            if detalhes is None and isinstance(resumo, dict):
+                detalhes = resumo.get("detalhes_ativos", {})
+            if not isinstance(detalhes, dict):
+                continue
+
+            for raw_ticker, valor_compra in detalhes.items():
+                tk = str(raw_ticker).upper().strip()
+                val = float(valor_compra or 0.0)
+                if tk in positions and val > 0:
+                    p = positions[tk]
+                    if p.qtd_aporte > 0:
+                        p.qtd_antes += p.qtd_aporte
+                        p.qtd_aporte = 0
+                    else:
+                        if p.preco_atual > 0:
+                            qtd_est = int(val // p.preco_atual)
+                            if qtd_est > 0:
+                                p.qtd_antes += qtd_est
+
+                    p.qtd_total = p.qtd_antes + p.qtd_aporte
+                    p.valor_total = round(p.qtd_total * p.preco_atual, 2)
+                    p.total_aporte = round(p.qtd_aporte * p.preco_atual, 2)
+                    updated_tickers.add(tk)
+
+        if updated_tickers:
+            self.save_positions(list(positions.values()))
+            logger.info("ofx_positions_reconciled", count=len(updated_tickers), tickers=list(updated_tickers))
+
+        return len(updated_tickers)
+
     # =========================================================================
     # Preferências de Notificação Proativa
     # =========================================================================

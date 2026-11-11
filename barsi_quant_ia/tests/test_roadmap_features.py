@@ -1156,6 +1156,111 @@ def test_clean_test_data_cli_and_sqlite_sequence_reset(tmp_path):
     assert new_id == 1
 
 
+def test_reconcile_ofx_to_positions_liquidation_and_direct_buy(tmp_path):
+    """Valida conciliação de aportes do OFX: liquidação de ordens abertas e compras diretas."""
+    db_file = str(tmp_path / "ofx_reconcile_test.db")
+    repo = BudgetRepository(db_file)
+
+    # Popula posições com ordens abertas (qtd_aporte > 0) e sem ordens (qtd_aporte == 0)
+    pos = [
+        Position(ticker="BBAS3", row_index=1, qtd_antes=100, qtd_aporte=18, preco_atual=28.0),
+        Position(ticker="MXRF11", row_index=2, qtd_antes=310, qtd_aporte=35, preco_atual=10.15),
+        Position(ticker="SAPR4", row_index=3, qtd_antes=200, qtd_aporte=50, preco_atual=5.20),
+        Position(ticker="CPLE6", row_index=4, qtd_antes=300, qtd_aporte=0, preco_atual=10.0),
+    ]
+    repo.save_positions(pos)
+
+    # Simula resumo de extrato OFX com compras confirmadas
+    class DummyResumo:
+        def __init__(self, detalhes):
+            self.detalhes_ativos = detalhes
+
+    resumos = {
+        "2026-11": DummyResumo({
+            "BBAS3": 504.0,     # Ordem em aberto de 18 cotas liquidada
+            "MXRF11": 311.95,   # Ordem em aberto de 35 cotas liquidada (saldo líquido positivo)
+            "CPLE6": 200.0,     # Compra direta: 200 // 10.0 = 20 novas cotas
+            "SAPR4": 0.0,       # Sem compras no mês
+        })
+    }
+
+    updated = repo.reconcile_ofx_to_positions(resumos)
+    assert updated == 3
+
+    # Valida estado consolidado no banco
+    reloaded = {p.ticker: p for p in repo.load_positions()}
+
+    # BBAS3: 100 + 18 = 118, qtd_aporte = 0
+    assert reloaded["BBAS3"].qtd_antes == 118
+    assert reloaded["BBAS3"].qtd_aporte == 0
+    assert reloaded["BBAS3"].qtd_total == 118
+
+    # MXRF11: 310 + 35 = 345, qtd_aporte = 0
+    assert reloaded["MXRF11"].qtd_antes == 345
+    assert reloaded["MXRF11"].qtd_aporte == 0
+    assert reloaded["MXRF11"].qtd_total == 345
+
+    # CPLE6: 300 + 20 = 320, qtd_aporte = 0
+    assert reloaded["CPLE6"].qtd_antes == 320
+    assert reloaded["CPLE6"].qtd_aporte == 0
+    assert reloaded["CPLE6"].qtd_total == 320
+
+    # SAPR4: Intocado (continua com ordem em aberto de 50)
+    assert reloaded["SAPR4"].qtd_antes == 200
+    assert reloaded["SAPR4"].qtd_aporte == 50
+
+
+def test_api_extratos_returns_reconciliation_count(tmp_path, monkeypatch):
+    """Testa que POST /api/extratos executa a conciliação e retorna contagem de ativos."""
+    from barsi.services.ofx_service import ResumoExtratoMes
+    test_client = TestClient(app)
+    db_file = str(tmp_path / "api_extratos_test.db")
+    repo = BudgetRepository(db_file)
+    monkeypatch.setattr(settings, "sqlite_db_path", db_file)
+
+    pos = [
+        Position(ticker="BBAS3", row_index=1, qtd_antes=100, qtd_aporte=18, preco_atual=28.0),
+    ]
+    repo.save_positions(pos)
+
+    admin_token = create_session_token(1, "admin", "admin", settings.secret_key)
+
+    # Mock do parser para simular retorno com BBAS3
+    mock_resumo = ResumoExtratoMes(
+        mes_ano="2026-11",
+        detalhes_ativos={"BBAS3": 504.0},
+        compras_acoes_barsi=504.0,
+        total_investimentos=504.0
+    )
+
+    monkeypatch.setattr(
+        "barsi.services.ofx_service.OFXParserService.processar_diretorio_extratos",
+        lambda d: {"2026-11": mock_resumo}
+    )
+
+    # Mock de sheets para evitar chamada de rede
+    class MockSheets:
+        def sync_budget_manager(self, r): pass
+
+    monkeypatch.setattr(
+        "barsi.adapters.factory.AdapterFactory.create_sheets_adapter",
+        lambda s: MockSheets()
+    )
+
+    res = test_client.post("/api/extratos", cookies={"barsi_session": admin_token})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ok"
+    assert data["reconciled_positions"] == 1
+
+    # Confirma que BBAS3 foi consolidado no SQLite
+    reloaded = repo.load_positions()
+    bbas = [p for p in reloaded if p.ticker == "BBAS3"][0]
+    assert bbas.qtd_antes == 118
+    assert bbas.qtd_aporte == 0
+
+
+
 
 
 

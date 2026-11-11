@@ -1434,10 +1434,26 @@ async def trigger_extratos_web(request: Request):
     require_role_action(request, action_type="sync")
     OFXParserService.reload_keywords_from_db()
     resumos = OFXParserService.processar_diretorio_extratos("extratos")
+
+    repo = BudgetRepository(settings.sqlite_db_path)
+    todas = [t for r in resumos.values() for t in r.transacoes]
+    if todas:
+        try:
+            repo.persist_transacoes(todas)
+        except Exception as e:
+            logger.warning("persist_transacoes_failed", error=str(e))
+
+    reconciled_count = repo.reconcile_ofx_to_positions(resumos)
+
     sheets = AdapterFactory.create_sheets_adapter(settings)
     if hasattr(sheets, "sync_budget_manager"):
         sheets.sync_budget_manager(resumos)
-    return {"status": "ok", "meses": list(resumos.keys())}
+    return {
+        "status": "ok",
+        "meses": list(resumos.keys()),
+        "reconciled_positions": reconciled_count,
+        "message": f"Extratos processados. {reconciled_count} ativo(s) conciliado(s) na carteira." if reconciled_count > 0 else "Extratos processados com sucesso."
+    }
 
 @app.post("/api/upload-extrato")
 async def upload_extrato(file: UploadFile = File(...), request: Request = None):
@@ -1461,6 +1477,16 @@ async def upload_extrato(file: UploadFile = File(...), request: Request = None):
             logger.warn("zip_extract_error", error=str(e))
 
     resumos = OFXParserService.processar_diretorio_extratos("extratos")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    todas = [t for r in resumos.values() for t in r.transacoes]
+    if todas:
+        try:
+            repo.persist_transacoes(todas)
+        except Exception as e:
+            logger.warning("persist_transacoes_failed", error=str(e))
+
+    reconciled_count = repo.reconcile_ofx_to_positions(resumos)
+
     sheets = AdapterFactory.create_sheets_adapter(settings)
     if hasattr(sheets, "sync_budget_manager"):
         sheets.sync_budget_manager(resumos)
@@ -1469,7 +1495,8 @@ async def upload_extrato(file: UploadFile = File(...), request: Request = None):
         "status": "ok",
         "filename": file.filename,
         "meses": list(resumos.keys()),
-        "total_meses": len(resumos)
+        "total_meses": len(resumos),
+        "reconciled_positions": reconciled_count
     }
 
 @app.post("/api/sync-tvbox")

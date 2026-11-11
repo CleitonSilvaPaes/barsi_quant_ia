@@ -22,3 +22,4 @@ def isolate_database(tmp_path, monkeypatch):
     yield test_db
 
     monkeypatch.setattr(http_module, "_user_repo_cache", None)
+

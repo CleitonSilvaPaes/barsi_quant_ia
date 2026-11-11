@@ -24,6 +24,7 @@
 <div class="actions-bar">
   <button class="btn btn-green" onclick="salvarAlteracoes()">💾 Salvar Edições</button>
   <button class="btn btn-primary" onclick="executarSync()">🚀 Sincronizar Cotações B3</button>
+  <button class="btn btn-amber" onclick="conciliarOFXCarteira()">📑 Conciliar Aportes OFX</button>
   <button class="btn btn-outline" onclick="exportarSheets()">📤 Exportar Sheets</button>
   <button class="btn btn-outline" onclick="exportarXlsx()">📥 Baixar Excel</button>
   <button class="btn btn-outline" onclick="carregarCarteira()">🔄 Recarregar</button>
@@ -354,6 +355,22 @@
       carregarCarteira();
     } catch (err) {
       showToast("Erro na sincronização: " + err, "error");
+    }
+  }
+
+  async function conciliarOFXCarteira() {
+    try {
+      showToast("Conciliando aportes do extrato OFX com as posições em carteira...");
+      const res = await fetch("/api/extratos", { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(data.message || "Aportes conciliados com sucesso!");
+        carregarCarteira();
+      } else {
+        showToast(data.detail || "Erro ao conciliar extratos", "error");
+      }
+    } catch (err) {
+      showToast("Erro ao conectar na API: " + err, "error");
     }
   }
 

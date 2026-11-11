@@ -138,6 +138,9 @@ def extratos(
     try:
         from barsi.adapters.history.budget_repository import BudgetRepository
         repo = BudgetRepository(settings.sqlite_db_path)
+        reconciled_count = repo.reconcile_ofx_to_positions(resumos)
+        if reconciled_count > 0:
+            typer.echo(f"\n[✔] {reconciled_count} ativo(s) em carteira conciliados com o OFX (qtd_aporte -> qtd_antes)!")
         todas = [t for r in resumos.values() for t in r.transacoes]
         if todas:
             repo.persist_transacoes(todas)
@@ -593,6 +596,9 @@ def budget_sync(
     try:
         from barsi.adapters.history.budget_repository import BudgetRepository
         repo = BudgetRepository(settings.sqlite_db_path)
+        reconciled_count = repo.reconcile_ofx_to_positions(resumos)
+        if reconciled_count > 0:
+            typer.echo(f"\n[✔] {reconciled_count} ativo(s) em carteira conciliados com o OFX (qtd_aporte -> qtd_antes)!")
         todas = [t for r in resumos.values() for t in r.transacoes]
         if todas:
             repo.persist_transacoes(todas)
