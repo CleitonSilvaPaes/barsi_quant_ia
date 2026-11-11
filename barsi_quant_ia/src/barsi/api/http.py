@@ -1430,7 +1430,7 @@ async def trigger_run_web(request: Request):
     return summary.model_dump()
 
 @app.post("/api/extratos")
-async def trigger_extratos_web(request: Request):
+async def trigger_extratos_web(request: Request, target_month: Optional[str] = None):
     require_role_action(request, action_type="sync")
     OFXParserService.reload_keywords_from_db()
     resumos = OFXParserService.processar_diretorio_extratos("extratos")
@@ -1443,7 +1443,7 @@ async def trigger_extratos_web(request: Request):
         except Exception as e:
             logger.warning("persist_transacoes_failed", error=str(e))
 
-    reconciled_count = repo.reconcile_ofx_to_positions(resumos)
+    reconciled_count = repo.reconcile_ofx_to_positions(resumos, target_month=target_month)
 
     sheets = AdapterFactory.create_sheets_adapter(settings)
     if hasattr(sheets, "sync_budget_manager"):
@@ -1456,7 +1456,7 @@ async def trigger_extratos_web(request: Request):
     }
 
 @app.post("/api/upload-extrato")
-async def upload_extrato(file: UploadFile = File(...), request: Request = None):
+async def upload_extrato(file: UploadFile = File(...), target_month: Optional[str] = None, request: Request = None):
     require_role_action(request, action_type="sync")
     os.makedirs("extratos", exist_ok=True)
     target_file = os.path.join("extratos", file.filename)
@@ -1485,7 +1485,7 @@ async def upload_extrato(file: UploadFile = File(...), request: Request = None):
         except Exception as e:
             logger.warning("persist_transacoes_failed", error=str(e))
 
-    reconciled_count = repo.reconcile_ofx_to_positions(resumos)
+    reconciled_count = repo.reconcile_ofx_to_positions(resumos, target_month=target_month)
 
     sheets = AdapterFactory.create_sheets_adapter(settings)
     if hasattr(sheets, "sync_budget_manager"):

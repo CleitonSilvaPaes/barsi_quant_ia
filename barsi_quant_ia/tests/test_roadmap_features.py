@@ -1402,6 +1402,68 @@ def test_reconcile_ignores_historical_direct_buys_prior_to_current_month(tmp_pat
     assert reloaded.qtd_aporte == 0
 
 
+def test_reconcile_net_value_excludes_refunds(tmp_path):
+    """Refunds/ajustes (CREDIT) no mesmo mês abatem as compras (DEBIT) para não inflar o valor líquido."""
+    from barsi.services.ofx_service import Transacao
+    repo = BudgetRepository(str(tmp_path / "net_refunds.db"))
+    repo.save_positions([
+        Position(ticker="BBAS3", row_index=1, qtd_antes=100, qtd_aporte=0,
+                 preco_atual=28.0, custo_medio=25.0),
+    ])
+
+    tx_buy = Transacao(id_transacao="fit-001", tipo="DEBIT", data="2026-11-06",
+                       valor=-312.40, descricao="Compra BBAS3", categoria="Aporte Ações/FIIs",
+                       ticker_relacionado="BBAS3")
+    tx_refund = Transacao(id_transacao="fit-002", tipo="CREDIT", data="2026-11-06",
+                          valor=+12.40, descricao="Refund BBAS3", categoria="Aporte Ações/FIIs",
+                          ticker_relacionado="BBAS3")
+    class R:
+        detalhes_ativos = {"BBAS3": 300.0}
+        transacoes = [tx_buy, tx_refund]
+
+    repo.reconcile_ofx_to_positions({"2026-11": R()})
+    p = {x.ticker: x for x in repo.load_positions()}["BBAS3"]
+
+    # Com signed net buy: 312.40 - 12.40 = 300.00 -> 300 // 28 = 10 cotas (100 + 10 = 110)
+    # Se usasse abs(): 312.40 + 12.40 = 324.80 -> 324.80 // 28 = 11 (estaria errado)
+    assert p.qtd_antes == 110, f"qtd_antes={p.qtd_antes}, esperado 110 (net buy R$ 300)"
+
+
+def test_reconcile_processes_previous_month_if_explicitly_targeted(tmp_path):
+    """Se o usuário definir target_month='2026-11', deve processar nov/26 mesmo com lotes contendo meses posteriores."""
+    from barsi.services.ofx_service import Transacao
+    repo = BudgetRepository(str(tmp_path / "target_batch.db"))
+    repo.save_positions([
+        Position(ticker="BBAS3", row_index=1, qtd_antes=100, qtd_aporte=0,
+                 preco_atual=28.0, custo_medio=25.0),
+    ])
+
+    tx_nov = Transacao(id_transacao="fit-nov-01", tipo="DEBIT", data="2026-11-06",
+                       valor=-500.0, descricao="Compra nov", categoria="Aporte Ações/FIIs",
+                       ticker_relacionado="BBAS3")
+    class RNov:
+        detalhes_ativos = {"BBAS3": 500.0}
+        transacoes = [tx_nov]
+
+    class RDez:
+        detalhes_ativos = {}
+        transacoes = []
+
+    # Sem target_month explícito quando há mês 2026-12 no lote: 2026-11 é considerado anterior
+    repo.reconcile_ofx_to_positions({"2026-11": RNov(), "2026-12": RDez()})
+    assert {x.ticker: x for x in repo.load_positions()}["BBAS3"].qtd_antes == 100
+
+    # Com target_month='2026-11' explícito: processa a transação de nov
+    repo2 = BudgetRepository(str(tmp_path / "target_batch2.db"))
+    repo2.save_positions([
+        Position(ticker="BBAS3", row_index=1, qtd_antes=100, qtd_aporte=0,
+                 preco_atual=28.0, custo_medio=25.0),
+    ])
+    repo2.reconcile_ofx_to_positions({"2026-11": RNov(), "2026-12": RDez()}, target_month="2026-11")
+    assert {x.ticker: x for x in repo2.load_positions()}["BBAS3"].qtd_antes == 117  # 100 + int(500/28)
+
+
+
 
 
 

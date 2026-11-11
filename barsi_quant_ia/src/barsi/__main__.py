@@ -88,6 +88,7 @@ def extratos(
     dir_path: str = typer.Option("extratos", "--dir", help="Pasta com arquivos de extrato .ofx"),
     sync_sheet: bool = typer.Option(False, "--sync-sheet", help="Sincroniza valores consolidados na aba Budget_Manager_Fluxo"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Mostra resultado da conciliação sem persistir no SQLite nem no Sheets"),
+    target_month: Optional[str] = typer.Option(None, "--target-month", help="Mês alvo (YYYY-MM). Compras diretas de meses anteriores são ignoradas. Padrão: mês mais recente do extrato."),
 ):
     """Lê e processa os extratos bancários da pasta extratos/ para conciliação Barsi."""
     from barsi.services.ofx_service import OFXParserService
@@ -138,7 +139,7 @@ def extratos(
     try:
         from barsi.adapters.history.budget_repository import BudgetRepository
         repo = BudgetRepository(settings.sqlite_db_path)
-        reconciled_count = repo.reconcile_ofx_to_positions(resumos)
+        reconciled_count = repo.reconcile_ofx_to_positions(resumos, target_month=target_month)
         if reconciled_count > 0:
             typer.echo(f"\n[✔] {reconciled_count} ativo(s) em carteira conciliados com o OFX (qtd_aporte -> qtd_antes)!")
         todas = [t for r in resumos.values() for t in r.transacoes]
@@ -582,7 +583,8 @@ def budget_set(
 
 @budget_app.command("sync")
 def budget_sync(
-    dir_path: str = typer.Option("extratos", "--dir", help="Pasta com extratos .ofx")
+    dir_path: str = typer.Option("extratos", "--dir", help="Pasta com extratos .ofx"),
+    target_month: Optional[str] = typer.Option(None, "--target-month", help="Mês alvo (YYYY-MM). Compras diretas de meses anteriores são ignoradas. Padrão: mês mais recente do extrato."),
 ):
     """Executa a conciliação completa de extratos e sincroniza a aba Budget_Manager_Fluxo."""
     from barsi.services.ofx_service import OFXParserService
@@ -596,7 +598,7 @@ def budget_sync(
     try:
         from barsi.adapters.history.budget_repository import BudgetRepository
         repo = BudgetRepository(settings.sqlite_db_path)
-        reconciled_count = repo.reconcile_ofx_to_positions(resumos)
+        reconciled_count = repo.reconcile_ofx_to_positions(resumos, target_month=target_month)
         if reconciled_count > 0:
             typer.echo(f"\n[✔] {reconciled_count} ativo(s) em carteira conciliados com o OFX (qtd_aporte -> qtd_antes)!")
         todas = [t for r in resumos.values() for t in r.transacoes]

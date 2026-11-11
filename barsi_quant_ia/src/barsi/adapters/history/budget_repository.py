@@ -760,7 +760,7 @@ class BudgetRepository:
                 ))
             return positions
 
-    def reconcile_ofx_to_positions(self, resumos: Dict[str, Any]) -> int:
+    def reconcile_ofx_to_positions(self, resumos: Dict[str, Any], target_month: Optional[str] = None) -> int:
         """Concilia transações de aporte do OFX com as posições da carteira.
 
         Estratégia FITID-first:
@@ -768,10 +768,10 @@ class BudgetRepository:
         2. Seleciona apenas transações pendentes (`categoria = 'Aporte Ações/FIIs' AND conciliado = 0`).
         3. Se `qtd_aporte > 0`: liquida a ordem em aberto (`qtd_antes += qtd_aporte`, `qtd_aporte = 0`).
         4. Se `qtd_aporte == 0` (compra direta):
-           - Se todas as transações forem anteriores ao mês limite (compras passadas), apenas marca os
-             FITIDs como conciliados sem alterar `qtd_antes` (já estão embutidas no saldo inicial).
-           - Se for do mês corrente/limite, estima `qtd_est = int(valor // preco_atual)` e adiciona.
-        5. Recalcula custo médio ponderado (com fallback defensivo de preco_atual quando custo_medio == 0).
+           - Se todas as transações forem anteriores ao mês alvo `target_month` (ou mês mais recente
+             do resumo), apenas marca os FITIDs como conciliados sem alterar `qtd_antes`.
+           - Se for do mês alvo, estima `qtd_est = int(total_liquido // preco_atual)` e adiciona.
+        5. Recalcula custo médio ponderado com valor líquido real (deduzindo refunds/CREDIT).
         6. Marca cada FITID processado individualmente como `conciliado = 1`.
         """
         positions_list = self.load_positions()
@@ -811,7 +811,7 @@ class BudgetRepository:
         with self._conn() as c:
             pendentes = c.execute(
                 """
-                SELECT fitid, ticker, mes_ano, valor
+                SELECT fitid, ticker, mes_ano, tipo, valor
                   FROM transacoes
                  WHERE categoria = 'Aporte Ações/FIIs'
                    AND conciliado = 0
@@ -830,7 +830,8 @@ class BudgetRepository:
             txs_por_ticker.setdefault(tk, []).append({
                 "fitid": row["fitid"],
                 "mes_ano": row["mes_ano"],
-                "valor": abs(float(row["valor"])),
+                "tipo": row["tipo"],
+                "valor": float(row["valor"]),
             })
 
         positions = {p.ticker.upper(): p for p in positions_list}
@@ -839,7 +840,8 @@ class BudgetRepository:
         from datetime import datetime
         mes_atual = datetime.now().strftime("%Y-%m")
         meses_resumo = [k for k in resumos.keys() if k]
-        mes_limite = max([mes_atual] + meses_resumo) if meses_resumo else mes_atual
+        # target_month explícito tem prioridade; senão, usa o mês mais recente do lote (ou mês atual)
+        mes_alvo = target_month or (max(meses_resumo) if meses_resumo else mes_atual)
 
         fitids_to_mark_conciliated = []
 
@@ -848,7 +850,12 @@ class BudgetRepository:
                 continue
 
             p = positions[tk]
-            total_valor = sum(t["valor"] for t in transacoes if t["valor"] > 0)
+            # Valor líquido real: compras (DEBIT) somam; estornos/ajustes (CREDIT) abatem
+            total_valor = sum(
+                abs(t["valor"]) if (t["tipo"] == "DEBIT" or t["valor"] < 0) else -abs(t["valor"])
+                for t in transacoes
+            )
+            total_valor = round(total_valor, 2)
             if total_valor <= 0:
                 fitids_to_mark_conciliated.extend(t["fitid"] for t in transacoes)
                 continue
@@ -860,9 +867,9 @@ class BudgetRepository:
                 p.qtd_antes += p.qtd_aporte
                 p.qtd_aporte = 0
             else:
-                # 2. Compra direta: se todas as transações forem de meses anteriores a mes_limite,
+                # 2. Compra direta: se todas as transações forem de meses anteriores a mes_alvo,
                 # são aportes históricos passados que já estão consolidados em qtd_antes!
-                if all(t["mes_ano"] < mes_limite for t in transacoes):
+                if all(t["mes_ano"] < mes_alvo for t in transacoes):
                     fitids_to_mark_conciliated.extend(t["fitid"] for t in transacoes)
                     continue
 
