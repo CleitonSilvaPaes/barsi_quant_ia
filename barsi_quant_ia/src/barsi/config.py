@@ -38,7 +38,11 @@ class Settings(BaseSettings):
     tvbox_ip: str = Field(default_factory=lambda: os.getenv("BARSI_TVBOX_IP", ""))
     tvbox_user: str = Field(default_factory=lambda: os.getenv("BARSI_TVBOX_USER", ""))
     tvbox_pass: str = Field(default_factory=lambda: os.getenv("BARSI_TVBOX_PASS", ""))
-    tvbox_home: str = Field(default_factory=lambda: os.getenv("BARSI_TVBOX_HOME", os.path.expanduser("~/barsi_quant_ia")))
+    tvbox_home: str = Field(default_factory=lambda: os.getenv("BARSI_TVBOX_HOME", ""))
+
+    # Regras e Parâmetros Quantitativos (Sem magic numbers)
+    max_plausible_dy: float = Field(default_factory=lambda: float(os.getenv("BARSI_MAX_PLAUSIBLE_DY", "0.35")))
+    div_growth_projection_rate: float = Field(default_factory=lambda: float(os.getenv("BARSI_DIV_GROWTH_PROJECTION_RATE", "0.15")))
 
     # Restrições de Concorrência e Hardware (TV Box)
     max_concurrency: int = 3

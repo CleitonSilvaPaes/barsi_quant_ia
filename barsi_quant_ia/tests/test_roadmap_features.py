@@ -486,6 +486,187 @@ def test_health_sync_and_reconcile_endpoints(tmp_path, monkeypatch):
     assert resp_rec.status_code == 200
     assert resp_rec.json()["ok"] is True
 
+def test_cli_run_uses_budget_repo_and_persists_sqlite(tmp_path, monkeypatch):
+    """Garante que 'python -m barsi run' consome e grava no SQLite canônico (Path B)."""
+    from typer.testing import CliRunner
+    from barsi.__main__ import app
+    from barsi.domain.models import MarketQuote
+
+    test_db = str(tmp_path / "test_cli_run.db")
+    monkeypatch.setattr(settings, "sqlite_db_path", test_db)
+    monkeypatch.setattr(settings, "telegram_alerts_enabled", False)
+
+    repo = BudgetRepository(test_db)
+    pos = Position(
+        ticker="BBAS3",
+        row_index=2,
+        empresa="Banco do Brasil",
+        setor="Bancos",
+        preco_atual=25.00,
+        preco_teto=35.00,
+        div_proj=2.10,
+        status_barsi="ACUMULAR",
+        margem_seguranca=28.57,
+        qtd_antes=100
+    )
+    repo.save_positions([pos])
+
+    # Mock market quote para retornar cotação atualizada
+    class MockMarket:
+        async def get_quote(self, ticker: str):
+            return MarketQuote(ticker=ticker, price=27.50)
+
+    from barsi.adapters.factory import AdapterFactory
+    monkeypatch.setattr(AdapterFactory, "create_market_adapter", lambda s: MockMarket())
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["run", "--no-radar"])
+    assert result.exit_code == 0, result.output
+    assert "Run concluída!" in result.output
+
+    # Verifica se o SQLite foi atualizado com a nova cotação
+    updated_pos = {p.ticker: p for p in repo.load_positions()}
+    assert "BBAS3" in updated_pos
+    assert updated_pos["BBAS3"].preco_atual == 27.50
+    assert updated_pos["BBAS3"].preco_teto > 0
+
+@pytest.mark.asyncio
+async def test_send_hourly_radar_summary_triggered_by_notify_radar(tmp_path, monkeypatch):
+    """Garante que execute_run dispara send_hourly_radar_summary quando notify_radar=True."""
+    from barsi.services.sync_service import SyncService
+    from barsi.domain.models import MarketQuote, NewsSummary, InsightResult
+
+    test_db = str(tmp_path / "test_radar.db")
+    repo = BudgetRepository(test_db)
+    pos = Position(
+        ticker="BBAS3",
+        row_index=2,
+        empresa="Banco do Brasil",
+        setor="Bancos",
+        preco_atual=20.00,
+        preco_teto=35.00,
+        div_proj=2.10,
+        status_barsi="ACUMULAR",
+        margem_seguranca=42.8,
+        qtd_antes=100
+    )
+    repo.save_positions([pos])
+
+    notifications = []
+    class MockNotifier:
+        async def notify(self, title, body, level="info"):
+            notifications.append((title, body, level))
+            return True
+
+    class MockMarket:
+        async def get_quote(self, ticker: str):
+            return MarketQuote(ticker=ticker, price=20.00)
+
+    class MockNews:
+        async def get_latest_news(self, ticker: str):
+            return NewsSummary(ticker=ticker, headlines="")
+
+    class MockAI:
+        async def generate_insight(self, *args, **kwargs):
+            return InsightResult(ticker="BBAS3", insight="Bom ativo", acao_sugerida="ACUMULAR", provider="rule_engine")
+
+    class MockSheets:
+        async def load_positions(self): return []
+        async def update_positions(self, p): pass
+
+    class MockHistory:
+        async def get_last_analysis(self, t): return None
+        async def save_analysis(self, **kw): pass
+        async def record_run(self, s): pass
+
+    service = SyncService(
+        market=MockMarket(),
+        news=MockNews(),
+        ai=MockAI(),
+        sheets=MockSheets(),
+        history=MockHistory(),
+        notifier=MockNotifier(),
+        budget_repo=repo
+    )
+
+    await service.execute_run(dry_run=False, notify_radar=True)
+    # Deve conter notificação de radar consolidado
+    radar_msgs = [m for m in notifications if "Radar" in m[0]]
+    assert len(radar_msgs) == 1
+    assert "BBAS3" in radar_msgs[0][1]
+
+def test_max_plausible_dy_setting(tmp_path, monkeypatch):
+    """Garante que settings.max_plausible_dy é respeitado na validação de DY."""
+    test_db = str(tmp_path / "test_dy_setting.db")
+    monkeypatch.setattr(settings, "sqlite_db_path", test_db)
+    monkeypatch.setattr(settings, "max_plausible_dy", 0.50)  # Limite tolerante de 50%
+
+    token = create_session_token(1, "admin_user", "admin", settings.secret_key)
+    client.cookies.set("barsi_session", token)
+
+    repo = BudgetRepository(test_db)
+    pos = Position(ticker="MXRF11", row_index=2, preco_atual=10.0, div_proj=1.0, qtd_antes=100)
+    repo.save_positions([pos])
+
+    # 40% de DY deve passar com limite de 50%
+    payload_ok = {"items": [{"ticker": "MXRF11", "row_index": 2, "div_proj": 4.0, "preco_atual": 10.0}]}
+    resp_ok = client.post("/api/carteira", json=payload_ok)
+    assert resp_ok.status_code == 200
+
+    # 60% de DY deve falhar com limite de 50%
+    payload_fail = {"items": [{"ticker": "MXRF11", "row_index": 2, "div_proj": 6.0, "preco_atual": 10.0}]}
+    resp_fail = client.post("/api/carteira", json=payload_fail)
+    assert resp_fail.status_code == 400
+    assert "excede o limite aceitável" in resp_fail.json()["detail"] or "resulta em DY" in resp_fail.json()["detail"]
+
+def test_health_sync_detects_multiple_field_divergences(tmp_path, monkeypatch):
+    """Garante que /api/health/sync detecta divergências em múltiplos campos (preco_teto, margem_seguranca, etc)."""
+    test_db = str(tmp_path / "test_divergences.db")
+    monkeypatch.setattr(settings, "sqlite_db_path", test_db)
+
+    token = create_session_token(1, "admin_user", "admin", settings.secret_key)
+    client.cookies.set("barsi_session", token)
+
+    repo = BudgetRepository(test_db)
+    pos_sql = Position(
+        ticker="CMIG4",
+        row_index=2,
+        preco_atual=10.00,
+        preco_teto=15.00,
+        div_proj=0.90,
+        margem_seguranca=33.3,
+        qtd_antes=500
+    )
+    repo.save_positions([pos_sql])
+
+    pos_sheet = Position(
+        ticker="CMIG4",
+        row_index=2,
+        preco_atual=10.00,
+        preco_teto=20.00,  # Divergência no preço teto
+        div_proj=0.90,
+        margem_seguranca=50.0,  # Divergência na margem
+        qtd_antes=500
+    )
+
+    class MockSheetsWithDivergence:
+        async def load_positions(self):
+            return [pos_sheet]
+
+    from barsi.adapters.factory import AdapterFactory
+    monkeypatch.setattr(AdapterFactory, "create_sheets_adapter", lambda s: MockSheetsWithDivergence())
+
+    resp = client.get("/api/health/sync")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["in_sync"] is False
+    assert len(data["divergences"]) == 1
+    diffs = data["divergences"][0]["divergences"]
+    assert any("preco_teto" in d for d in diffs)
+    assert any("margem_seguranca" in d for d in diffs)
+
+
+
 
 
 

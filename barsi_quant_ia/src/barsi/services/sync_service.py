@@ -52,8 +52,6 @@ class SyncService:
             if quote and quote.price > 0:
                 pos = atualizar_posicao_quant(pos, preco_novo=quote.price)
                 event_bus.publish("PriceUpdated", {"ticker": ticker, "price": quote.price})
-            else:
-                pos = atualizar_posicao_quant(pos, preco_novo=pos.preco_atual)
 
             # 2. Notícias
             news_summary = await self.news.get_latest_news(ticker)
@@ -99,7 +97,8 @@ class SyncService:
     async def execute_run(
         self,
         dry_run: bool = False,
-        target_ticker: Optional[str] = None
+        target_ticker: Optional[str] = None,
+        notify_radar: bool = False
     ) -> RunSummary:
         start_time = time.time()
         run_id = str(uuid.uuid4())
@@ -193,6 +192,12 @@ class SyncService:
                             repo.save_price_history(p.ticker, today_str, p.preco_atual)
             except Exception as e:
                 logger.warn("save_price_history_run_failed", error=str(e))
+
+            if notify_radar and valid_positions:
+                try:
+                    await self.send_hourly_radar_summary(valid_positions)
+                except Exception as exc:
+                    logger.warning("hourly_radar_failed", error=str(exc))
 
         logger.info(
             "run_completed",

@@ -13,7 +13,8 @@ app = typer.Typer(name="barsi", help="Sistema Previdenciário Barsi - CLI Quant 
 @app.command()
 def run(
     dry_run: bool = typer.Option(False, "--dry-run", help="Executa o cálculo sem persistir alterações"),
-    ticker: Optional[str] = typer.Option(None, "--ticker", help="Executa o ciclo para um único ativo (ex: BBAS3)")
+    ticker: Optional[str] = typer.Option(None, "--ticker", help="Executa o ciclo para um único ativo (ex: BBAS3)"),
+    radar: bool = typer.Option(True, "--radar/--no-radar", help="Envia resumo consolidado de oportunidades ao finalizar (Telegram/WhatsApp)")
 ):
     """Executa o pipeline completo de sincronização e enriquecimento Barsi."""
     setup_logging(settings.log_level)
@@ -38,7 +39,7 @@ def run(
             budget_repo=budget_repo,
             max_concurrency=settings.max_concurrency
         )
-        summary = await service.execute_run(dry_run=dry_run, target_ticker=ticker)
+        summary = await service.execute_run(dry_run=dry_run, target_ticker=ticker, notify_radar=radar)
         typer.echo(f"\n[OK] Run concluída! ID: {summary.run_id}")
         typer.echo(f"     Ativos analisados: {summary.tickers_analyzed}")
         typer.echo(f"     Duração: {summary.duration_ms} ms | RAM RSS: {summary.memory_peak_mb} MB")
@@ -173,7 +174,7 @@ def sync_tvbox(
         typer.echo(f"[!] Falha na conexão SSH com a TV Box: {exc}")
         return
 
-    target_homes = [settings.tvbox_home]
+    target_homes = [settings.tvbox_home] if (settings.tvbox_home and "/" in settings.tvbox_home) else []
     alt_home = f"/home/{target_user}/barsi_quant_ia"
     if alt_home not in target_homes:
         target_homes.append(alt_home)
@@ -316,7 +317,7 @@ def pull_db(
         typer.echo(f"[!] Falha na conexão SSH com a TV Box: {exc}")
         return
 
-    remote_home = f"/home/{target_user}/barsi_quant_ia"
+    remote_home = settings.tvbox_home if (settings.tvbox_home and "/" in settings.tvbox_home) else f"/home/{target_user}/barsi_quant_ia"
     remote_db = f"{remote_home}/memory/barsi_memory.db"
     local_db = "memory/barsi_memory.db" if os.path.exists("memory") else "barsi_quant_ia/memory/barsi_memory.db"
     os.makedirs(os.path.dirname(local_db), exist_ok=True)

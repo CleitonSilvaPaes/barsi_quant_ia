@@ -276,6 +276,10 @@ def resolve_db_path(path: str = "./memory/barsi_memory.db") -> str:
     return os.path.abspath(path)
 
 
+# Fatores da curva histórica sintética para seed inicial de visualização (6 meses precedentes).
+# Simulam a evolução progressiva do portfólio no primeiro acesso antes da consolidação de snapshots reais.
+DEFAULT_SYNTHETIC_CURVE_FACTORS = (0.45, 0.55, 0.67, 0.78, 0.90, 1.0)
+
 class BudgetRepository:
     """Leitura e escrita de orçamento no SQLite. Sem I/O de rede, sem dependência do Google Sheets."""
 
@@ -699,7 +703,7 @@ class BudgetRepository:
             
             hoje = datetime.now()
             setores_base = setores_dict or {}
-            factors = [0.45, 0.55, 0.67, 0.78, 0.90, 1.0]
+            factors = DEFAULT_SYNTHETIC_CURVE_FACTORS
             for i, factor in enumerate(factors):
                 months_ago = 5 - i
                 year = hoje.year

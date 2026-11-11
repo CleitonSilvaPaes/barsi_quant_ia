@@ -471,11 +471,11 @@ async def save_carteira_edits(req: SaveEditsRequest, request: Request):
                     detail=f"Para {item.ticker}, informe preco_atual maior que zero antes de definir div_proj (necessário para validação de sanidade do DY)."
                 )
             dy_calc = item.div_proj / preco_ref
-            if dy_calc > 0.35:
+            if dy_calc > settings.max_plausible_dy:
                 logger.warning("dy_implausible_rejected", ticker=item.ticker, div_proj=item.div_proj, preco=preco_ref, dy=dy_calc)
                 raise HTTPException(
                     status_code=400,
-                    detail=f"DPA Projetado R$ {item.div_proj:.2f} resulta em DY de {dy_calc:.1%} para {item.ticker} (máx 35%). Verifique se não digitou valor acumulado ou mensal incorreto."
+                    detail=f"DPA Projetado R$ {item.div_proj:.2f} resulta em DY de {dy_calc:.1%} para {item.ticker} (máx {settings.max_plausible_dy:.0%}). Verifique se não digitou valor acumulado ou mensal incorreto."
                 )
 
         if item.ticker in pos_map:
@@ -795,10 +795,11 @@ async def get_analytics_data(request: Request, months: int = 12):
         ym_parts = s["data_snapshot"].split("-")
         mes_str = f"{ym_parts[1]}/{ym_parts[0][2:]}" if len(ym_parts) >= 2 else s["data_snapshot"]
         div_real = s.get("dividendos_mes", 0.0)
+        growth_multiplier = 1.0 + getattr(settings, "div_growth_projection_rate", 0.15)
         dividendos.append({
             "mes": mes_str,
             "realizado": round(div_real, 2),
-            "projetado": round(div_real * 1.15, 2)
+            "projetado": round(div_real * growth_multiplier, 2)
         })
 
     return {
@@ -1368,10 +1369,14 @@ async def health_sync(request: Request):
             })
         else:
             diffs = []
-            if round(p_sql.div_proj or 0.0, 2) != round(p_sh.div_proj or 0.0, 2):
-                diffs.append(f"DPA: SQLite={p_sql.div_proj} vs Sheets={p_sh.div_proj}")
-            if (p_sql.qtd_antes or 0) != (p_sh.qtd_antes or 0):
-                diffs.append(f"Qtd: SQLite={p_sql.qtd_antes} vs Sheets={p_sh.qtd_antes}")
+            for field in ("div_proj", "qtd_antes", "preco_atual", "preco_teto", "margem_seguranca", "qtd_aporte", "teto_manual"):
+                a = getattr(p_sql, field, None)
+                b = getattr(p_sh, field, None)
+                if isinstance(a, float) and isinstance(b, float):
+                    if round(a or 0.0, 2) != round(b or 0.0, 2):
+                        diffs.append(f"{field}: SQLite={a} vs Sheets={b}")
+                elif (a or 0) != (b or 0):
+                    diffs.append(f"{field}: SQLite={a} vs Sheets={b}")
             if diffs:
                 divergences.append({
                     "ticker": t,
