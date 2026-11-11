@@ -88,7 +88,11 @@ def extratos(
     dir_path: str = typer.Option("extratos", "--dir", help="Pasta com arquivos de extrato .ofx"),
     sync_sheet: bool = typer.Option(False, "--sync-sheet", help="Sincroniza valores consolidados na aba Budget_Manager_Fluxo"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Mostra resultado da conciliação sem persistir no SQLite nem no Sheets"),
-    target_month: Optional[str] = typer.Option(None, "--target-month", help="Mês alvo (YYYY-MM). Compras diretas de meses anteriores são ignoradas. Padrão: mês mais recente do extrato."),
+    target_month: Optional[str] = typer.Option(
+        None,
+        "--target-month",
+        help="Mês alvo (YYYY-MM). Compras diretas de meses anteriores são ignoradas. Padrão: MAX(mês atual, mês mais recente do extrato). Use explicitamente para fechar um mês anterior em atraso."
+    ),
 ):
     """Lê e processa os extratos bancários da pasta extratos/ para conciliação Barsi."""
     from barsi.services.ofx_service import OFXParserService
@@ -584,7 +588,11 @@ def budget_set(
 @budget_app.command("sync")
 def budget_sync(
     dir_path: str = typer.Option("extratos", "--dir", help="Pasta com extratos .ofx"),
-    target_month: Optional[str] = typer.Option(None, "--target-month", help="Mês alvo (YYYY-MM). Compras diretas de meses anteriores são ignoradas. Padrão: mês mais recente do extrato."),
+    target_month: Optional[str] = typer.Option(
+        None,
+        "--target-month",
+        help="Mês alvo (YYYY-MM). Compras diretas de meses anteriores são ignoradas. Padrão: MAX(mês atual, mês mais recente do extrato). Use explicitamente para fechar um mês anterior em atraso."
+    ),
 ):
     """Executa a conciliação completa de extratos e sincroniza a aba Budget_Manager_Fluxo."""
     from barsi.services.ofx_service import OFXParserService

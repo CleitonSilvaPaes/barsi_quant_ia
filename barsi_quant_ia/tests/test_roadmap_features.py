@@ -1463,6 +1463,30 @@ def test_reconcile_processes_previous_month_if_explicitly_targeted(tmp_path):
     assert {x.ticker: x for x in repo2.load_positions()}["BBAS3"].qtd_antes == 117  # 100 + int(500/28)
 
 
+def test_reconcile_skips_old_batch_when_current_month_missing(tmp_path):
+    """Se o lote de OFX contém apenas meses anteriores ao mês corrente, compras diretas são tratadas como históricas."""
+    from barsi.services.ofx_service import Transacao
+    repo = BudgetRepository(str(tmp_path / "old_batch.db"))
+    repo.save_positions([
+        Position(ticker="BBAS3", row_index=1, qtd_antes=100, qtd_aporte=0,
+                 preco_atual=28.0, custo_medio=25.0),
+    ])
+
+    tx_old = Transacao(id_transacao="fit-old-01", tipo="DEBIT", data="2026-10-15",
+                       valor=-500.0, descricao="Compra passada", categoria="Aporte Ações/FIIs",
+                       ticker_relacionado="BBAS3")
+    class R:
+        detalhes_ativos = {"BBAS3": 500.0}
+        transacoes = [tx_old]
+
+    # Sem target_month, o mês corrente (2026-11) é considerado o limite
+    # Transação de 2026-10 é ignorada (não infla qtd_antes)
+    repo.reconcile_ofx_to_positions({"2026-10": R()})
+    p = {x.ticker: x for x in repo.load_positions()}["BBAS3"]
+    assert p.qtd_antes == 100
+
+
+
 
 
 

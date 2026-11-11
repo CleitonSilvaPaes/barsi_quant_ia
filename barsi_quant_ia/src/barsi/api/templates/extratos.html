@@ -6,10 +6,14 @@
   <button class="btn btn-primary" style="margin-top: 1rem;" onclick="event.stopPropagation(); document.getElementById('file-upload').click()">Selecionar Arquivo no Computador</button>
 </div>
 
-<div class="actions-bar">
+<div class="actions-bar" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
   <button class="btn btn-green" onclick="conciliarExtratos()">📑 Executar Conciliação com SQLite & Sheets</button>
   <button class="btn btn-amber" onclick="sincronizarTVBox()">🔄 Sincronizar com TV Box</button>
   <button class="btn btn-outline" onclick="carregarExtratos()">🔄 Recarregar</button>
+  <div style="margin-left: auto; display: flex; align-items: center; gap: 0.4rem;">
+    <label style="font-size: 0.8rem; color: var(--text-muted);">Mês Alvo:</label>
+    <input type="text" id="target-month-input" class="tbl-input" placeholder="ex: 2026-11 (opcional)" style="width: 155px; font-size: 0.82rem; padding: 0.3rem 0.5rem;" title="Opcional: Força a conciliação de um mês específico em atraso" />
+  </div>
 </div>
 
 <div id="extrato-log" style="display:none; background:#090d16; border:1px solid var(--border); border-radius:6px; padding:0.75rem 1rem; font-family:monospace; font-size:0.8rem; color:#38bdf8; margin-bottom:1.5rem;"></div>
@@ -63,7 +67,9 @@
     formData.append("file", file);
 
     try {
-      const res = await fetch("/api/upload-extrato", { method: "POST", body: formData });
+      const targetMonth = document.getElementById("target-month-input")?.value?.trim() || "";
+      const url = targetMonth ? `/api/upload-extrato?target_month=${encodeURIComponent(targetMonth)}` : "/api/upload-extrato";
+      const res = await fetch(url, { method: "POST", body: formData });
       const out = await res.json();
       log.innerText = `[${new Date().toLocaleTimeString()}] ✅ Arquivo '${out.filename}' recebido e processado com sucesso! Meses conciliados: ${out.meses.join(', ')}.`;
       showToast("Extrato importado com sucesso!");
@@ -78,10 +84,12 @@
     log.style.display = "block";
     log.innerText = `[${new Date().toLocaleTimeString()}] Conciliando extratos OFX locais com o orçamento...`;
     try {
-      const res = await fetch("/api/extratos", { method: "POST" });
+      const targetMonth = document.getElementById("target-month-input")?.value?.trim() || "";
+      const url = targetMonth ? `/api/extratos?target_month=${encodeURIComponent(targetMonth)}` : "/api/extratos";
+      const res = await fetch(url, { method: "POST" });
       const out = await res.json();
-      log.innerText = `[${new Date().toLocaleTimeString()}] ✅ Conciliação concluída! Meses atualizados: ${out.meses.join(', ')}.`;
-      showToast("Extratos conciliados com sucesso!");
+      log.innerText = `[${new Date().toLocaleTimeString()}] ✅ Conciliação concluída! Meses atualizados: ${out.meses.join(', ')}. Ativos conciliados: ${out.reconciled_positions || 0}.`;
+      showToast(out.message || "Extratos conciliados com sucesso!");
     } catch (err) {
       log.innerText = `[${new Date().toLocaleTimeString()}] ❌ Erro: ` + err;
       showToast("Erro na conciliação", "error");
