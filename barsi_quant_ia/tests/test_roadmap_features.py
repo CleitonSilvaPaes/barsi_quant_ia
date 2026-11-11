@@ -1127,6 +1127,36 @@ def test_custom_artifacts_api_endpoints_and_excel_export(tmp_path, monkeypatch):
     assert res_del.json()["ok"] is True
 
 
+def test_clean_test_data_cli_and_sqlite_sequence_reset(tmp_path):
+    """Testa o comando CLI clean-test-data e o reset de AUTOINCREMENT em sqlite_sequence."""
+    from barsi.__main__ import clean_test_data_cli
+    db_file = str(tmp_path / "reset_test.db")
+    repo = BudgetRepository(db_file)
+
+    # 1. Insere dados em tabelas que possuem AUTOINCREMENT
+    id1 = repo.create_custom_artifact(
+        name="Artefato 1", chart_type="bar", data_source="positions", fields=["ticker"]
+    )
+    id2 = repo.create_custom_artifact(
+        name="Artefato 2", chart_type="line", data_source="positions", fields=["ticker"]
+    )
+    assert id1 == 1
+    assert id2 == 2
+
+    # 2. Executa a limpeza com reset de sqlite_sequence
+    clean_test_data_cli(confirm=True, db_path=db_file)
+
+    # 3. Valida que a tabela foi limpa
+    assert len(repo.list_custom_artifacts()) == 0
+
+    # 4. Insere novo dado: devido ao reset de sqlite_sequence, o próximo ID deve ser 1 novamente!
+    new_id = repo.create_custom_artifact(
+        name="Artefato Reiniciado", chart_type="bar", data_source="positions", fields=["ticker"]
+    )
+    assert new_id == 1
+
+
+
 
 
 

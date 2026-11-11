@@ -928,6 +928,50 @@ def train_dss_cli(
     typer.echo(f"    - Pesos salvos em: {output}")
     typer.echo("💡 Servidor em execução? Recarregue via: sudo systemctl restart barsi-api.service ou POST /api/dss/reload")
 
+@app.command("clean-test-data")
+def clean_test_data_cli(
+    confirm: bool = typer.Option(False, "--yes", "-y", help="Pula a confirmação interativa"),
+    db_path: Optional[str] = typer.Option(None, "--db", help="Path do SQLite (default: settings.sqlite_db_path)")
+):
+    """Remove dados operacionais de teste e reseta as sequências AUTOINCREMENT (sqlite_sequence)."""
+    import sqlite3
+    from barsi.adapters.history.budget_repository import BudgetRepository
+
+    target_db = db_path or settings.sqlite_db_path
+
+    if not confirm:
+        typer.confirm(f"⚠️ Isso apagará dados transacionais do banco SQLite ({target_db}) e resetará os IDs. Continuar?", abort=True)
+
+    repo = BudgetRepository(target_db)
+
+    tabelas = [
+        "positions",
+        "transacoes",
+        "dividends_received",
+        "historico_analises",
+        "portfolio_snapshots",
+        "runs",
+        "notification_log",
+        "budget_entries",
+        "custom_artifacts",
+        "pending_sheets_writes",
+        "sheets_positions_cache",
+        "price_history",
+    ]
+
+    with repo._conn() as c:
+        for tabela in tabelas:
+            try:
+                c.execute(f"DELETE FROM {tabela};")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                c.execute("DELETE FROM sqlite_sequence WHERE name = ?;", (tabela,))
+            except sqlite3.OperationalError:
+                pass
+
+    typer.echo("[✔] Dados limpos e sequências AUTOINCREMENT (sqlite_sequence) reiniciadas com sucesso!")
+
 if __name__ == "__main__":
     app()
 
