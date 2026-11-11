@@ -25,6 +25,8 @@ def run(
         sheets = AdapterFactory.create_sheets_adapter(settings)
         history = AdapterFactory.create_history_adapter(settings)
         notifier = AdapterFactory.create_notification_adapter(settings)
+        from barsi.adapters.history.budget_repository import BudgetRepository
+        budget_repo = BudgetRepository(settings.sqlite_db_path)
 
         service = SyncService(
             market=market,
@@ -33,6 +35,7 @@ def run(
             sheets=sheets,
             history=history,
             notifier=notifier,
+            budget_repo=budget_repo,
             max_concurrency=settings.max_concurrency
         )
         summary = await service.execute_run(dry_run=dry_run, target_ticker=ticker)
