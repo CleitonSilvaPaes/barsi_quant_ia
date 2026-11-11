@@ -3,6 +3,7 @@
 Centraliza DDLs, sementes padrão de orçamento, regras de categorização por palavras-chave,
 definições de artefatos personalizados e preferências de alertas/agendamento.
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple
@@ -280,7 +281,7 @@ DEFAULT_SCHEDULER_DAYS = "1,2,3,4,5"
 DEFAULT_SCHEDULER_HOURS = "9,10,11,12,13,14,15,16,17,18"
 
 DEFAULT_NOTIFICATION_PREFS: List[Tuple[str, int]] = [
-    ("margem_20", 1),      # alertas individuais >= 20% de margem
+    ("margem_20", 1),  # alertas individuais >= 20% de margem
     ("radar_summary", 1),  # resumo horário consolidado
 ]
 
@@ -365,4 +366,3 @@ VALID_DATA_SOURCES: Dict[str, Any] = {
         "default_order": "data ASC",
     },
 }
-

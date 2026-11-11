@@ -1547,17 +1547,3 @@ def test_seed_defaults_with_custom_file_and_fallback(tmp_path, monkeypatch):
     assert repo.get_expense_amount("2026-11", "Categoria Teste Custom") == 250.0
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-

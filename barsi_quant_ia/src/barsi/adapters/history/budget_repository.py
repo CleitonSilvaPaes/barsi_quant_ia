@@ -4,6 +4,7 @@ Esta é a ÚNICA fonte da verdade para valores monetários mensais.
 Regra permanente: NENHUM valor monetário mensal pode ser hardcoded no código.
 Se o valor não existe em `recurring_expenses`, ele NÃO EXISTE.
 """
+
 from __future__ import annotations
 
 import os
@@ -60,7 +61,6 @@ def resolve_db_path(path: str = "./memory/barsi_memory.db") -> str:
     return os.path.abspath(path)
 
 
-
 def validate_target_month(target_month: Optional[str]) -> Optional[str]:
     """Valida e normaliza o parâmetro target_month.
 
@@ -75,11 +75,14 @@ def validate_target_month(target_month: Optional[str]) -> Optional[str]:
     if not val:
         return None
     import re
+
     if not re.match(r"^\d{4}-\d{2}$", val):
         raise ValueError(f"target_month inválido: '{val}'. Formato esperado: YYYY-MM (ex: 2026-11).")
     ano, mes = int(val[:4]), int(val[5:7])
     if not (2020 <= ano <= 2100) or not (1 <= mes <= 12):
-        raise ValueError(f"target_month fora de faixa: '{val}'. O ano deve estar entre 2020 e 2100 e mês entre 01 e 12.")
+        raise ValueError(
+            f"target_month fora de faixa: '{val}'. O ano deve estar entre 2020 e 2100 e mês entre 01 e 12."
+        )
     return val
 
 
@@ -124,10 +127,13 @@ class BudgetRepository:
         inserted = 0
         with self._conn() as c:
             for kw, cat, bucket, prio in DEFAULT_KEYWORDS:
-                cur = c.execute("""
+                cur = c.execute(
+                    """
                     INSERT OR IGNORE INTO category_keywords (keyword, category, bucket, priority)
                     VALUES (?, ?, ?, ?)
-                """, (kw, cat, bucket, prio))
+                """,
+                    (kw, cat, bucket, prio),
+                )
                 inserted += cur.rowcount
         return inserted
 
@@ -182,7 +188,9 @@ class BudgetRepository:
         3. Constante `DEFAULT_BUDGET_SEEDS` como fallback sintético.
         """
         if seeds is None:
-            custom_path = os.getenv("BARSI_SEEDS_JSON") or os.path.join(os.path.dirname(self.db_path), "seeds_local.json")
+            custom_path = os.getenv("BARSI_SEEDS_JSON") or os.path.join(
+                os.path.dirname(self.db_path), "seeds_local.json"
+            )
             if os.path.exists(custom_path):
                 try:
                     with open(custom_path, "r", encoding="utf-8") as f:
@@ -209,19 +217,23 @@ class BudgetRepository:
         """
         with self._conn() as c:
             # 1. Snapshot conciliado
-            row = c.execute("""
+            row = c.execute(
+                """
                 SELECT be.amount
                   FROM budget_entries be
                   JOIN expense_categories ec ON ec.id = be.category_id
                  WHERE ec.name = ? AND be.mes_ano = ?
                  LIMIT 1
-            """, (category, mes_ano)).fetchone()
+            """,
+                (category, mes_ano),
+            ).fetchone()
             if row:
                 return float(row["amount"])
 
             # 2. Recorrente vigente
             mes_iso = f"{mes_ano}-01"
-            row = c.execute("""
+            row = c.execute(
+                """
                 SELECT re.amount
                   FROM recurring_expenses re
                   JOIN expense_categories ec ON ec.id = re.category_id
@@ -230,7 +242,9 @@ class BudgetRepository:
                    AND (re.valid_to IS NULL OR re.valid_to >= ?)
                  ORDER BY re.valid_from DESC
                  LIMIT 1
-            """, (category, mes_iso, mes_iso)).fetchone()
+            """,
+                (category, mes_iso, mes_iso),
+            ).fetchone()
             if row:
                 return float(row["amount"])
 
@@ -242,7 +256,8 @@ class BudgetRepository:
         res: Dict[str, float] = {}
         with self._conn() as c:
             # 1. Despesas recorrentes vigentes
-            rows_recurring = c.execute("""
+            rows_recurring = c.execute(
+                """
                 WITH latest AS (
                     SELECT re.category_id, re.amount,
                            ROW_NUMBER() OVER (PARTITION BY re.category_id
@@ -255,17 +270,22 @@ class BudgetRepository:
                   FROM latest
                   JOIN expense_categories ec ON ec.id = latest.category_id
                  WHERE latest.rn = 1
-            """, (mes_iso, mes_iso)).fetchall()
+            """,
+                (mes_iso, mes_iso),
+            ).fetchall()
             for r in rows_recurring:
                 res[r["name"]] = float(r["amount"])
 
             # 2. Snapshot conciliado do mês (budget_entries) sobrepõe (dado real > estimado)
-            rows_snapshot = c.execute("""
+            rows_snapshot = c.execute(
+                """
                 SELECT ec.name, be.amount
                   FROM budget_entries be
                   JOIN expense_categories ec ON ec.id = be.category_id
                  WHERE be.mes_ano = ?
-            """, (mes_ano,)).fetchall()
+            """,
+                (mes_ano,),
+            ).fetchall()
             for r in rows_snapshot:
                 res[r["name"]] = float(r["amount"])
 
@@ -290,19 +310,26 @@ class BudgetRepository:
         e faz upsert com ON CONFLICT(category_id, valid_from).
         """
         with self._conn() as c:
-            c.execute("""INSERT OR IGNORE INTO expense_categories (name, kind)
-                         VALUES (?, ?)""", (category, kind))
+            c.execute(
+                """INSERT OR IGNORE INTO expense_categories (name, kind)
+                         VALUES (?, ?)""",
+                (category, kind),
+            )
             row = c.execute("SELECT id FROM expense_categories WHERE name = ?", (category,)).fetchone()
             cat_id = row["id"]
 
             # Fecha vigência anterior aberta (apenas se for anterior à data informada)
-            c.execute("""
+            c.execute(
+                """
                 UPDATE recurring_expenses
                    SET valid_to = date(?, '-1 day')
                  WHERE category_id = ? AND valid_to IS NULL AND valid_from < ?
-            """, (valid_from, cat_id, valid_from))
+            """,
+                (valid_from, cat_id, valid_from),
+            )
 
-            c.execute("""
+            c.execute(
+                """
                 INSERT INTO recurring_expenses
                     (category_id, amount, valid_from, valid_to, source, notes)
                 VALUES (?, ?, ?, ?, ?, ?)
@@ -311,7 +338,9 @@ class BudgetRepository:
                     valid_to = excluded.valid_to,
                     source = excluded.source,
                     notes = excluded.notes
-            """, (cat_id, amount, valid_from, valid_to, source, notes))
+            """,
+                (cat_id, amount, valid_from, valid_to, source, notes),
+            )
         logger.info("recurring_expense_upserted", category=category, amount=amount, valid_from=valid_from)
 
     def list_recurring(self) -> List[Dict[str, Any]]:
@@ -337,24 +366,32 @@ class BudgetRepository:
                 fitid = getattr(t, "id_transacao", None) or (t.get("id_transacao") if isinstance(t, dict) else "")
                 data = getattr(t, "data", None) or (t.get("data") if isinstance(t, dict) else "")
                 tipo = getattr(t, "tipo", None) or (t.get("tipo") if isinstance(t, dict) else "")
-                valor = getattr(t, "valor", 0.0) if hasattr(t, "valor") else (t.get("valor", 0.0) if isinstance(t, dict) else 0.0)
+                valor = (
+                    getattr(t, "valor", 0.0)
+                    if hasattr(t, "valor")
+                    else (t.get("valor", 0.0) if isinstance(t, dict) else 0.0)
+                )
                 descricao = getattr(t, "descricao", None) or (t.get("descricao") if isinstance(t, dict) else "")
-                categoria = getattr(t, "categoria", None) or (t.get("categoria", "Outros") if isinstance(t, dict) else "Outros")
-                ticker = getattr(t, "ticker_relacionado", None) or (t.get("ticker_relacionado") if isinstance(t, dict) else None)
+                categoria = getattr(t, "categoria", None) or (
+                    t.get("categoria", "Outros") if isinstance(t, dict) else "Outros"
+                )
+                ticker = getattr(t, "ticker_relacionado", None) or (
+                    t.get("ticker_relacionado") if isinstance(t, dict) else None
+                )
                 origem = getattr(t, "origem", None) or (t.get("origem", "CONTA") if isinstance(t, dict) else "CONTA")
 
                 cat_row = c.execute("SELECT id FROM expense_categories WHERE name = ?", (categoria,)).fetchone()
                 cat_id = cat_row["id"] if cat_row else None
 
-                cur = c.execute("""
+                cur = c.execute(
+                    """
                     INSERT OR IGNORE INTO transacoes
                         (fitid, data, mes_ano, tipo, valor, descricao,
                          categoria, ticker, origem, categoria_id)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    fitid, data, data[:7] if data else "", tipo, valor, descricao,
-                    categoria, ticker, origem, cat_id
-                ))
+                """,
+                    (fitid, data, data[:7] if data else "", tipo, valor, descricao, categoria, ticker, origem, cat_id),
+                )
                 inserted += cur.rowcount
         logger.info("transacoes_persisted", inserted=inserted)
         return inserted
@@ -366,14 +403,17 @@ class BudgetRepository:
             cat_row = c.execute("SELECT id FROM expense_categories WHERE name = ?", (category,)).fetchone()
             cat_id = cat_row["id"]
 
-            c.execute("""
+            c.execute(
+                """
                 INSERT INTO budget_entries (mes_ano, category_id, amount, source, updated_at)
                 VALUES (?, ?, ?, ?, datetime('now'))
                 ON CONFLICT(mes_ano, category_id) DO UPDATE SET
                     amount = excluded.amount,
                     source = excluded.source,
                     updated_at = datetime('now')
-            """, (mes_ano, cat_id, amount, source))
+            """,
+                (mes_ano, cat_id, amount, source),
+            )
 
     # ------------------------------------------------------------------ #
     # Posições da Carteira (desacoplamento total do Google Sheets)
@@ -383,7 +423,8 @@ class BudgetRepository:
         count = 0
         with self._conn() as c:
             for p in positions:
-                cur = c.execute("""
+                cur = c.execute(
+                    """
                     INSERT INTO positions (
                         ticker, empresa, setor, qtd_antes, qtd_aporte,
                         preco_atual, div_proj, preco_teto, margem_seguranca,
@@ -403,12 +444,23 @@ class BudgetRepository:
                         teto_manual = excluded.teto_manual,
                         custo_medio = excluded.custo_medio,
                         updated_at = datetime('now')
-                """, (
-                    p.ticker, p.empresa, p.setor, p.qtd_antes, p.qtd_aporte,
-                    p.preco_atual, p.div_proj, p.preco_teto, p.margem_seguranca,
-                    p.feedback_usuario, p.insight_atual, 1 if getattr(p, "teto_manual", False) else 0,
-                    float(getattr(p, "custo_medio", 0.0) or 0.0)
-                ))
+                """,
+                    (
+                        p.ticker,
+                        p.empresa,
+                        p.setor,
+                        p.qtd_antes,
+                        p.qtd_aporte,
+                        p.preco_atual,
+                        p.div_proj,
+                        p.preco_teto,
+                        p.margem_seguranca,
+                        p.feedback_usuario,
+                        p.insight_atual,
+                        1 if getattr(p, "teto_manual", False) else 0,
+                        float(getattr(p, "custo_medio", 0.0) or 0.0),
+                    ),
+                )
                 count += cur.rowcount
         return count
 
@@ -427,25 +479,27 @@ class BudgetRepository:
                 q_antes = r["qtd_antes"] or 0
                 q_aporte = r["qtd_aporte"] or 0
                 p_atual = float(r["preco_atual"] or 0.0)
-                positions.append(Position(
-                    ticker=r["ticker"],
-                    row_index=idx,
-                    empresa=r["empresa"] or "",
-                    setor=r["setor"] or "",
-                    qtd_antes=q_antes,
-                    qtd_aporte=q_aporte,
-                    qtd_total=q_antes + q_aporte,
-                    preco_atual=p_atual,
-                    div_proj=float(r["div_proj"] or 0.0),
-                    preco_teto=float(r["preco_teto"] or 0.0),
-                    margem_seguranca=float(r["margem_seguranca"] or 0.0),
-                    valor_total=round((q_antes + q_aporte) * p_atual, 2),
-                    total_aporte=round(q_aporte * p_atual, 2),
-                    feedback_usuario=r["feedback_usuario"] or "",
-                    insight_atual=r["insight_atual"] or "",
-                    teto_manual=teto_man,
-                    custo_medio=c_medio
-                ))
+                positions.append(
+                    Position(
+                        ticker=r["ticker"],
+                        row_index=idx,
+                        empresa=r["empresa"] or "",
+                        setor=r["setor"] or "",
+                        qtd_antes=q_antes,
+                        qtd_aporte=q_aporte,
+                        qtd_total=q_antes + q_aporte,
+                        preco_atual=p_atual,
+                        div_proj=float(r["div_proj"] or 0.0),
+                        preco_teto=float(r["preco_teto"] or 0.0),
+                        margem_seguranca=float(r["margem_seguranca"] or 0.0),
+                        valor_total=round((q_antes + q_aporte) * p_atual, 2),
+                        total_aporte=round(q_aporte * p_atual, 2),
+                        feedback_usuario=r["feedback_usuario"] or "",
+                        insight_atual=r["insight_atual"] or "",
+                        teto_manual=teto_man,
+                        custo_medio=c_medio,
+                    )
+                )
             return positions
 
     def reconcile_ofx_to_positions(self, resumos: Dict[str, Any], target_month: Optional[str] = None) -> int:
@@ -482,16 +536,18 @@ class BudgetRepository:
                     for tk_synth, val_synth in detalhes.items():
                         v_flt = float(val_synth or 0.0)
                         if v_flt > 0:
-                            todas_transacoes.append({
-                                "id_transacao": f"SYNTH_{tk_synth.upper()}_{mes}",
-                                "data": f"{mes}-01",
-                                "tipo": "DEBIT",
-                                "valor": -abs(v_flt),
-                                "descricao": f"Aporte {tk_synth.upper()}",
-                                "categoria": "Aporte Ações/FIIs",
-                                "ticker_relacionado": tk_synth.upper(),
-                                "origem": "OFX_SYNTH"
-                            })
+                            todas_transacoes.append(
+                                {
+                                    "id_transacao": f"SYNTH_{tk_synth.upper()}_{mes}",
+                                    "data": f"{mes}-01",
+                                    "tipo": "DEBIT",
+                                    "valor": -abs(v_flt),
+                                    "descricao": f"Aporte {tk_synth.upper()}",
+                                    "categoria": "Aporte Ações/FIIs",
+                                    "ticker_relacionado": tk_synth.upper(),
+                                    "origem": "OFX_SYNTH",
+                                }
+                            )
 
         if todas_transacoes:
             self.persist_transacoes(todas_transacoes)
@@ -516,17 +572,20 @@ class BudgetRepository:
         txs_por_ticker: Dict[str, List[Dict[str, Any]]] = {}
         for row in pendentes:
             tk = row["ticker"].upper().strip()
-            txs_por_ticker.setdefault(tk, []).append({
-                "fitid": row["fitid"],
-                "mes_ano": row["mes_ano"],
-                "tipo": row["tipo"],
-                "valor": float(row["valor"]),
-            })
+            txs_por_ticker.setdefault(tk, []).append(
+                {
+                    "fitid": row["fitid"],
+                    "mes_ano": row["mes_ano"],
+                    "tipo": row["tipo"],
+                    "valor": float(row["valor"]),
+                }
+            )
 
         positions = {p.ticker.upper(): p for p in positions_list}
         updated_tickers = set()
 
         from datetime import datetime
+
         mes_atual = datetime.now().strftime("%Y-%m")
         meses_resumo = [k for k in resumos.keys() if k]
         # target_month explícito tem prioridade; senão, adota o mês mais recente do lote ou corrente
@@ -541,8 +600,7 @@ class BudgetRepository:
             p = positions[tk]
             # Valor líquido real: compras (DEBIT) somam; estornos/ajustes (CREDIT) abatem
             total_valor = sum(
-                abs(t["valor"]) if (t["tipo"] == "DEBIT" or t["valor"] < 0) else -abs(t["valor"])
-                for t in transacoes
+                abs(t["valor"]) if (t["tipo"] == "DEBIT" or t["valor"] < 0) else -abs(t["valor"]) for t in transacoes
             )
             total_valor = round(total_valor, 2)
             if total_valor <= 0:
@@ -638,14 +696,17 @@ class BudgetRepository:
         if alert_type not in VALID_ALERT_TYPES:
             raise ValueError(f"alert_type inválido: '{alert_type}'. Válidos: {sorted(VALID_ALERT_TYPES)}")
         with self._conn() as c:
-            c.execute("""
+            c.execute(
+                """
                 INSERT INTO notification_preferences (alert_type, enabled, updated_at, updated_by)
                 VALUES (?, ?, datetime('now'), ?)
                 ON CONFLICT(alert_type) DO UPDATE SET
                     enabled    = excluded.enabled,
                     updated_at = datetime('now'),
                     updated_by = excluded.updated_by
-            """, (alert_type, 1 if enabled else 0, updated_by))
+            """,
+                (alert_type, 1 if enabled else 0, updated_by),
+            )
 
     def set_all_notifications_enabled(self, enabled: bool, updated_by: Optional[str] = None) -> int:
         """Ativa ou desativa globalmente todos os tipos de notificação."""
@@ -733,7 +794,8 @@ class BudgetRepository:
 
         self.get_scheduler_config()  # garante linha existente
         with self._conn() as c:
-            c.execute("""
+            c.execute(
+                """
                 UPDATE scheduler_config
                    SET enabled      = COALESCE(?, enabled),
                        days_of_week = COALESCE(?, days_of_week),
@@ -742,10 +804,15 @@ class BudgetRepository:
                        updated_at   = datetime('now'),
                        updated_by   = COALESCE(?, updated_by)
                  WHERE id = 1
-            """, (
-                None if enabled is None else (1 if enabled else 0),
-                days_of_week, hours, minute, updated_by,
-            ))
+            """,
+                (
+                    None if enabled is None else (1 if enabled else 0),
+                    days_of_week,
+                    hours,
+                    minute,
+                    updated_by,
+                ),
+            )
         return self.get_scheduler_config()
 
     def is_run_due(self, now: Optional[datetime] = None) -> Tuple[bool, str]:
@@ -815,11 +882,12 @@ class BudgetRepository:
         dividendos_mes: float = 0.0,
         aporte_planejado: float = 0.0,
         rentabilidade_mes: float = 0.0,
-        setores_json: Optional[str] = None
+        setores_json: Optional[str] = None,
     ) -> None:
         """Salva ou atualiza o snapshot de patrimônio para uma data (YYYY-MM-DD)."""
         with self._conn() as c:
-            c.execute("""
+            c.execute(
+                """
                 INSERT INTO portfolio_snapshots 
                 (data_snapshot, patrimonio_total, cotas_totais, dividendos_mes, aporte_planejado, rentabilidade_mes, setores_json)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -831,17 +899,30 @@ class BudgetRepository:
                     rentabilidade_mes = excluded.rentabilidade_mes,
                     setores_json = COALESCE(excluded.setores_json, portfolio_snapshots.setores_json),
                     created_at = datetime('now')
-            """, (data_snapshot, patrimonio_total, cotas_totais, dividendos_mes, aporte_planejado, rentabilidade_mes, setores_json or '{}'))
+            """,
+                (
+                    data_snapshot,
+                    patrimonio_total,
+                    cotas_totais,
+                    dividendos_mes,
+                    aporte_planejado,
+                    rentabilidade_mes,
+                    setores_json or "{}",
+                ),
+            )
 
     def get_portfolio_snapshots(self, limit_months: int = 12) -> List[Dict[str, Any]]:
         """Retorna histórico de snapshots ordenados por data."""
         with self._conn() as c:
-            rows = c.execute("""
+            rows = c.execute(
+                """
                 SELECT data_snapshot, patrimonio_total, cotas_totais, dividendos_mes, aporte_planejado, rentabilidade_mes, setores_json
                 FROM portfolio_snapshots
                 ORDER BY data_snapshot ASC
                 LIMIT ?
-            """, (limit_months,)).fetchall()
+            """,
+                (limit_months,),
+            ).fetchall()
             result = []
             for r in rows:
                 item = dict(r)
@@ -856,17 +937,14 @@ class BudgetRepository:
             return result
 
     def seed_initial_snapshots_if_empty(
-        self,
-        current_patrimonio: float,
-        current_cotas: int,
-        setores_dict: Optional[Dict[str, float]] = None
+        self, current_patrimonio: float, current_cotas: int, setores_dict: Optional[Dict[str, float]] = None
     ) -> None:
         """Gera histórico inicial coerente dos últimos 6 meses com datas dinâmicas se a tabela tiver poucos registros."""
         with self._conn() as c:
             count = c.execute("SELECT COUNT(*) FROM portfolio_snapshots").fetchone()[0]
             if count >= 6 or current_patrimonio <= 0:
                 return
-            
+
             hoje = datetime.now()
             setores_base = setores_dict or {}
             factors = DEFAULT_SYNTHETIC_CURVE_FACTORS
@@ -877,22 +955,23 @@ class BudgetRepository:
                 while month <= 0:
                     month += 12
                     year -= 1
-                
+
                 if months_ago == 0:
                     dt_str = hoje.strftime("%Y-%m-%d")
                 else:
                     last_day = calendar.monthrange(year, month)[1]
                     dt_str = f"{year:04d}-{month:02d}-{last_day:02d}"
-                
+
                 pat = round(current_patrimonio * factor, 2)
                 cotas = int(current_cotas * factor)
                 div = round(pat * 0.006, 2)
                 ap = round(800.0 + (i * 40.0), 2)
-                
+
                 month_setores = {k: round(v * factor, 2) for k, v in setores_base.items()} if setores_base else {}
                 sec_json = json.dumps(month_setores, ensure_ascii=False)
-                
-                c.execute("""
+
+                c.execute(
+                    """
                     INSERT INTO portfolio_snapshots 
                     (data_snapshot, patrimonio_total, cotas_totais, dividendos_mes, aporte_planejado, rentabilidade_mes, setores_json)
                     VALUES (?, ?, ?, ?, ?, 0.0, ?)
@@ -900,55 +979,72 @@ class BudgetRepository:
                         patrimonio_total = excluded.patrimonio_total,
                         cotas_totais = excluded.cotas_totais,
                         setores_json = COALESCE(excluded.setores_json, portfolio_snapshots.setores_json)
-                """, (dt_str, pat, cotas, div, ap, sec_json))
+                """,
+                    (dt_str, pat, cotas, div, ap, sec_json),
+                )
 
     def update_insight_feedback(self, ticker: str, feedback: str) -> None:
         """Atualiza o feedback do usuário na tabela positions e no último registro de historico_analises."""
         with self._conn() as c:
-            c.execute("UPDATE positions SET feedback_usuario = ?, updated_at = datetime('now') WHERE ticker = ?", (feedback, ticker))
+            c.execute(
+                "UPDATE positions SET feedback_usuario = ?, updated_at = datetime('now') WHERE ticker = ?",
+                (feedback, ticker),
+            )
             try:
-                c.execute("""
+                c.execute(
+                    """
                     UPDATE historico_analises 
                     SET feedback_usuario = ? 
                     WHERE id = (
                         SELECT id FROM historico_analises WHERE ticker = ? ORDER BY id DESC LIMIT 1
                     )
-                """, (feedback, ticker))
+                """,
+                    (feedback, ticker),
+                )
             except sqlite3.OperationalError:
                 pass
 
     def save_price_history(self, ticker: str, data_pregao: str, preco_fechamento: float, volume: float = 0.0) -> None:
         """Salva a cotação histórica de fechamento de um pregão."""
         with self._conn() as c:
-            c.execute("""
+            c.execute(
+                """
                 INSERT INTO price_history (ticker, data_pregao, preco_fechamento, volume)
                 VALUES (?, ?, ?, ?)
                 ON CONFLICT(ticker, data_pregao) DO UPDATE SET
                     preco_fechamento = excluded.preco_fechamento,
                     volume = excluded.volume
-            """, (ticker, data_pregao, preco_fechamento, volume))
+            """,
+                (ticker, data_pregao, preco_fechamento, volume),
+            )
 
     def get_price_history(self, ticker: str, limit_days: int = 90) -> List[Dict[str, Any]]:
         """Retorna as cotações históricas dos últimos N pregões."""
         with self._conn() as c:
-            rows = c.execute("""
+            rows = c.execute(
+                """
                 SELECT ticker, data_pregao, preco_fechamento, volume
                 FROM price_history
                 WHERE ticker = ?
                 ORDER BY data_pregao ASC
                 LIMIT ?
-            """, (ticker, limit_days)).fetchall()
+            """,
+                (ticker, limit_days),
+            ).fetchall()
             return [dict(r) for r in rows]
 
     def sync_yfinance_history(self, tickers: Optional[List[str]] = None) -> int:
         """Baixa o histórico diário real via yfinance e persiste no SQLite."""
         if not tickers:
             positions = self.load_positions()
-            tickers = [p.ticker for p in positions] if positions else [
-                "BBAS3", "SAPR4", "BBSE3", "MXRF11", "PETR4", "KNCR11", "ITUB4", "HGCR11", "XPLG11", "CMIG4"
-            ]
+            tickers = (
+                [p.ticker for p in positions]
+                if positions
+                else ["BBAS3", "SAPR4", "BBSE3", "MXRF11", "PETR4", "KNCR11", "ITUB4", "HGCR11", "XPLG11", "CMIG4"]
+            )
 
         import yfinance as yf
+
         total_records = 0
         with self._conn() as c:
             for t in tickers:
@@ -963,13 +1059,16 @@ class BudgetRepository:
                         dt_str = dt.strftime("%Y-%m-%d")
                         close_price = round(float(row["Close"]), 2)
                         vol = float(row.get("Volume", 0.0))
-                        c.execute("""
+                        c.execute(
+                            """
                             INSERT INTO price_history (ticker, data_pregao, preco_fechamento, volume)
                             VALUES (?, ?, ?, ?)
                             ON CONFLICT(ticker, data_pregao) DO UPDATE SET
                                 preco_fechamento = excluded.preco_fechamento,
                                 volume = excluded.volume
-                        """, (clean_ticker, dt_str, close_price, vol))
+                        """,
+                            (clean_ticker, dt_str, close_price, vol),
+                        )
                         total_records += 1
                 except Exception as e:
                     logger.warn("yfinance_history_sync_error", ticker=t, error=str(e))
@@ -990,13 +1089,16 @@ class BudgetRepository:
 
         with self._conn() as c:
             # Obtém as datas de fechamento mensal presentes no price_history
-            dates = c.execute("""
+            dates = c.execute(
+                """
                 SELECT DISTINCT strftime('%Y-%m', data_pregao) as ym, MAX(data_pregao) as end_date
                 FROM price_history
                 GROUP BY ym
                 ORDER BY end_date ASC
                 LIMIT ?
-            """, (limit_months,)).fetchall()
+            """,
+                (limit_months,),
+            ).fetchall()
 
             if not dates or len(dates) < 3:
                 self.seed_initial_snapshots_if_empty(round(soma_pat, 2), soma_cotas, setores_base)
@@ -1013,17 +1115,18 @@ class BudgetRepository:
                 for p in positions:
                     row_p = c.execute(
                         "SELECT preco_fechamento FROM price_history WHERE ticker = ? AND data_pregao <= ? ORDER BY data_pregao DESC LIMIT 1",
-                        (p.ticker, dt_str)
+                        (p.ticker, dt_str),
                     ).fetchone()
                     preco = float(row_p["preco_fechamento"]) if row_p else p.preco_atual
                     val = (p.qtd_antes or 0) * preco
                     soma_pat_m += val
-                    soma_cotas_m += (p.qtd_antes or 0)
+                    soma_cotas_m += p.qtd_antes or 0
                     sec = p.setor or "B.E.S.T."
                     month_setores[sec] = round(month_setores.get(sec, 0.0) + val, 2)
 
                 if soma_pat_m > 0:
-                    c.execute("""
+                    c.execute(
+                        """
                         INSERT INTO portfolio_snapshots 
                         (data_snapshot, patrimonio_total, cotas_totais, dividendos_mes, aporte_planejado, rentabilidade_mes, setores_json)
                         VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -1035,21 +1138,26 @@ class BudgetRepository:
                             rentabilidade_mes = excluded.rentabilidade_mes,
                             setores_json = COALESCE(excluded.setores_json, portfolio_snapshots.setores_json),
                             created_at = datetime('now')
-                    """, (
-                        dt_str,
-                        round(soma_pat_m, 2),
-                        soma_cotas_m,
-                        round(soma_pat_m * 0.009, 2),
-                        1000.0,
-                        0.0,
-                        json.dumps(month_setores, ensure_ascii=False)
-                    ))
+                    """,
+                        (
+                            dt_str,
+                            round(soma_pat_m, 2),
+                            soma_cotas_m,
+                            round(soma_pat_m * 0.009, 2),
+                            1000.0,
+                            0.0,
+                            json.dumps(month_setores, ensure_ascii=False),
+                        ),
+                    )
 
-            rows = c.execute("""
+            rows = c.execute(
+                """
                 SELECT * FROM portfolio_snapshots 
                 ORDER BY data_snapshot ASC 
                 LIMIT ?
-            """, (limit_months,)).fetchall()
+            """,
+                (limit_months,),
+            ).fetchall()
 
             snaps = []
             for r in rows:
@@ -1071,10 +1179,13 @@ class BudgetRepository:
         """Enfileira uma escrita para o Google Sheets quando a rede ou API estiver indisponível."""
         payload_str = json.dumps(payload, ensure_ascii=False)
         with self._conn() as c:
-            cur = c.execute("""
+            cur = c.execute(
+                """
                 INSERT INTO pending_sheets_writes (ticker, payload_json)
                 VALUES (?, ?)
-            """, (ticker, payload_str))
+            """,
+                (ticker, payload_str),
+            )
             logger.info("pending_sheets_write_recorded", ticker=ticker, write_id=cur.lastrowid)
             return cur.lastrowid
 
@@ -1126,16 +1237,19 @@ class BudgetRepository:
                     "preco_teto": p.preco_teto,
                     "margem_seguranca": p.margem_seguranca,
                     "feedback_usuario": p.feedback_usuario,
-                    "insight_atual": p.insight_atual
+                    "insight_atual": p.insight_atual,
                 }
-                c.execute("""
+                c.execute(
+                    """
                     INSERT INTO sheets_positions_cache (ticker, payload_json, expires_at, updated_at)
                     VALUES (?, ?, ?, datetime('now'))
                     ON CONFLICT(ticker) DO UPDATE SET
                         payload_json = excluded.payload_json,
                         expires_at = excluded.expires_at,
                         updated_at = datetime('now')
-                """, (p.ticker, json.dumps(data, ensure_ascii=False), expires_at))
+                """,
+                    (p.ticker, json.dumps(data, ensure_ascii=False), expires_at),
+                )
 
     def get_sheets_positions_cache(self) -> Tuple[Optional[List[Position]], bool]:
         """
@@ -1146,7 +1260,7 @@ class BudgetRepository:
             rows = c.execute("SELECT ticker, payload_json, expires_at FROM sheets_positions_cache").fetchall()
             if not rows:
                 return None, True
-            
+
             now_iso = datetime.now().isoformat()
             is_stale = False
             positions = []
@@ -1155,20 +1269,22 @@ class BudgetRepository:
                     is_stale = True
                 try:
                     d = json.loads(r["payload_json"])
-                    positions.append(Position(
-                        ticker=d["ticker"],
-                        row_index=d.get("row_index", 10),
-                        empresa=d.get("empresa", ""),
-                        setor=d.get("setor", ""),
-                        qtd_antes=d.get("qtd_antes", 0),
-                        qtd_aporte=d.get("qtd_aporte", 0),
-                        preco_atual=float(d.get("preco_atual", 0.0)),
-                        div_proj=float(d.get("div_proj", 0.0)),
-                        preco_teto=float(d.get("preco_teto", 0.0)),
-                        margem_seguranca=float(d.get("margem_seguranca", 0.0)),
-                        feedback_usuario=d.get("feedback_usuario", ""),
-                        insight_atual=d.get("insight_atual", "")
-                    ))
+                    positions.append(
+                        Position(
+                            ticker=d["ticker"],
+                            row_index=d.get("row_index", 10),
+                            empresa=d.get("empresa", ""),
+                            setor=d.get("setor", ""),
+                            qtd_antes=d.get("qtd_antes", 0),
+                            qtd_aporte=d.get("qtd_aporte", 0),
+                            preco_atual=float(d.get("preco_atual", 0.0)),
+                            div_proj=float(d.get("div_proj", 0.0)),
+                            preco_teto=float(d.get("preco_teto", 0.0)),
+                            margem_seguranca=float(d.get("margem_seguranca", 0.0)),
+                            feedback_usuario=d.get("feedback_usuario", ""),
+                            insight_atual=d.get("insight_atual", ""),
+                        )
+                    )
                 except Exception:
                     pass
             return (positions if positions else None), is_stale
@@ -1184,26 +1300,25 @@ class BudgetRepository:
         valor_por_cota: float = 0.0,
         quantidade: int = 0,
         tipo: str = "DIVIDENDO",
-        fonte: str = "manual"
+        fonte: str = "manual",
     ) -> int:
         """Registra um dividendo real recebido no SQLite."""
         ticker = ticker.strip().upper()
         mes_ano = data_pagamento[:7] if len(data_pagamento) >= 7 else datetime.now().strftime("%Y-%m")
         with self._conn() as c:
-            cur = c.execute("""
+            cur = c.execute(
+                """
                 INSERT INTO dividends_received (
                     ticker, data_pagamento, mes_ano, valor_total, valor_por_cota,
                     quantidade, tipo, fonte, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-            """, (ticker, data_pagamento, mes_ano, valor_total, valor_por_cota, quantidade, tipo, fonte))
+            """,
+                (ticker, data_pagamento, mes_ano, valor_total, valor_por_cota, quantidade, tipo, fonte),
+            )
             return cur.lastrowid
 
     def list_dividends_received(
-        self,
-        ticker: Optional[str] = None,
-        mes_ano: Optional[str] = None,
-        year: Optional[int] = None,
-        limit: int = 100
+        self, ticker: Optional[str] = None, mes_ano: Optional[str] = None, year: Optional[int] = None, limit: int = 100
     ) -> List[Dict[str, Any]]:
         """Lista registros de proventos reais recebidos com filtros flexíveis."""
         query = "SELECT * FROM dividends_received WHERE 1=1"
@@ -1227,13 +1342,16 @@ class BudgetRepository:
     def get_dividends_summary_by_month(self, months: int = 12) -> List[Dict[str, Any]]:
         """Retorna proventos agrupados por mês para os últimos N meses."""
         with self._conn() as c:
-            rows = c.execute("""
+            rows = c.execute(
+                """
                 SELECT mes_ano, SUM(valor_total) as total_mes, COUNT(*) as qtd_lancamentos
                 FROM dividends_received
                 GROUP BY mes_ano
                 ORDER BY mes_ano DESC
                 LIMIT ?
-            """, (months,)).fetchall()
+            """,
+                (months,),
+            ).fetchall()
             results = [dict(r) for r in rows]
             results.reverse()
             return results
@@ -1253,11 +1371,7 @@ class BudgetRepository:
     # Orçamento & Transações Conciliadas (Onda 2)
     # ------------------------------------------------------------------ #
     def list_transacoes(
-        self,
-        mes_ano: Optional[str] = None,
-        categoria: Optional[str] = None,
-        limit: int = 50,
-        offset: int = 0
+        self, mes_ano: Optional[str] = None, categoria: Optional[str] = None, limit: int = 50, offset: int = 0
     ) -> List[Dict[str, Any]]:
         """Retorna transações bancárias/cartão persistidas com filtros."""
         query = "SELECT * FROM transacoes WHERE 1=1"
@@ -1283,20 +1397,27 @@ class BudgetRepository:
         recurring = self.get_all_expenses(mes_ano)
         with self._conn() as c:
             # Gastos reais por categoria no mês via tabela transacoes
-            rows = c.execute("""
+            rows = c.execute(
+                """
                 SELECT categoria,
                        SUM(CASE WHEN tipo = 'DEBIT' THEN valor ELSE 0 END) as total_debito,
                        SUM(CASE WHEN tipo = 'CREDIT' THEN valor ELSE 0 END) as total_credito
                 FROM transacoes
                 WHERE mes_ano = ?
                 GROUP BY categoria
-            """, (mes_ano,)).fetchall()
+            """,
+                (mes_ano,),
+            ).fetchall()
             realizado_map = {r["categoria"]: float(r["total_debito"] or 0.0) for r in rows}
             creditos_map = {r["categoria"]: float(r["total_credito"] or 0.0) for r in rows}
 
-        total_entradas_real = sum(c for cat, c in creditos_map.items() if "SALÁRIO" in cat.upper() or "RECEITA" in cat.upper() or "ENTRADA" in cat.upper())
+        total_entradas_real = sum(
+            c
+            for cat, c in creditos_map.items()
+            if "SALÁRIO" in cat.upper() or "RECEITA" in cat.upper() or "ENTRADA" in cat.upper()
+        )
         total_saidas_real = sum(realizado_map.values())
-        
+
         # Consolida itens comparativos
         all_cats = sorted(set(list(recurring.keys()) + list(realizado_map.keys())))
         items = []
@@ -1304,13 +1425,15 @@ class BudgetRepository:
             previsto = recurring.get(cat, 0.0)
             realizado = realizado_map.get(cat, 0.0)
             delta = round(realizado - previsto, 2)
-            items.append({
-                "categoria": cat,
-                "previsto": previsto,
-                "realizado": realizado,
-                "delta": delta,
-                "status": "CONFORME" if abs(delta) < 1.0 else ("ECONOMIA" if delta < 0 else "ATENÇÃO")
-            })
+            items.append(
+                {
+                    "categoria": cat,
+                    "previsto": previsto,
+                    "realizado": realizado,
+                    "delta": delta,
+                    "status": "CONFORME" if abs(delta) < 1.0 else ("ECONOMIA" if delta < 0 else "ATENÇÃO"),
+                }
+            )
 
         salario_previsto = self.get_expense_amount(mes_ano, "Salário / Renda Principal")
         total_entradas = total_entradas_real if total_entradas_real > 0 else salario_previsto
@@ -1320,7 +1443,7 @@ class BudgetRepository:
             "total_entradas": round(total_entradas, 2),
             "total_saidas": round(total_saidas_real, 2),
             "saldo_livre": round(total_entradas - total_saidas_real, 2),
-            "items": items
+            "items": items,
         }
 
     # -------------------------------------------------------------
@@ -1388,7 +1511,7 @@ class BudgetRepository:
         fields: List[str],
         description: Optional[str] = None,
         filters: Optional[Dict[str, Any]] = None,
-        visible_in: Optional[List[str]] = None
+        visible_in: Optional[List[str]] = None,
     ) -> int:
         """Cria uma nova definição de artefato dinâmico com validação estrita de fontes e colunas."""
         name = (name or "").strip()
@@ -1401,7 +1524,9 @@ class BudgetRepository:
 
         data_source = (data_source or "").lower().strip()
         if data_source not in VALID_DATA_SOURCES:
-            raise ValueError(f"Fonte de dados inválida: {data_source}. Permitidas: {sorted(list(VALID_DATA_SOURCES.keys()))}")
+            raise ValueError(
+                f"Fonte de dados inválida: {data_source}. Permitidas: {sorted(list(VALID_DATA_SOURCES.keys()))}"
+            )
 
         if not fields or not isinstance(fields, list):
             raise ValueError("Lista de campos não pode ser vazia")
@@ -1409,9 +1534,15 @@ class BudgetRepository:
         allowed = VALID_DATA_SOURCES[data_source]["allowed_fields"]
         invalid_fields = [f for f in fields if f not in allowed]
         if invalid_fields:
-            raise ValueError(f"Campos inválidos para '{data_source}': {invalid_fields}. Permitidos: {list(allowed.keys())}")
+            raise ValueError(
+                f"Campos inválidos para '{data_source}': {invalid_fields}. Permitidos: {list(allowed.keys())}"
+            )
 
-        visible = visible_in if (visible_in is not None and isinstance(visible_in, list) and len(visible_in) > 0) else ["analytics"]
+        visible = (
+            visible_in
+            if (visible_in is not None and isinstance(visible_in, list) and len(visible_in) > 0)
+            else ["analytics"]
+        )
         fields_json = json.dumps(fields)
         filters_json = json.dumps(filters or {})
         visible_json = json.dumps(visible)
@@ -1421,7 +1552,7 @@ class BudgetRepository:
                 """INSERT INTO custom_artifacts 
                    (name, description, chart_type, data_source, fields, filters, visible_in, updated_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
-                (name, description or "", chart_type, data_source, fields_json, filters_json, visible_json)
+                (name, description or "", chart_type, data_source, fields_json, filters_json, visible_json),
             )
             return cursor.lastrowid
 
@@ -1445,18 +1576,20 @@ class BudgetRepository:
                     flts = json.loads(r["filters"]) if r["filters"] else {}
                 except Exception:
                     flts = {}
-                result.append({
-                    "id": r["id"],
-                    "name": r["name"],
-                    "description": r["description"] or "",
-                    "chart_type": r["chart_type"],
-                    "data_source": r["data_source"],
-                    "fields": flds,
-                    "filters": flts,
-                    "visible_in": vis,
-                    "created_at": r["created_at"],
-                    "updated_at": r["updated_at"],
-                })
+                result.append(
+                    {
+                        "id": r["id"],
+                        "name": r["name"],
+                        "description": r["description"] or "",
+                        "chart_type": r["chart_type"],
+                        "data_source": r["data_source"],
+                        "fields": flds,
+                        "filters": flts,
+                        "visible_in": vis,
+                        "created_at": r["created_at"],
+                        "updated_at": r["updated_at"],
+                    }
+                )
             return result
 
     def get_custom_artifact(self, artifact_id: int) -> Optional[Dict[str, Any]]:
@@ -1515,9 +1648,8 @@ class BudgetRepository:
         metric_fields = fields[1:] if len(fields) > 1 else []
 
         # Determina agrupamento se gráfico circular ou se label for categórico com métrica numérica
-        should_group = (
-            chart_type in ("doughnut", "pie") or
-            (label_field in ("setor", "categoria", "tipo", "origem", "mes_ano") and bool(metric_fields))
+        should_group = chart_type in ("doughnut", "pie") or (
+            label_field in ("setor", "categoria", "tipo", "origem", "mes_ano") and bool(metric_fields)
         )
 
         where_parts = []
@@ -1571,11 +1703,13 @@ class BudgetRepository:
                         m_vals.append(round(float(val), 2) if val is not None else 0.0)
                     except (ValueError, TypeError):
                         m_vals.append(0.0)
-                datasets.append({
-                    "label": m.replace("_", " ").title(),
-                    "data": m_vals,
-                    "field": m,
-                })
+                datasets.append(
+                    {
+                        "label": m.replace("_", " ").title(),
+                        "data": m_vals,
+                        "field": m,
+                    }
+                )
                 if not values:
                     values = m_vals
 
@@ -1593,5 +1727,3 @@ class BudgetRepository:
             "datasets": datasets,
             "rows": raw_rows,
         }
-
-
