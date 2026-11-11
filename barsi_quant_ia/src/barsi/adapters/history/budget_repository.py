@@ -798,7 +798,9 @@ class BudgetRepository:
                 val = float(valor_compra or 0.0)
                 if tk in positions and val > 0:
                     p = positions[tk]
+                    qtd_adicionada = 0
                     if p.qtd_aporte > 0:
+                        qtd_adicionada = p.qtd_aporte
                         p.qtd_antes += p.qtd_aporte
                         p.qtd_aporte = 0
                     else:
@@ -806,6 +808,17 @@ class BudgetRepository:
                             qtd_est = int(val // p.preco_atual)
                             if qtd_est > 0:
                                 p.qtd_antes += qtd_est
+                                qtd_adicionada = qtd_est
+
+                    # Atualização de Custo Médio Ponderado:
+                    # novo_custo = (qtd_anterior * custo_anterior + val) / qtd_total_pos_compra
+                    if qtd_adicionada > 0 and val > 0 and p.qtd_antes > 0:
+                        qtd_anterior = p.qtd_antes - qtd_adicionada
+                        if qtd_anterior > 0 and p.custo_medio and p.custo_medio > 0:
+                            novo_custo = (qtd_anterior * p.custo_medio + val) / p.qtd_antes
+                            p.custo_medio = round(novo_custo, 2)
+                        else:
+                            p.custo_medio = round(val / qtd_adicionada, 2)
 
                     p.qtd_total = p.qtd_antes + p.qtd_aporte
                     p.valor_total = round(p.qtd_total * p.preco_atual, 2)

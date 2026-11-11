@@ -136,12 +136,13 @@
       </div>
       <div>
         <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.3rem;">Tipo de Gráfico *</label>
-        <select id="art-chart" class="tbl-input" required>
+        <select id="art-chart" class="tbl-input" onchange="verificarTipoGrafico()" required>
           <option value="bar">📊 Barras (Bar)</option>
           <option value="line">📈 Linhas (Line)</option>
           <option value="doughnut">🍩 Rosca (Doughnut)</option>
           <option value="pie">🥧 Pizza (Pie)</option>
         </select>
+        <div id="art-chart-circular-tip" style="display: none; font-size: 0.75rem; color: #38bdf8; margin-top: 0.4rem; line-height: 1.3;">💡 Modelos de <strong>Rosca</strong> e <strong>Pizza</strong> representam proporções e utilizam apenas a 1ª métrica numérica selecionada.</div>
       </div>
       <div>
         <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.3rem;">Fonte de Dados *</label>
@@ -512,9 +513,18 @@
     if (el.style.display === "none" || !el.style.display) {
       el.style.display = "block";
       await atualizarCamposFonte();
+      verificarTipoGrafico();
       el.scrollIntoView({ behavior: "smooth", block: "start" });
     } else {
       el.style.display = "none";
+    }
+  }
+
+  function verificarTipoGrafico() {
+    const el = document.getElementById("art-chart");
+    const tip = document.getElementById("art-chart-circular-tip");
+    if (el && tip) {
+      tip.style.display = (el.value === "doughnut" || el.value === "pie") ? "block" : "none";
     }
   }
 
@@ -673,92 +683,7 @@
   }
 
   function renderCustomArtifactChart(art, data) {
-    const canvasId = `canvas-art-${art.id}`;
-    const canvasEl = document.getElementById(canvasId);
-    if (!canvasEl) return;
-    const ctx = canvasEl.getContext("2d");
-
-    const isMobile = window.innerWidth < 600;
-    const palette = [
-      '#38bdf8', '#22c55e', '#f59e0b', '#ec4899', '#8b5cf6',
-      '#2563eb', '#14b8a6', '#f97316', '#a855f7', '#06b6d4'
-    ];
-
-    const chartType = art.chart_type || 'bar';
-    let datasets = [];
-
-    if (chartType === 'doughnut' || chartType === 'pie') {
-      const bgColors = data.labels.map((_, i) => palette[i % palette.length]);
-      datasets = [{
-        data: data.values || [],
-        backgroundColor: bgColors,
-        borderColor: '#111827',
-        borderWidth: 2
-      }];
-    } else {
-      datasets = (data.datasets && data.datasets.length) ? data.datasets.map((ds, idx) => {
-        const color = palette[idx % palette.length];
-        return {
-          label: ds.label,
-          data: ds.data,
-          borderColor: color,
-          backgroundColor: chartType === 'line' ? 'rgba(56, 189, 248, 0.12)' : color,
-          fill: chartType === 'line',
-          tension: 0.35,
-          borderWidth: chartType === 'line' ? 2 : 1,
-          borderRadius: chartType === 'bar' ? 4 : 0,
-          pointRadius: chartType === 'line' ? (isMobile ? 3 : 4) : 0
-        };
-      }) : [{
-        label: art.name,
-        data: data.values || [],
-        borderColor: '#38bdf8',
-        backgroundColor: '#38bdf8',
-        borderRadius: 4
-      }];
-    }
-
-    const options = {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: {
-          display: chartType !== 'bar' || (data.datasets && data.datasets.length > 1),
-          position: (chartType === 'doughnut' || chartType === 'pie') ? 'bottom' : 'top',
-          labels: {
-            color: '#cbd5e1',
-            font: { size: isMobile ? 9 : 11 },
-            boxWidth: isMobile ? 10 : 12
-          }
-        },
-        tooltip: {
-          mode: (chartType === 'doughnut' || chartType === 'pie') ? 'nearest' : 'index',
-          intersect: chartType === 'doughnut' || chartType === 'pie'
-        }
-      }
-    };
-
-    if (chartType === 'line' || chartType === 'bar') {
-      options.scales = {
-        x: {
-          grid: { color: '#1e293b' },
-          ticks: { color: '#94a3b8', font: { size: isMobile ? 8 : 10 }, maxRotation: 45 }
-        },
-        y: {
-          grid: { color: '#1e293b' },
-          ticks: { color: '#94a3b8', font: { size: isMobile ? 8 : 10 } }
-        }
-      };
-    }
-
-    customChartInstances[art.id] = new Chart(ctx, {
-      type: chartType,
-      data: {
-        labels: data.labels || [],
-        datasets: datasets
-      },
-      options: options
-    });
+    renderDynamicArtifactChart(`canvas-art-${art.id}`, art, data, customChartInstances);
   }
 
   async function excluirArtefato(id, name) {

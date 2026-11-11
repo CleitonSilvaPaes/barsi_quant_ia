@@ -428,50 +428,7 @@
   }
 
   function renderCarteiraArtifactChart(art, data) {
-    const canvas = document.getElementById(`carteira-art-canvas-${art.id}`);
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    const palette = ['#38bdf8', '#22c55e', '#f59e0b', '#ec4899', '#8b5cf6', '#2563eb'];
-    const chartType = art.chart_type || 'bar';
-    let datasets = [];
-
-    if (chartType === 'doughnut' || chartType === 'pie') {
-      datasets = [{
-        data: data.values || [],
-        backgroundColor: data.labels.map((_, i) => palette[i % palette.length]),
-        borderColor: '#111827',
-        borderWidth: 2
-      }];
-    } else {
-      datasets = (data.datasets && data.datasets.length) ? data.datasets.map((ds, idx) => ({
-        label: ds.label,
-        data: ds.data,
-        borderColor: palette[idx % palette.length],
-        backgroundColor: palette[idx % palette.length],
-        borderRadius: 4
-      })) : [{
-        label: art.name,
-        data: data.values || [],
-        borderColor: '#38bdf8',
-        backgroundColor: '#38bdf8',
-        borderRadius: 4
-      }];
-    }
-
-    carteiraArtifactCharts[art.id] = new Chart(ctx, {
-      type: chartType,
-      data: { labels: data.labels || [], datasets: datasets },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            display: chartType !== 'bar' || (data.datasets && data.datasets.length > 1),
-            labels: { color: '#cbd5e1', font: { size: 10 } }
-          }
-        }
-      }
-    });
+    renderDynamicArtifactChart(`carteira-art-canvas-${art.id}`, art, data, carteiraArtifactCharts);
   }
 
   window.addEventListener("DOMContentLoaded", () => {

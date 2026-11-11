@@ -1157,16 +1157,16 @@ def test_clean_test_data_cli_and_sqlite_sequence_reset(tmp_path):
 
 
 def test_reconcile_ofx_to_positions_liquidation_and_direct_buy(tmp_path):
-    """Valida conciliação de aportes do OFX: liquidação de ordens abertas e compras diretas."""
+    """Valida conciliação de aportes do OFX: liquidação de ordens, compras diretas e custo médio ponderado."""
     db_file = str(tmp_path / "ofx_reconcile_test.db")
     repo = BudgetRepository(db_file)
 
     # Popula posições com ordens abertas (qtd_aporte > 0) e sem ordens (qtd_aporte == 0)
     pos = [
-        Position(ticker="BBAS3", row_index=1, qtd_antes=100, qtd_aporte=18, preco_atual=28.0),
-        Position(ticker="MXRF11", row_index=2, qtd_antes=310, qtd_aporte=35, preco_atual=10.15),
-        Position(ticker="SAPR4", row_index=3, qtd_antes=200, qtd_aporte=50, preco_atual=5.20),
-        Position(ticker="CPLE6", row_index=4, qtd_antes=300, qtd_aporte=0, preco_atual=10.0),
+        Position(ticker="BBAS3", row_index=1, qtd_antes=100, qtd_aporte=18, preco_atual=28.0, custo_medio=25.0),
+        Position(ticker="MXRF11", row_index=2, qtd_antes=310, qtd_aporte=35, preco_atual=10.15, custo_medio=10.0),
+        Position(ticker="SAPR4", row_index=3, qtd_antes=200, qtd_aporte=50, preco_atual=5.20, custo_medio=4.80),
+        Position(ticker="CPLE6", row_index=4, qtd_antes=300, qtd_aporte=0, preco_atual=10.0, custo_medio=9.0),
     ]
     repo.save_positions(pos)
 
@@ -1177,9 +1177,9 @@ def test_reconcile_ofx_to_positions_liquidation_and_direct_buy(tmp_path):
 
     resumos = {
         "2026-11": DummyResumo({
-            "BBAS3": 504.0,     # Ordem em aberto de 18 cotas liquidada
-            "MXRF11": 311.95,   # Ordem em aberto de 35 cotas liquidada (saldo líquido positivo)
-            "CPLE6": 200.0,     # Compra direta: 200 // 10.0 = 20 novas cotas
+            "BBAS3": 504.0,     # Ordem em aberto de 18 cotas liquidada: (100*25 + 504) / 118 = 25.46
+            "MXRF11": 311.95,   # Ordem em aberto de 35 cotas liquidada: (310*10 + 311.95) / 345 = 9.89
+            "CPLE6": 200.0,     # Compra direta: 200 // 10.0 = 20 novas cotas: (300*9 + 200) / 320 = 9.06
             "SAPR4": 0.0,       # Sem compras no mês
         })
     }
@@ -1190,24 +1190,28 @@ def test_reconcile_ofx_to_positions_liquidation_and_direct_buy(tmp_path):
     # Valida estado consolidado no banco
     reloaded = {p.ticker: p for p in repo.load_positions()}
 
-    # BBAS3: 100 + 18 = 118, qtd_aporte = 0
+    # BBAS3: 100 + 18 = 118, qtd_aporte = 0, custo_medio recalculado
     assert reloaded["BBAS3"].qtd_antes == 118
     assert reloaded["BBAS3"].qtd_aporte == 0
     assert reloaded["BBAS3"].qtd_total == 118
+    assert reloaded["BBAS3"].custo_medio == 25.46
 
-    # MXRF11: 310 + 35 = 345, qtd_aporte = 0
+    # MXRF11: 310 + 35 = 345, qtd_aporte = 0, custo_medio recalculado
     assert reloaded["MXRF11"].qtd_antes == 345
     assert reloaded["MXRF11"].qtd_aporte == 0
     assert reloaded["MXRF11"].qtd_total == 345
+    assert reloaded["MXRF11"].custo_medio == 9.89
 
-    # CPLE6: 300 + 20 = 320, qtd_aporte = 0
+    # CPLE6: 300 + 20 = 320, qtd_aporte = 0, custo_medio recalculado
     assert reloaded["CPLE6"].qtd_antes == 320
     assert reloaded["CPLE6"].qtd_aporte == 0
     assert reloaded["CPLE6"].qtd_total == 320
+    assert reloaded["CPLE6"].custo_medio == 9.06
 
-    # SAPR4: Intocado (continua com ordem em aberto de 50)
+    # SAPR4: Intocado (continua com ordem em aberto de 50 e custo médio inalterado)
     assert reloaded["SAPR4"].qtd_antes == 200
     assert reloaded["SAPR4"].qtd_aporte == 50
+    assert reloaded["SAPR4"].custo_medio == 4.80
 
 
 def test_api_extratos_returns_reconciliation_count(tmp_path, monkeypatch):
