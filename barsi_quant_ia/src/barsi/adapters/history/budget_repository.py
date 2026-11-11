@@ -61,6 +61,28 @@ def resolve_db_path(path: str = "./memory/barsi_memory.db") -> str:
 
 
 
+def validate_target_month(target_month: Optional[str]) -> Optional[str]:
+    """Valida e normaliza o parâmetro target_month.
+
+    Formato esperado: 'YYYY-MM' (ex: '2026-11').
+    Faixa aceita: Ano entre 2020 e 2100, Mês entre 01 e 12.
+    Retorna None se target_month for nulo ou vazio.
+    Levanta ValueError se o formato ou a data forem inválidos.
+    """
+    if target_month is None:
+        return None
+    val = target_month.strip()
+    if not val:
+        return None
+    import re
+    if not re.match(r"^\d{4}-\d{2}$", val):
+        raise ValueError(f"target_month inválido: '{val}'. Formato esperado: YYYY-MM (ex: 2026-11).")
+    ano, mes = int(val[:4]), int(val[5:7])
+    if not (2020 <= ano <= 2100) or not (1 <= mes <= 12):
+        raise ValueError(f"target_month fora de faixa: '{val}'. O ano deve estar entre 2020 e 2100 e mês entre 01 e 12.")
+    return val
+
+
 class BudgetRepository:
     """Leitura e escrita de orçamento no SQLite. Sem I/O de rede, sem dependência do Google Sheets."""
 
@@ -151,11 +173,29 @@ class BudgetRepository:
             conn.commit()
             return cur.rowcount > 0
 
-    def seed_defaults(self) -> int:
-        """Popula as despesas recorrentes padrão de forma 100% idempotente."""
-        for cat, amt, dt, kind in DEFAULT_BUDGET_SEEDS:
+    def seed_defaults(self, seeds: Optional[List[Tuple[str, float, str, str]]] = None) -> int:
+        """Popula as despesas recorrentes padrão de forma 100% idempotente.
+
+        Prioridade de carregamento:
+        1. Parâmetro explícito `seeds`.
+        2. Arquivo JSON em `BARSI_SEEDS_JSON` ou `memory/seeds_local.json`.
+        3. Constante `DEFAULT_BUDGET_SEEDS` como fallback sintético.
+        """
+        if seeds is None:
+            custom_path = os.getenv("BARSI_SEEDS_JSON") or os.path.join(os.path.dirname(self.db_path), "seeds_local.json")
+            if os.path.exists(custom_path):
+                try:
+                    with open(custom_path, "r", encoding="utf-8") as f:
+                        loaded = json.load(f)
+                        if isinstance(loaded, list):
+                            seeds = [(str(item[0]), float(item[1]), str(item[2]), str(item[3])) for item in loaded]
+                except Exception as exc:
+                    logger.warning("failed_loading_custom_seeds", path=custom_path, error=str(exc))
+
+        target_seeds = seeds if seeds is not None else DEFAULT_BUDGET_SEEDS
+        for cat, amt, dt, kind in target_seeds:
             self.upsert_recurring(cat, amt, dt, kind=kind, source="seed")
-        return len(DEFAULT_BUDGET_SEEDS)
+        return len(target_seeds)
 
     # ------------------------------------------------------------------ #
     # Leitura — substitui magic numbers hardcoded
@@ -422,6 +462,7 @@ class BudgetRepository:
         5. Recalcula custo médio ponderado com valor líquido real (deduzindo refunds/CREDIT).
         6. Marca cada FITID processado individualmente como `conciliado = 1`.
         """
+        target_month = validate_target_month(target_month)
         positions_list = self.load_positions()
         if not positions_list:
             return 0

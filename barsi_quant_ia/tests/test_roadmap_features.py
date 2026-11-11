@@ -1,5 +1,6 @@
 """Testes automatizados das funcionalidades do Roadmap (P0, 2FA TOTP, Dividends & YoC)."""
 import os
+import json
 import pytest
 from fastapi.testclient import TestClient
 from datetime import datetime, timedelta
@@ -1484,6 +1485,67 @@ def test_reconcile_skips_old_batch_when_current_month_missing(tmp_path):
     repo.reconcile_ofx_to_positions({"2026-10": R()})
     p = {x.ticker: x for x in repo.load_positions()}["BBAS3"]
     assert p.qtd_antes == 100
+
+
+def test_validate_target_month_valid_and_invalid():
+    """Garante validação rigorosa de formato e limites de target_month."""
+    from barsi.adapters.history.budget_repository import validate_target_month
+
+    assert validate_target_month(None) is None
+    assert validate_target_month("") is None
+    assert validate_target_month("   ") is None
+    assert validate_target_month("2026-11") == "2026-11"
+    assert validate_target_month("  2026-05  ") == "2026-05"
+
+    for invalid in ["abc", "2026-1", "2026-13", "2026-00", "1999-12", "2150-01", "2026/11"]:
+        with pytest.raises(ValueError, match="target_month"):
+            validate_target_month(invalid)
+
+
+def test_reconcile_invalid_target_month_raises_value_error(tmp_path):
+    """Garante que reconcile_ofx_to_positions rejeita target_month inválido com ValueError."""
+    db_file = str(tmp_path / "test_invalid_target_month.db")
+    repo = BudgetRepository(db_file)
+    with pytest.raises(ValueError, match="target_month inválido"):
+        repo.reconcile_ofx_to_positions({}, target_month="abc")
+
+
+def test_api_extratos_invalid_target_month_returns_400(tmp_path, monkeypatch):
+    """Garante que endpoints /api/extratos e /api/upload-extrato retornam HTTP 400 para target_month malformado."""
+    db_file = str(tmp_path / "test_api_target_month_400.db")
+    monkeypatch.setattr(settings, "sqlite_db_path", db_file)
+    token = create_session_token(1, "admin", "admin", settings.secret_key)
+    client.cookies.set("barsi_session", token)
+
+    resp = client.post("/api/extratos?target_month=2026-99")
+    assert resp.status_code == 400
+    assert "target_month fora de faixa" in resp.json()["detail"]
+
+    resp2 = client.post("/api/extratos?target_month=invalido")
+    assert resp2.status_code == 400
+    assert "target_month inválido" in resp2.json()["detail"]
+
+
+def test_seed_defaults_with_custom_file_and_fallback(tmp_path, monkeypatch):
+    """Garante que seed_defaults suporta seeds_local.json e recorre ao fallback sintético."""
+    db_file = str(tmp_path / "test_seeds.db")
+    repo = BudgetRepository(db_file)
+
+    # 1. Fallback sintético limpo (sem arquivo customizado)
+    count_default = repo.seed_defaults()
+    assert count_default > 0
+
+    # 2. Com arquivo customizado local
+    seeds_file = tmp_path / "seeds_local.json"
+    seeds_file.write_text(json.dumps([
+        ["Categoria Teste Custom", 250.0, "2026-11-01", "fixa"]
+    ]), encoding="utf-8")
+
+    monkeypatch.setenv("BARSI_SEEDS_JSON", str(seeds_file))
+    count_custom = repo.seed_defaults()
+    assert count_custom == 1
+    assert repo.get_expense_amount("2026-11", "Categoria Teste Custom") == 250.0
+
 
 
 

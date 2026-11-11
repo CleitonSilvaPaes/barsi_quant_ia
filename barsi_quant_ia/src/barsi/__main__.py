@@ -95,6 +95,13 @@ def extratos(
     ),
 ):
     """Lê e processa os extratos bancários da pasta extratos/ para conciliação Barsi."""
+    if target_month:
+        try:
+            from barsi.adapters.history.budget_repository import validate_target_month
+            target_month = validate_target_month(target_month)
+        except ValueError as exc:
+            typer.echo(f"[!] Erro no mês alvo: {exc}")
+            raise typer.Exit(code=1)
     from barsi.services.ofx_service import OFXParserService
     OFXParserService.reload_keywords_from_db()
     resumos = OFXParserService.processar_diretorio_extratos(dir_path)
@@ -595,6 +602,13 @@ def budget_sync(
     ),
 ):
     """Executa a conciliação completa de extratos e sincroniza a aba Budget_Manager_Fluxo."""
+    if target_month:
+        try:
+            from barsi.adapters.history.budget_repository import validate_target_month
+            target_month = validate_target_month(target_month)
+        except ValueError as exc:
+            typer.echo(f"[!] Erro no mês alvo: {exc}")
+            raise typer.Exit(code=1)
     from barsi.services.ofx_service import OFXParserService
     from barsi.adapters.factory import AdapterFactory
     resumos = OFXParserService.processar_diretorio_extratos(dir_path)

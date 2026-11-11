@@ -12,7 +12,7 @@
   <button class="btn btn-outline" onclick="carregarExtratos()">🔄 Recarregar</button>
   <div style="margin-left: auto; display: flex; align-items: center; gap: 0.4rem;">
     <label style="font-size: 0.8rem; color: var(--text-muted);">Mês Alvo:</label>
-    <input type="text" id="target-month-input" class="tbl-input" placeholder="ex: 2026-11 (opcional)" style="width: 155px; font-size: 0.82rem; padding: 0.3rem 0.5rem;" title="Opcional: Força a conciliação de um mês específico em atraso" />
+    <input type="month" id="target-month-input" class="tbl-input" pattern="\d{4}-\d{2}" placeholder="YYYY-MM" style="width: 155px; font-size: 0.82rem; padding: 0.3rem 0.5rem;" title="Opcional: Força a conciliação de um mês específico em atraso (YYYY-MM)" />
   </div>
 </div>
 
@@ -57,8 +57,32 @@
 </div>
 
 <script>
+  function getValidTargetMonth() {
+    const input = document.getElementById("target-month-input");
+    const val = (input?.value || "").trim();
+    if (!val) return "";
+    if (!/^\d{4}-\d{2}$/.test(val)) {
+      showToast("Mês alvo inválido. Use o formato YYYY-MM (ex: 2026-11).", "error");
+      throw new Error("Formato inválido de mês alvo (esperado: YYYY-MM)");
+    }
+    const parts = val.split("-");
+    const ano = parseInt(parts[0], 10);
+    const mes = parseInt(parts[1], 10);
+    if (ano < 2020 || ano > 2100 || mes < 1 || mes > 12) {
+      showToast("Mês alvo fora da faixa permitida (2020 a 2100).", "error");
+      throw new Error("Mês alvo fora da faixa permitida");
+    }
+    return val;
+  }
+
   async function uploadExtrato(file) {
     if (!file) return;
+    let targetMonth = "";
+    try {
+      targetMonth = getValidTargetMonth();
+    } catch (e) {
+      return;
+    }
     const log = document.getElementById("extrato-log");
     log.style.display = "block";
     log.innerText = `[${new Date().toLocaleTimeString()}] Enviando '${file.name}' para processamento...`;
@@ -67,32 +91,44 @@
     formData.append("file", file);
 
     try {
-      const targetMonth = document.getElementById("target-month-input")?.value?.trim() || "";
       const url = targetMonth ? `/api/upload-extrato?target_month=${encodeURIComponent(targetMonth)}` : "/api/upload-extrato";
       const res = await fetch(url, { method: "POST", body: formData });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || `Erro HTTP ${res.status}`);
+      }
       const out = await res.json();
       log.innerText = `[${new Date().toLocaleTimeString()}] ✅ Arquivo '${out.filename}' recebido e processado com sucesso! Meses conciliados: ${out.meses.join(', ')}.`;
       showToast("Extrato importado com sucesso!");
     } catch (err) {
       log.innerText = `[${new Date().toLocaleTimeString()}] ❌ Erro ao enviar extrato: ` + err;
-      showToast("Falha no upload do extrato", "error");
+      showToast("Falha no upload do extrato: " + err.message, "error");
     }
   }
 
   async function conciliarExtratos() {
+    let targetMonth = "";
+    try {
+      targetMonth = getValidTargetMonth();
+    } catch (e) {
+      return;
+    }
     const log = document.getElementById("extrato-log");
     log.style.display = "block";
     log.innerText = `[${new Date().toLocaleTimeString()}] Conciliando extratos OFX locais com o orçamento...`;
     try {
-      const targetMonth = document.getElementById("target-month-input")?.value?.trim() || "";
       const url = targetMonth ? `/api/extratos?target_month=${encodeURIComponent(targetMonth)}` : "/api/extratos";
       const res = await fetch(url, { method: "POST" });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || `Erro HTTP ${res.status}`);
+      }
       const out = await res.json();
       log.innerText = `[${new Date().toLocaleTimeString()}] ✅ Conciliação concluída! Meses atualizados: ${out.meses.join(', ')}. Ativos conciliados: ${out.reconciled_positions || 0}.`;
       showToast(out.message || "Extratos conciliados com sucesso!");
     } catch (err) {
       log.innerText = `[${new Date().toLocaleTimeString()}] ❌ Erro: ` + err;
-      showToast("Erro na conciliação", "error");
+      showToast("Erro na conciliação: " + err.message, "error");
     }
   }
 

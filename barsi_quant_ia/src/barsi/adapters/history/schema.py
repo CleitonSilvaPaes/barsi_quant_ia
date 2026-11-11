@@ -259,23 +259,17 @@ DEFAULT_KEYWORDS: List[Tuple[str, str, str, int]] = [
     ("RESERVA", "Reserva / RDB", "reserva", 100),
 ]
 
+# ⚠️ Valores sintéticos de demonstração para onboarding inicial e testes automatizados.
+# Não contêm valores ou despesas financeiras reais (em conformidade com .rules § 2 e § 7).
+# Em instalações reais, configure via interface web (/budget), extratos bancários (.ofx)
+# ou crie um arquivo local gitignored 'memory/seeds_local.json' (ou defina BARSI_SEEDS_JSON).
 DEFAULT_BUDGET_SEEDS: List[Tuple[str, float, str, str]] = [
-    ("Saldo Inicial Nov/26", 50.28, "2026-11-01", "reserva"),
-    ("Aluguel", 521.30, "2026-10-01", "fixa"),
-    ("Compromisso Familiar", 400.00, "2026-10-01", "fixa"),
-    ("DAS Simples Nacional", 86.05, "2026-10-01", "tributo"),
-    ("Licenciamento Detran", 149.37, "2026-11-01", "tributo"),
-    ("Cooperativa Ailos", 60.00, "2026-10-01", "fixa"),
-    ("Saldo Ant. Caixa", 180.44, "2026-11-01", "reserva"),
-    ("Gastos Variáveis A", 420.00, "2026-10-01", "variavel"),
-    ("Gastos Variáveis B", 50.00, "2026-10-01", "variavel"),
-    ("Gastos Variáveis C", 110.00, "2026-10-01", "variavel"),
-    ("Gastos Variáveis D", 60.00, "2026-10-01", "variavel"),
-    ("Gastos Variáveis E", 50.00, "2026-10-01", "variavel"),
-    ("Gastos Variáveis A", 450.00, "2026-11-01", "variavel"),
-    ("Gastos Variáveis B", 120.00, "2026-11-01", "variavel"),
-    ("Gastos Variáveis C", 120.00, "2026-11-01", "variavel"),
-    ("Gastos Variáveis D", 65.00, "2026-11-01", "variavel"),
+    ("Reserva de Emergência (Exemplo)", 100.00, "2026-01-01", "reserva"),
+    ("Moradia / Despesas Fixas (Exemplo)", 500.00, "2026-01-01", "fixa"),
+    ("Compromissos Recorrentes (Exemplo)", 300.00, "2026-01-01", "fixa"),
+    ("Tributos & Taxas (Exemplo)", 50.00, "2026-01-01", "tributo"),
+    ("Alimentação & Mercado (Exemplo)", 400.00, "2026-01-01", "variavel"),
+    ("Transporte & Combustível (Exemplo)", 150.00, "2026-01-01", "variavel"),
 ]
 
 # Fatores da curva histórica sintética para seed inicial de visualização (6 meses precedentes).

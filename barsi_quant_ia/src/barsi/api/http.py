@@ -20,7 +20,7 @@ from fastapi.security import HTTPBearer
 from barsi.config import settings
 from barsi.adapters.factory import AdapterFactory
 from barsi.adapters.history.user_repository import UserRepository
-from barsi.adapters.history.budget_repository import BudgetRepository
+from barsi.adapters.history.budget_repository import BudgetRepository, validate_target_month
 from barsi.infra.security import create_session_token, decode_session_token
 from barsi.services.sync_service import SyncService
 from barsi.services.ofx_service import OFXParserService
@@ -1432,6 +1432,10 @@ async def trigger_run_web(request: Request):
 @app.post("/api/extratos")
 async def trigger_extratos_web(request: Request, target_month: Optional[str] = None):
     require_role_action(request, action_type="sync")
+    try:
+        target_month = validate_target_month(target_month)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     OFXParserService.reload_keywords_from_db()
     resumos = OFXParserService.processar_diretorio_extratos("extratos")
 
@@ -1458,6 +1462,10 @@ async def trigger_extratos_web(request: Request, target_month: Optional[str] = N
 @app.post("/api/upload-extrato")
 async def upload_extrato(file: UploadFile = File(...), target_month: Optional[str] = None, request: Request = None):
     require_role_action(request, action_type="sync")
+    try:
+        target_month = validate_target_month(target_month)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     os.makedirs("extratos", exist_ok=True)
     target_file = os.path.join("extratos", file.filename)
     contents = await file.read()

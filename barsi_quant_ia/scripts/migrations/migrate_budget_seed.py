@@ -3,7 +3,7 @@ import os
 import sys
 
 # Garante path para importação do módulo barsi
-root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
+root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
