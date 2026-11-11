@@ -1264,6 +1264,51 @@ def test_api_extratos_returns_reconciliation_count(tmp_path, monkeypatch):
     assert bbas.qtd_aporte == 0
 
 
+def test_reconcile_ofx_to_positions_is_idempotent(tmp_path):
+    """Rodar reconcile 2x com o mesmo OFX não deve duplicar cotas nem recalcular custo."""
+    repo = BudgetRepository(str(tmp_path / "idempotent_test.db"))
+    repo.save_positions([
+        Position(ticker="BBAS3", row_index=1, qtd_antes=100, qtd_aporte=18, preco_atual=28.0, custo_medio=25.0),
+    ])
+
+    class DummyResumo:
+        detalhes_ativos = {"BBAS3": 504.0}
+
+    resumos = {"2026-11": DummyResumo()}
+
+    r1 = repo.reconcile_ofx_to_positions(resumos)
+    assert r1 == 1
+    reloaded = {p.ticker: p for p in repo.load_positions()}
+    assert reloaded["BBAS3"].qtd_antes == 118
+    custo_1 = reloaded["BBAS3"].custo_medio
+
+    # 2ª execução com o MESMO OFX não deve alterar nada
+    r2 = repo.reconcile_ofx_to_positions(resumos)
+    assert r2 == 0, "reconcile não é idempotente: duplicou cotas na 2ª execução"
+    reloaded2 = {p.ticker: p for p in repo.load_positions()}
+    assert reloaded2["BBAS3"].qtd_antes == 118
+    assert reloaded2["BBAS3"].custo_medio == custo_1
+
+
+def test_reconcile_fallback_keeps_history_when_custo_medio_zero(tmp_path):
+    """Quando custo_medio==0 mas existe qtd_anterior, usa preco_atual como proxy e não descarta histórico."""
+    repo = BudgetRepository(str(tmp_path / "fallback_cost_test.db"))
+    repo.save_positions([
+        Position(ticker="BBAS3", row_index=1, qtd_antes=100, qtd_aporte=18, preco_atual=28.0, custo_medio=0.0),
+    ])
+
+    class DummyResumo:
+        detalhes_ativos = {"BBAS3": 400.0}
+
+    repo.reconcile_ofx_to_positions({"2026-11": DummyResumo()})
+    p = {x.ticker: x for x in repo.load_positions()}["BBAS3"]
+
+    # (100 * 28.0 + 400.0) / 118 = 3200 / 118 = 27.12
+    # Sem o fallback com preco_atual, seria 400 / 18 = 22.22 (descartando as 100 cotas antigas)
+    assert p.custo_medio == 27.12, f"Fallback descartou histórico: {p.custo_medio}"
+
+
+
 
 
 

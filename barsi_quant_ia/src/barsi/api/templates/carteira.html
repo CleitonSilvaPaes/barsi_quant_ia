@@ -47,6 +47,14 @@
   </div>
 </div>
 
+<div id="aviso-custo-medio-zero" style="display: none; margin-bottom: 1rem; padding: 0.75rem 1rem; border-radius: 8px; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); color: #f59e0b; font-size: 0.85rem; align-items: center; gap: 0.6rem;">
+  <span style="font-size: 1.1rem;">⚠️</span>
+  <div>
+    <strong>Atenção ao Custo Médio:</strong> Existem ativos na carteira com Custo Médio não preenchido (R$ 0,00). 
+    Recomendamos informar o custo médio das suas cotas antigas na tabela abaixo e salvar antes de conciliar novos aportes para assegurar o cálculo correto do Yield on Cost (YoC).
+  </div>
+</div>
+
 <div class="card" style="padding:0; overflow:hidden;">
   <div style="overflow-x: auto;">
     <table id="tbl-carteira">
@@ -127,6 +135,11 @@
     try {
       const res = await fetch("/api/carteira");
       carteiraCompleta = await res.json();
+      const hasZeroCusto = carteiraCompleta.some(p => (!p.custo_medio || p.custo_medio <= 0) && p.qtd_total > 0);
+      const avisoEl = document.getElementById("aviso-custo-medio-zero");
+      if (avisoEl) {
+        avisoEl.style.display = hasZeroCusto ? "flex" : "none";
+      }
       aplicarFiltros();
     } catch (err) {
       document.getElementById("tbl-body").innerHTML = `<tr><td colspan="13" style="color:var(--red); text-align:center;">Erro ao carregar carteira: ${err}</td></tr>`;

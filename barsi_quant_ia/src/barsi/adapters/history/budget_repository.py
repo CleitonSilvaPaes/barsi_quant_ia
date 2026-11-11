@@ -796,34 +796,83 @@ class BudgetRepository:
             for raw_ticker, valor_compra in detalhes.items():
                 tk = str(raw_ticker).upper().strip()
                 val = float(valor_compra or 0.0)
-                if tk in positions and val > 0:
-                    p = positions[tk]
-                    qtd_adicionada = 0
-                    if p.qtd_aporte > 0:
-                        qtd_adicionada = p.qtd_aporte
-                        p.qtd_antes += p.qtd_aporte
-                        p.qtd_aporte = 0
-                    else:
-                        if p.preco_atual > 0:
-                            qtd_est = int(val // p.preco_atual)
-                            if qtd_est > 0:
-                                p.qtd_antes += qtd_est
-                                qtd_adicionada = qtd_est
+                if tk not in positions or val <= 0:
+                    continue
 
-                    # Atualização de Custo Médio Ponderado:
-                    # novo_custo = (qtd_anterior * custo_anterior + val) / qtd_total_pos_compra
-                    if qtd_adicionada > 0 and val > 0 and p.qtd_antes > 0:
-                        qtd_anterior = p.qtd_antes - qtd_adicionada
-                        if qtd_anterior > 0 and p.custo_medio and p.custo_medio > 0:
-                            novo_custo = (qtd_anterior * p.custo_medio + val) / p.qtd_antes
-                            p.custo_medio = round(novo_custo, 2)
+                # --- Verificação de Idempotência via transacoes.conciliado ---
+                with self._conn() as c:
+                    ja_conciliado = c.execute(
+                        """
+                        SELECT 1 FROM transacoes
+                         WHERE ticker = ? AND mes_ano = ?
+                           AND categoria = 'Aporte Ações/FIIs'
+                           AND conciliado = 1
+                         LIMIT 1
+                        """,
+                        (tk, mes),
+                    ).fetchone()
+                    if ja_conciliado:
+                        continue
+
+                    # Marca as transações do OFX deste ticker/mês como conciliadas
+                    cur = c.execute(
+                        """
+                        UPDATE transacoes
+                           SET conciliado = 1
+                         WHERE ticker = ? AND mes_ano = ?
+                           AND categoria = 'Aporte Ações/FIIs'
+                           AND conciliado = 0
+                        """,
+                        (tk, mes),
+                    )
+                    # Se não havia transação no banco (ex: testes sem persist_transacoes prévio),
+                    # registra marcador para garantir idempotência em reexecuções
+                    if cur.rowcount == 0:
+                        c.execute(
+                            """
+                            INSERT OR IGNORE INTO transacoes
+                                (fitid, data, mes_ano, tipo, valor, descricao, categoria, ticker, origem, conciliado)
+                            VALUES (?, ?, ?, 'DEBIT', ?, ?, 'Aporte Ações/FIIs', ?, 'CONCILIACAO', 1)
+                            """,
+                            (f"RECON_{tk}_{mes}", f"{mes}-01", mes, val, f"Aporte conciliado {tk}", tk),
+                        )
+
+                p = positions[tk]
+                qtd_adicionada = 0
+                if p.qtd_aporte > 0:
+                    qtd_adicionada = p.qtd_aporte
+                    p.qtd_antes += p.qtd_aporte
+                    p.qtd_aporte = 0
+                else:
+                    if p.preco_atual > 0:
+                        qtd_est = int(val // p.preco_atual)
+                        if qtd_est > 0:
+                            p.qtd_antes += qtd_est
+                            qtd_adicionada = qtd_est
+
+                # Atualização de Custo Médio Ponderado:
+                if qtd_adicionada > 0 and val > 0 and p.qtd_antes > 0:
+                    qtd_anterior = p.qtd_antes - qtd_adicionada
+                    if qtd_anterior > 0:
+                        if p.custo_medio and p.custo_medio > 0:
+                            custo_antigo = p.custo_medio
                         else:
-                            p.custo_medio = round(val / qtd_adicionada, 2)
+                            custo_antigo = p.preco_atual
+                            logger.warning(
+                                "reconcile_custo_medio_zero_fallback",
+                                ticker=tk,
+                                qtd_anterior=qtd_anterior,
+                                preco_proxy=p.preco_atual,
+                            )
+                        novo_custo = (qtd_anterior * custo_antigo + val) / p.qtd_antes
+                        p.custo_medio = round(novo_custo, 2)
+                    else:
+                        p.custo_medio = round(val / qtd_adicionada, 2)
 
-                    p.qtd_total = p.qtd_antes + p.qtd_aporte
-                    p.valor_total = round(p.qtd_total * p.preco_atual, 2)
-                    p.total_aporte = round(p.qtd_aporte * p.preco_atual, 2)
-                    updated_tickers.add(tk)
+                p.qtd_total = p.qtd_antes + p.qtd_aporte
+                p.valor_total = round(p.qtd_total * p.preco_atual, 2)
+                p.total_aporte = round(p.qtd_aporte * p.preco_atual, 2)
+                updated_tickers.add(tk)
 
         if updated_tickers:
             self.save_positions(list(positions.values()))
