@@ -2,6 +2,7 @@
 import os
 import pytest
 from fastapi.testclient import TestClient
+from datetime import datetime, timedelta
 
 from barsi.domain.models import Position, DividendReceived
 from barsi.infra.security import (
@@ -664,6 +665,167 @@ def test_health_sync_detects_multiple_field_divergences(tmp_path, monkeypatch):
     diffs = data["divergences"][0]["divergences"]
     assert any("preco_teto" in d for d in diffs)
     assert any("margem_seguranca" in d for d in diffs)
+
+def test_scheduler_default_config(tmp_path):
+    repo = BudgetRepository(str(tmp_path / "t.db"))
+    cfg = repo.get_scheduler_config()
+    assert cfg["enabled"] == 1
+    assert cfg["days_of_week"] == "1,2,3,4,5"
+    assert "9" in cfg["hours"].split(",")
+    assert cfg["minute"] == 0
+
+def test_scheduler_is_run_due_respects_disabled(tmp_path):
+    repo = BudgetRepository(str(tmp_path / "t.db"))
+    repo.update_scheduler_config(enabled=False)
+    should_run, reason = repo.is_run_due()
+    assert should_run is False
+    assert reason == "disabled"
+
+def test_scheduler_is_run_due_respects_day_and_hour(tmp_path):
+    repo = BudgetRepository(str(tmp_path / "t.db"))
+    # Segunda-feira 10:00, minuto 0 (2026-11-09 é segunda)
+    segunda_10h = datetime(2026, 11, 9, 10, 0)
+    should_run, reason = repo.is_run_due(now=segunda_10h)
+    assert should_run is True, reason
+
+    # Sábado 10:00 -> fora dos dias de semana
+    sabado_10h = datetime(2026, 11, 7, 10, 0)
+    should_run, reason = repo.is_run_due(now=sabado_10h)
+    assert should_run is False
+    assert reason == "outside_days"
+
+    # Segunda-feira 3:00 -> fora do pregão
+    segunda_3h = datetime(2026, 11, 9, 3, 0)
+    should_run, reason = repo.is_run_due(now=segunda_3h)
+    assert should_run is False
+    assert reason == "outside_hours"
+
+def test_scheduler_dedup_within_20min(tmp_path):
+    import sqlite3
+    repo = BudgetRepository(str(tmp_path / "t.db"))
+    segunda_10h = datetime(2026, 11, 9, 10, 0)
+    run_time = (segunda_10h - timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
+
+    with sqlite3.connect(repo.db_path) as c:
+        c.execute(
+            "INSERT INTO runs (run_id, timestamp, duration_ms, tickers_analyzed, memory_peak_mb, errors) "
+            "VALUES (?, ?, 100, 10, 110, '')",
+            ("recent", run_time),
+        )
+    should_run, reason = repo.is_run_due(now=segunda_10h)
+    assert should_run is False
+    assert reason == "already_ran_recently"
+
+def test_scheduler_endpoint_requires_admin(tmp_path, monkeypatch):
+    test_db = str(tmp_path / "t.db")
+    monkeypatch.setattr(settings, "sqlite_db_path", test_db)
+    
+    # Usuário comum (leitor)
+    token_leitor = create_session_token(2, "leitor_user", "leitor", settings.secret_key)
+    client.cookies.set("barsi_session", token_leitor)
+    assert client.post("/api/scheduler", json={"enabled": False}).status_code == 403
+
+    # Administrador
+    token_admin = create_session_token(1, "admin_user", "admin", settings.secret_key)
+    client.cookies.set("barsi_session", token_admin)
+    res = client.post("/api/scheduler", json={"enabled": False})
+    assert res.status_code == 200
+    assert res.json()["config"]["enabled"] is False
+
+def test_scheduler_next_run_computed(tmp_path):
+    repo = BudgetRepository(str(tmp_path / "t.db"))
+    repo.update_scheduler_config(
+        days_of_week="1,2,3,4,5",
+        hours="9,10",
+        minute=0,
+    )
+    # Sexta-feira 11:00 -> próximo slot deve ser na segunda-feira seguinte às 09:00
+    sexta_11h = datetime(2026, 11, 13, 11, 0)
+    next_run = repo.next_scheduled_run(now=sexta_11h)
+    assert next_run is not None
+    assert next_run.startswith("2026-11-16T09:00")
+
+def test_notification_prefs_default_enabled(tmp_path):
+    repo = BudgetRepository(str(tmp_path / "t.db"))
+    assert repo.is_notification_enabled("margem_20") is True
+    assert repo.is_notification_enabled("radar_summary") is True
+    assert repo.is_notification_enabled("desconhecido") is True  # fail-open
+
+def test_notification_prefs_disable_blocks_should_notify(tmp_path):
+    repo = BudgetRepository(str(tmp_path / "t.db"))
+    repo.set_notification_enabled("margem_20", False, updated_by="test")
+    assert repo.should_notify("BBAS3", "margem_20") is False
+
+    # Re-enable e confirma que dedup volta a funcionar
+    repo.set_notification_enabled("margem_20", True)
+    assert repo.should_notify("BBAS3", "margem_20") is True
+    assert repo.should_notify("BBAS3", "margem_20") is False  # já notificou hoje
+
+def test_notifications_telegram_command(tmp_path, monkeypatch):
+    test_db = str(tmp_path / "test_notif_tg.db")
+    monkeypatch.setattr(settings, "sqlite_db_path", test_db)
+    monkeypatch.setattr(settings, "telegram_chat_id", "123456789")
+    monkeypatch.setattr(settings, "telegram_bot_token", "fake_bot_token")
+    monkeypatch.setattr(settings, "telegram_webhook_secret", "")
+
+    replies = []
+    async def mock_send(token, chat_id, text, parse_mode="Markdown"):
+        replies.append(text)
+        return True
+
+    from barsi.api import http
+    monkeypatch.setattr(http, "send_telegram_message", mock_send)
+
+    # 1. Menu de preferências
+    payload = {
+        "message": {
+            "chat": {"id": 123456789},
+            "text": "/notifications"
+        }
+    }
+    resp = client.post("/api/telegram/webhook", json=payload)
+    assert resp.status_code == 200
+    assert any("Preferências de Notificação" in r for r in replies)
+
+    # 2. Desativa margem_20
+    payload_off = {
+        "message": {
+            "chat": {"id": 123456789},
+            "text": "/notifications margem_20 off"
+        }
+    }
+    resp_off = client.post("/api/telegram/webhook", json=payload_off)
+    assert resp_off.status_code == 200
+    repo = BudgetRepository(test_db)
+    assert repo.is_notification_enabled("margem_20") is False
+
+    # 3. Testa comando /schedule
+    payload_sched = {
+        "message": {
+            "chat": {"id": 123456789},
+            "text": "/schedule"
+        }
+    }
+    resp_sched = client.post("/api/telegram/webhook", json=payload_sched)
+    assert resp_sched.status_code == 200
+    assert any("Scheduler Barsi" in r for r in replies)
+
+def test_cli_run_if_due_skips_when_not_due(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+    from barsi.__main__ import app
+
+    test_db = str(tmp_path / "test_if_due.db")
+    monkeypatch.setattr(settings, "sqlite_db_path", test_db)
+
+    repo = BudgetRepository(test_db)
+    # Desativa scheduler para garantir que não deve rodar
+    repo.update_scheduler_config(enabled=False)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["run", "--if-due"])
+    assert result.exit_code == 0
+    assert "Run não devida: disabled" in result.output
+
 
 
 

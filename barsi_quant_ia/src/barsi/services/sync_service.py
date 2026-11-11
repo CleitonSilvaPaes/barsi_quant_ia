@@ -213,6 +213,8 @@ class SyncService:
         """Envia resumo consolidado com o top 5 de oportunidades para canais de notificação."""
         if not self.notifier:
             return False
+        if self.budget_repo and not self.budget_repo.is_notification_enabled("radar_summary"):
+            return False
         if positions is None:
             positions = self.budget_repo.load_positions() if self.budget_repo else []
         acumular = [p for p in positions if getattr(p.status_barsi, "value", str(p.status_barsi)) == "ACUMULAR"]

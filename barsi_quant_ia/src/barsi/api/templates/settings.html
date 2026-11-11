@@ -128,6 +128,38 @@
   </div>
 </div>
 
+<div class="card">
+  <h3 style="color: var(--accent); font-size: 1.05rem; margin-bottom: 0.5rem;">⏰ Scheduler de Execução Automática (Abordagem C - Híbrida)</h3>
+  <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.25rem;">
+    Controla quando o <code>barsi-sync.timer</code> executa o pipeline. O systemd dispara o heartbeat a cada 5 min na TV Box, mas o app só executa se o slot atual estiver habilitado abaixo.
+  </p>
+
+  <div style="display:grid; grid-template-columns: auto 1fr; gap:0.75rem; align-items:center;">
+    <label style="font-weight:600; font-size:0.85rem;">Ativo:</label>
+    <input type="checkbox" id="sched-enabled" onchange="salvarScheduler()" />
+
+    <label style="font-weight:600; font-size:0.85rem;">Dias (ISO 1=Seg..7=Dom):</label>
+    <div id="sched-days" style="display:flex; gap:0.5rem; flex-wrap:wrap;"></div>
+
+    <label style="font-weight:600; font-size:0.85rem;">Horas (0-23):</label>
+    <div id="sched-hours" style="display:flex; gap:0.4rem; flex-wrap:wrap;"></div>
+
+    <label style="font-weight:600; font-size:0.85rem;">Minuto (0-59):</label>
+    <input type="number" id="sched-minute" min="0" max="59" class="tbl-input" style="width:80px;" onchange="salvarScheduler()" />
+
+    <label style="font-weight:600; font-size:0.85rem;">Próximo slot:</label>
+    <div id="sched-next" style="font-family:monospace; color:var(--green); font-weight:700;">—</div>
+  </div>
+</div>
+
+<div class="card">
+  <h3 style="color: var(--accent); font-size: 1.05rem; margin-bottom: 0.5rem;">🔔 Notificações Proativas</h3>
+  <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.25rem;">
+    Ative ou desative tipos de alerta sem mexer no <code>.env</code>. As mudanças passam a valer instantaneamente em tempo real.
+  </p>
+  <div id="notif-prefs-list" style="display:flex; flex-direction:column; gap:0.5rem; max-width:480px;"></div>
+</div>
+
 <script>
   async function testarConexao(provedor) {
     const el = document.getElementById(`res-${provedor}`);
@@ -309,6 +341,118 @@
     }
   }
 
-  window.addEventListener("DOMContentLoaded", verificarParidade);
+  // =========================================================================
+  // Scheduler Híbrido & Notificações
+  // =========================================================================
+
+  const DAYS = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
+
+  async function carregarScheduler() {
+    try {
+      const res = await fetch("/api/scheduler");
+      if (!res.ok) return;
+      const cfg = await res.json();
+
+      const chk = document.getElementById("sched-enabled");
+      if (chk) chk.checked = cfg.enabled;
+      const minInput = document.getElementById("sched-minute");
+      if (minInput) minInput.value = cfg.minute;
+      const nextDiv = document.getElementById("sched-next");
+      if (nextDiv) nextDiv.innerText = cfg.next_run ? cfg.next_run.replace("T", " ") : "—";
+
+      const daysSet = new Set((cfg.days_of_week || "").split(",").map(Number));
+      const daysContainer = document.getElementById("sched-days");
+      if (daysContainer) {
+        daysContainer.innerHTML = DAYS.map((name, i) =>
+          `<label style="font-size:0.8rem; background:#1e293b; padding:0.25rem 0.5rem; border-radius:4px; display:inline-flex; align-items:center; gap:0.25rem;">
+            <input type="checkbox" data-day="${i+1}" ${daysSet.has(i+1) ? "checked" : ""} onchange="salvarScheduler()" /> ${name}
+          </label>`
+        ).join("");
+      }
+
+      const hoursSet = new Set((cfg.hours || "").split(",").map(Number));
+      const hoursContainer = document.getElementById("sched-hours");
+      if (hoursContainer) {
+        hoursContainer.innerHTML = Array.from({length:24}, (_, h) =>
+          `<label style="font-size:0.75rem; background:#1e293b; padding:0.2rem 0.4rem; border-radius:4px; display:inline-flex; align-items:center; gap:0.2rem;">
+            <input type="checkbox" data-hour="${h}" ${hoursSet.has(h) ? "checked" : ""} onchange="salvarScheduler()" />${h}h
+          </label>`
+        ).join("");
+      }
+    } catch (e) {
+      console.warn("Falha ao carregar scheduler:", e);
+    }
+  }
+
+  async function salvarScheduler() {
+    const days = [...document.querySelectorAll("#sched-days input:checked")].map(el => el.dataset.day);
+    const hours = [...document.querySelectorAll("#sched-hours input:checked")].map(el => el.dataset.hour);
+    const body = {
+      enabled: document.getElementById("sched-enabled").checked,
+      days_of_week: days.join(","),
+      hours: hours.join(","),
+      minute: parseInt(document.getElementById("sched-minute").value || 0, 10),
+    };
+    try {
+      const res = await fetch("/api/scheduler", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        document.getElementById("sched-next").innerText = data.next_run ? data.next_run.replace("T", " ") : "—";
+        showToast("Scheduler salvo com sucesso!");
+      } else {
+        const err = await res.json();
+        showToast(err.detail || "Erro ao salvar scheduler", "error");
+      }
+    } catch (e) {
+      showToast("Erro na requisição", "error");
+    }
+  }
+
+  async function carregarNotifPrefs() {
+    try {
+      const res = await fetch("/api/notifications/preferences");
+      if (!res.ok) return;
+      const data = await res.json();
+      const box = document.getElementById("notif-prefs-list");
+      if (!box) return;
+      box.innerHTML = "";
+      (data.items || []).forEach(p => {
+        box.innerHTML += `
+          <label style="display:flex; justify-content:space-between; align-items:center; background:#1e293b; padding:0.65rem 0.85rem; border-radius:6px;">
+            <span style="font-size:0.85rem;"><code>${p.alert_type}</code></span>
+            <input type="checkbox" ${p.enabled ? "checked" : ""} onchange="toggleNotif('${p.alert_type}', this.checked)" />
+          </label>`;
+      });
+    } catch (e) {
+      console.warn("Falha ao carregar preferências de notificação:", e);
+    }
+  }
+
+  async function toggleNotif(alertType, enabled) {
+    try {
+      const res = await fetch("/api/notifications/preferences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ alert_type: alertType, enabled }),
+      });
+      if (res.ok) {
+        showToast(`${alertType} → ${enabled ? "🟢 ON" : "🔴 OFF"}`);
+      } else {
+        showToast("Erro ao salvar preferência", "error");
+      }
+    } catch (e) {
+      showToast("Erro de rede", "error");
+    }
+  }
+
+  window.addEventListener("DOMContentLoaded", () => {
+    verificarParidade();
+    carregarScheduler();
+    carregarNotifPrefs();
+  });
 </script>
 

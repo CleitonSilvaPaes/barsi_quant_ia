@@ -10,24 +10,43 @@ from barsi.infra.logging import setup_logging, logger
 
 app = typer.Typer(name="barsi", help="Sistema Previdenciário Barsi - CLI Quant & Edge")
 
+def _resolve_tvbox_home(user: str) -> str:
+    """Resolve o diretório home remoto na TV Box, priorizando BARSI_TVBOX_HOME."""
+    home = (settings.tvbox_home or "").strip()
+    if home and "/" in home:
+        return home
+    return f"/home/{user}/barsi_quant_ia"
+
 @app.command()
 def run(
     dry_run: bool = typer.Option(False, "--dry-run", help="Executa o cálculo sem persistir alterações"),
     ticker: Optional[str] = typer.Option(None, "--ticker", help="Executa o ciclo para um único ativo (ex: BBAS3)"),
-    radar: bool = typer.Option(True, "--radar/--no-radar", help="Envia resumo consolidado de oportunidades ao finalizar (Telegram/WhatsApp)")
+    radar: bool = typer.Option(False, "--radar/--no-radar", help="Envia resumo consolidado de oportunidades ao finalizar (Telegram/WhatsApp)"),
+    if_due: bool = typer.Option(False, "--if-due", help="Só executa se o scheduler determinar que agora é hora. Usado pelo systemd timer.")
 ):
     """Executa o pipeline completo de sincronização e enriquecimento Barsi."""
     setup_logging(settings.log_level)
     
     async def _main():
+        from barsi.adapters.history.budget_repository import BudgetRepository
+        repo = BudgetRepository(settings.sqlite_db_path)
+        notify_radar = radar
+
+        # Se --if-due, valida scheduler ANTES de criar Adapters (economia de recursos)
+        if if_due:
+            should_run, reason = repo.is_run_due()
+            if not should_run:
+                logger.info("scheduled_run_skipped", reason=reason)
+                typer.echo(f"[i] Run não devida: {reason}")
+                return
+            notify_radar = repo.is_notification_enabled("radar_summary")
+
         market = AdapterFactory.create_market_adapter(settings)
         news = AdapterFactory.create_news_adapter(settings)
         ai = AdapterFactory.create_ai_adapter(settings)
         sheets = AdapterFactory.create_sheets_adapter(settings)
         history = AdapterFactory.create_history_adapter(settings)
         notifier = AdapterFactory.create_notification_adapter(settings)
-        from barsi.adapters.history.budget_repository import BudgetRepository
-        budget_repo = BudgetRepository(settings.sqlite_db_path)
 
         service = SyncService(
             market=market,
@@ -36,10 +55,10 @@ def run(
             sheets=sheets,
             history=history,
             notifier=notifier,
-            budget_repo=budget_repo,
+            budget_repo=repo,
             max_concurrency=settings.max_concurrency
         )
-        summary = await service.execute_run(dry_run=dry_run, target_ticker=ticker, notify_radar=radar)
+        summary = await service.execute_run(dry_run=dry_run, target_ticker=ticker, notify_radar=notify_radar)
         typer.echo(f"\n[OK] Run concluída! ID: {summary.run_id}")
         typer.echo(f"     Ativos analisados: {summary.tickers_analyzed}")
         typer.echo(f"     Duração: {summary.duration_ms} ms | RAM RSS: {summary.memory_peak_mb} MB")
@@ -174,7 +193,8 @@ def sync_tvbox(
         typer.echo(f"[!] Falha na conexão SSH com a TV Box: {exc}")
         return
 
-    target_homes = [settings.tvbox_home] if (settings.tvbox_home and "/" in settings.tvbox_home) else []
+    pref_home = _resolve_tvbox_home(target_user)
+    target_homes = [pref_home]
     alt_home = f"/home/{target_user}/barsi_quant_ia"
     if alt_home not in target_homes:
         target_homes.append(alt_home)
@@ -317,7 +337,7 @@ def pull_db(
         typer.echo(f"[!] Falha na conexão SSH com a TV Box: {exc}")
         return
 
-    remote_home = settings.tvbox_home if (settings.tvbox_home and "/" in settings.tvbox_home) else f"/home/{target_user}/barsi_quant_ia"
+    remote_home = _resolve_tvbox_home(target_user)
     remote_db = f"{remote_home}/memory/barsi_memory.db"
     local_db = "memory/barsi_memory.db" if os.path.exists("memory") else "barsi_quant_ia/memory/barsi_memory.db"
     os.makedirs(os.path.dirname(local_db), exist_ok=True)
@@ -334,6 +354,79 @@ def pull_db(
 
     ssh.close()
     typer.echo(f"[✔] Banco SQLite baixado com sucesso da TV Box para {local_db}!\n")
+
+@app.command()
+def scheduler_install(
+    ip: Optional[str] = typer.Option(None, "--ip", help="IP da TV Box na rede (lê de BARSI_TVBOX_IP se nulo)"),
+    user: Optional[str] = typer.Option(None, "--user", help="Usuário SSH (lê de BARSI_TVBOX_USER se nulo)"),
+    password: Optional[str] = typer.Option(None, "--pass", help="Senha SSH (lê de BARSI_TVBOX_PASS se nulo)")
+):
+    """Reinstala o barsi-sync.timer como heartbeat de 5 min com execução condicional --if-due."""
+    import getpass, paramiko
+
+    target_ip = ip or settings.tvbox_ip
+    target_user = user or settings.tvbox_user
+    if not target_ip or not target_user:
+        typer.echo("[!] Configure BARSI_TVBOX_IP e BARSI_TVBOX_USER no .env")
+        raise typer.Exit(code=1)
+    target_pass = password or settings.tvbox_pass or getpass.getpass(f"Senha SSH para {target_user}@{target_ip}: ")
+
+    remote_home = _resolve_tvbox_home(target_user)
+    typer.echo(f"[+] Conectando em {target_user}@{target_ip} para instalar scheduler heartbeat...")
+
+    service_content = f"""[Unit]
+Description=Execucao Barsi Sync Worker (Scheduler Hibrido)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User={target_user}
+WorkingDirectory={remote_home}
+ExecStart={remote_home}/.venv/bin/python -m barsi run --if-due
+StandardOutput=journal
+StandardError=journal
+MemoryMax=250M
+"""
+
+    timer_content = """[Unit]
+Description=Barsi Scheduler Heartbeat (logica condicional no app)
+
+[Timer]
+OnCalendar=*:0/5
+Persistent=true
+RandomizedDelaySec=15
+
+[Install]
+WantedBy=timers.target
+"""
+
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        ssh.connect(target_ip, username=target_user, password=target_pass, timeout=8)
+        
+        def run_sudo(cmd):
+            full_cmd = f"echo '{target_pass}' | sudo -S {cmd}"
+            stdin, stdout, stderr = ssh.exec_command(full_cmd)
+            stdout.channel.recv_exit_status()
+            return stdout.read().decode().strip(), stderr.read().decode().strip()
+
+        s_cmd = f"bash -c \"cat << 'EOF' > /etc/systemd/system/barsi-sync.service\n{service_content}\nEOF\""
+        t_cmd = f"bash -c \"cat << 'EOF' > /etc/systemd/system/barsi-sync.timer\n{timer_content}\nEOF\""
+
+        run_sudo(s_cmd)
+        run_sudo(t_cmd)
+        run_sudo("systemctl daemon-reload")
+        run_sudo("systemctl enable --now barsi-sync.timer")
+        out, _ = run_sudo("systemctl list-timers barsi-sync.timer")
+        typer.echo("[✔] Scheduler instalado com sucesso!\n")
+        typer.echo(out)
+    except Exception as exc:
+        typer.echo(f"[!] Falha na instalação do scheduler: {exc}")
+    finally:
+        ssh.close()
+
 
 @app.command()
 def tvbox(

@@ -190,6 +190,35 @@ INIT_BUDGET_SCHEMA_SQL = """
     );
     CREATE INDEX IF NOT EXISTS idx_dividends_ticker ON dividends_received(ticker, data_pagamento);
     CREATE INDEX IF NOT EXISTS idx_dividends_mes ON dividends_received(mes_ano);
+
+    -- 14. Histórico de Execuções (Runs do Pipeline)
+    CREATE TABLE IF NOT EXISTS runs (
+        run_id           TEXT PRIMARY KEY,
+        timestamp        TEXT DEFAULT (datetime('now')),
+        duration_ms      INTEGER,
+        tickers_analyzed INTEGER,
+        memory_peak_mb   REAL,
+        errors           TEXT
+    );
+
+    -- 15. Configuração do Scheduler (Singleton id = 1)
+    CREATE TABLE IF NOT EXISTS scheduler_config (
+        id            INTEGER PRIMARY KEY CHECK (id = 1),  -- singleton
+        enabled       INTEGER NOT NULL DEFAULT 1,
+        days_of_week  TEXT NOT NULL DEFAULT '1,2,3,4,5',   -- ISO: 1=Seg..7=Dom
+        hours         TEXT NOT NULL DEFAULT '9,10,11,12,13,14,15,16,17,18',
+        minute        INTEGER NOT NULL DEFAULT 0 CHECK (minute BETWEEN 0 AND 59),
+        updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_by    TEXT
+    );
+
+    -- 16. Preferências de Notificação Proativa
+    CREATE TABLE IF NOT EXISTS notification_preferences (
+        alert_type    TEXT PRIMARY KEY,
+        enabled       INTEGER NOT NULL DEFAULT 1,
+        updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_by    TEXT
+    );
 """
 
 DEFAULT_KEYWORDS: List[Tuple[str, str, str, int]] = [
@@ -280,6 +309,14 @@ def resolve_db_path(path: str = "./memory/barsi_memory.db") -> str:
 # Simulam a evolução progressiva do portfólio no primeiro acesso antes da consolidação de snapshots reais.
 DEFAULT_SYNTHETIC_CURVE_FACTORS = (0.45, 0.55, 0.67, 0.78, 0.90, 1.0)
 
+DEFAULT_SCHEDULER_DAYS  = "1,2,3,4,5"
+DEFAULT_SCHEDULER_HOURS = "9,10,11,12,13,14,15,16,17,18"
+
+DEFAULT_NOTIFICATION_PREFS: List[Tuple[str, int]] = [
+    ("margem_20",      1),   # alertas individuais >= 20% de margem
+    ("radar_summary",  1),   # resumo horário consolidado
+]
+
 class BudgetRepository:
     """Leitura e escrita de orçamento no SQLite. Sem I/O de rede, sem dependência do Google Sheets."""
 
@@ -314,6 +351,7 @@ class BudgetRepository:
             except Exception:
                 pass
         self.seed_default_keywords()
+        self.seed_default_notification_prefs()
 
     def seed_default_keywords(self) -> int:
         """Popula a tabela category_keywords de forma estritamente idempotente."""
@@ -626,8 +664,67 @@ class BudgetRepository:
                 ))
             return positions
 
+    # =========================================================================
+    # Preferências de Notificação Proativa
+    # =========================================================================
+
+    def seed_default_notification_prefs(self) -> int:
+        """Inicializa as preferências padrão de notificação de forma idempotente."""
+        inserted = 0
+        with self._conn() as c:
+            for alert_type, enabled in DEFAULT_NOTIFICATION_PREFS:
+                cur = c.execute(
+                    "INSERT OR IGNORE INTO notification_preferences (alert_type, enabled) VALUES (?, ?)",
+                    (alert_type, enabled),
+                )
+                inserted += cur.rowcount
+        return inserted
+
+    def is_notification_enabled(self, alert_type: str) -> bool:
+        """Default = True se a preferência não existir (fail-open, para não quebrar quem nunca configurou)."""
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT enabled FROM notification_preferences WHERE alert_type = ?",
+                (alert_type,),
+            ).fetchone()
+        return True if row is None else bool(row["enabled"])
+
+    def set_notification_enabled(self, alert_type: str, enabled: bool, updated_by: Optional[str] = None) -> None:
+        """Ativa ou desativa um tipo de notificação específico."""
+        with self._conn() as c:
+            c.execute("""
+                INSERT INTO notification_preferences (alert_type, enabled, updated_at, updated_by)
+                VALUES (?, ?, datetime('now'), ?)
+                ON CONFLICT(alert_type) DO UPDATE SET
+                    enabled    = excluded.enabled,
+                    updated_at = datetime('now'),
+                    updated_by = excluded.updated_by
+            """, (alert_type, 1 if enabled else 0, updated_by))
+
+    def set_all_notifications_enabled(self, enabled: bool, updated_by: Optional[str] = None) -> int:
+        """Ativa ou desativa globalmente todos os tipos de notificação."""
+        with self._conn() as c:
+            cur = c.execute(
+                "UPDATE notification_preferences SET enabled = ?, updated_at = datetime('now'), updated_by = ?",
+                (1 if enabled else 0, updated_by),
+            )
+            return cur.rowcount
+
+    def list_notification_preferences(self) -> List[Dict[str, Any]]:
+        """Lista todas as preferências de notificação cadastradas."""
+        self.seed_default_notification_prefs()
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT alert_type, enabled, updated_at, updated_by FROM notification_preferences ORDER BY alert_type"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def should_notify(self, ticker: str, alert_type: str = "margem_20") -> bool:
-        """Deduplica notificações: retorna True se ainda não notificou este ticker/tipo hoje, e registra o envio."""
+        """Deduplica notificações: respeita preferências proativas e limita a 1 envio por ticker/tipo por dia."""
+        # 1. Preferência primeiro (se desabilitado, NÃO registra no log — não polui o histórico)
+        if not self.is_notification_enabled(alert_type):
+            return False
+        # 2. Dedup diário
         with self._conn() as c:
             row = c.execute(
                 "SELECT 1 FROM notification_log WHERE ticker=? AND alert_type=? AND sent_date=date('now')",
@@ -640,6 +737,129 @@ class BudgetRepository:
                 (ticker, alert_type),
             )
             return True
+
+    # =========================================================================
+    # Scheduler de Execução Automática (Abordagem C - Híbrida)
+    # =========================================================================
+
+    def get_scheduler_config(self) -> Dict[str, Any]:
+        """Obtém configuração singleton do scheduler (id=1). Cria com valores padrão se não existir."""
+        with self._conn() as c:
+            row = c.execute("SELECT * FROM scheduler_config WHERE id = 1").fetchone()
+            if row is None:
+                c.execute(
+                    "INSERT INTO scheduler_config (id, days_of_week, hours, minute) VALUES (1, ?, ?, 0)",
+                    (DEFAULT_SCHEDULER_DAYS, DEFAULT_SCHEDULER_HOURS),
+                )
+                row = c.execute("SELECT * FROM scheduler_config WHERE id = 1").fetchone()
+        return dict(row)
+
+    def update_scheduler_config(
+        self,
+        *,
+        enabled: Optional[bool] = None,
+        days_of_week: Optional[str] = None,
+        hours: Optional[str] = None,
+        minute: Optional[int] = None,
+        updated_by: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Atualização parcial das configurações do scheduler com validações rigorosas."""
+        if days_of_week is not None:
+            try:
+                parsed = sorted({int(x) for x in str(days_of_week).split(",") if x.strip()})
+            except ValueError:
+                raise ValueError("days_of_week deve ser CSV de inteiros 1-7")
+            if not parsed or any(d < 1 or d > 7 for d in parsed):
+                raise ValueError("days_of_week fora de 1..7")
+            days_of_week = ",".join(str(d) for d in parsed)
+
+        if hours is not None:
+            try:
+                parsed_h = sorted({int(x) for x in str(hours).split(",") if x.strip()})
+            except ValueError:
+                raise ValueError("hours deve ser CSV de inteiros 0-23")
+            if not parsed_h or any(h < 0 or h > 23 for h in parsed_h):
+                raise ValueError("hours fora de 0..23")
+            hours = ",".join(str(h) for h in parsed_h)
+
+        if minute is not None and (minute < 0 or minute > 59):
+            raise ValueError("minute deve estar entre 0 e 59")
+
+        self.get_scheduler_config()  # garante linha existente
+        with self._conn() as c:
+            c.execute("""
+                UPDATE scheduler_config
+                   SET enabled      = COALESCE(?, enabled),
+                       days_of_week = COALESCE(?, days_of_week),
+                       hours        = COALESCE(?, hours),
+                       minute       = COALESCE(?, minute),
+                       updated_at   = datetime('now'),
+                       updated_by   = COALESCE(?, updated_by)
+                 WHERE id = 1
+            """, (
+                None if enabled is None else (1 if enabled else 0),
+                days_of_week, hours, minute, updated_by,
+            ))
+        return self.get_scheduler_config()
+
+    def is_run_due(self, now: Optional[datetime] = None) -> Tuple[bool, str]:
+        """Retorna (deve_rodar, razão). Sem side-effects de I/O de rede."""
+        cfg = self.get_scheduler_config()
+        if not cfg["enabled"]:
+            return False, "disabled"
+
+        now = now or datetime.now()
+        iso_dow = now.isoweekday()  # 1=Seg..7=Dom
+        days_set = {int(x) for x in str(cfg["days_of_week"]).split(",") if x.strip()}
+        if iso_dow not in days_set:
+            return False, "outside_days"
+
+        hours_set = {int(x) for x in str(cfg["hours"]).split(",") if x.strip()}
+        if now.hour not in hours_set:
+            return False, "outside_hours"
+
+        # Tolerância de 7 min (systemd dispara a cada 5 min, acomoda latência)
+        if abs(now.minute - cfg["minute"]) > 7:
+            return False, "outside_window"
+
+        # Dedup: se rodou nos últimos 20 min, não roda de novo
+        with self._conn() as c:
+            if now is not None:
+                cutoff = (now - timedelta(minutes=20)).strftime("%Y-%m-%d %H:%M:%S")
+                row = c.execute(
+                    "SELECT 1 FROM runs WHERE timestamp >= ? LIMIT 1",
+                    (cutoff,),
+                ).fetchone()
+            else:
+                row = c.execute(
+                    "SELECT 1 FROM runs WHERE timestamp >= datetime('now', '-20 minutes') LIMIT 1"
+                ).fetchone()
+            if row:
+                return False, "already_ran_recently"
+
+        return True, "due"
+
+    def next_scheduled_run(self, now: Optional[datetime] = None) -> Optional[str]:
+        """Retorna string ISO do próximo slot programado, ou None se desabilitado."""
+        cfg = self.get_scheduler_config()
+        if not cfg["enabled"]:
+            return None
+        now = now or datetime.now()
+        hours = sorted({int(x) for x in str(cfg["hours"]).split(",") if x.strip()})
+        days = sorted({int(x) for x in str(cfg["days_of_week"]).split(",") if x.strip()})
+        if not hours or not days:
+            return None
+
+        minute = cfg.get("minute", 0) or 0
+        for delta_days in range(8):
+            d = now + timedelta(days=delta_days)
+            if d.isoweekday() not in days:
+                continue
+            for h in hours:
+                candidate = d.replace(hour=h, minute=minute, second=0, microsecond=0)
+                if candidate > now:
+                    return candidate.isoformat()
+        return None
 
     def save_portfolio_snapshot(
         self,

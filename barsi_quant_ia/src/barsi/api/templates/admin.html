@@ -1,9 +1,13 @@
-<div id="admin-2fa-warning" style="display:none; background:rgba(239, 68, 68, 0.15); border:1px solid #ef4444; border-radius:8px; padding:0.85rem 1.25rem; margin-bottom:1.5rem;">
+<div id="admin-2fa-warning"
+  style="display:none; background:rgba(239, 68, 68, 0.15); border:1px solid #ef4444; border-radius:8px; padding:0.85rem 1.25rem; margin-bottom:1.5rem;">
   <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
     <div style="color:#fca5a5; font-size:0.875rem;">
-      <strong>⚠️ Recomendação de Segurança:</strong> Existe conta de <strong>Administrador</strong> com autenticação em duas etapas (2FA) desativada. Proteja seu acesso contra senhas vazadas ativando em <a href="/settings" style="color:#fff; font-weight:bold; text-decoration:underline;">Configurações ➔ 2FA</a>.
+      <strong>⚠️ Recomendação de Segurança:</strong> Existe conta de <strong>Administrador</strong> com autenticação em
+      duas etapas (2FA) desativada. Proteja seu acesso contra senhas vazadas ativando em <a href="/settings"
+        style="color:#fff; font-weight:bold; text-decoration:underline;">Configurações ➔ 2FA</a>.
     </div>
-    <a href="/settings" class="btn btn-primary" style="padding:0.25rem 0.65rem; font-size:0.78rem;">🔐 Configurar 2FA</a>
+    <a href="/settings" class="btn btn-primary" style="padding:0.25rem 0.65rem; font-size:0.78rem;">🔐 Configurar
+      2FA</a>
   </div>
 </div>
 
@@ -30,7 +34,10 @@
   </div>
 </div>
 
-<div style="display:grid; grid-template-columns: 2fr 1fr; gap:1.5rem;">
+<!-- ALTERAÇÃO AQUI: grid responsivo com auto-fit -->
+<div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:1.5rem; align-items:start;">
+
+  <!-- Coluna 1: Tabela -->
   <div class="card" style="padding:0; overflow:hidden;">
     <div style="padding:1rem 1.25rem; border-bottom:1px solid var(--border);">
       <h3 style="font-size:1rem; color:#fff;">👥 Usuários do Sistema</h3>
@@ -47,12 +54,15 @@
           </tr>
         </thead>
         <tbody id="tbl-users">
-          <tr><td colspan="5" style="text-align:center; color:var(--text-muted);">Carregando usuários...</td></tr>
+          <tr>
+            <td colspan="5" style="text-align:center; color:var(--text-muted);">Carregando usuários...</td>
+          </tr>
         </tbody>
       </table>
     </div>
   </div>
 
+  <!-- Coluna 2: Formulário -->
   <div class="card">
     <h3 style="font-size:1rem; color:var(--accent); margin-bottom:1rem;">➕ Adicionar Usuário</h3>
     <form onsubmit="criarUsuario(event)" style="display:flex; flex-direction:column; gap:0.75rem;">
@@ -72,7 +82,8 @@
           <option value="admin">Administrador (Total)</option>
         </select>
       </div>
-      <button type="submit" class="btn btn-green" style="margin-top:0.5rem; justify-content:center;">Criar Usuário</button>
+      <button type="submit" class="btn btn-green" style="margin-top:0.5rem; justify-content:center;">Criar
+        Usuário</button>
     </form>
   </div>
 </div>
@@ -147,4 +158,3 @@
 
   window.addEventListener("DOMContentLoaded", carregarUsuarios);
 </script>
-

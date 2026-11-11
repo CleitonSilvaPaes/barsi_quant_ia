@@ -81,6 +81,16 @@ class DividendItem(BaseModel):
 class TotpConfirmRequest(BaseModel):
     code: str
 
+class SchedulerUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    days_of_week: Optional[str] = None
+    hours: Optional[str] = None
+    minute: Optional[int] = Field(default=None, ge=0, le=59)
+
+class NotifPrefUpdate(BaseModel):
+    alert_type: str       # "margem_20" | "radar_summary" | "all"
+    enabled: bool
+
 class SaveEditsRequest(BaseModel):
     items: List[EditItem]
 
@@ -795,7 +805,7 @@ async def get_analytics_data(request: Request, months: int = 12):
         ym_parts = s["data_snapshot"].split("-")
         mes_str = f"{ym_parts[1]}/{ym_parts[0][2:]}" if len(ym_parts) >= 2 else s["data_snapshot"]
         div_real = s.get("dividendos_mes", 0.0)
-        growth_multiplier = 1.0 + getattr(settings, "div_growth_projection_rate", 0.15)
+        growth_multiplier = 1.0 + settings.div_growth_projection_rate
         dividendos.append({
             "mes": mes_str,
             "realizado": round(div_real, 2),
@@ -1074,6 +1084,69 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
 
         background_tasks.add_task(_run_task)
 
+    elif cmd == "/schedule":
+        cfg = repo.get_scheduler_config()
+        if not args:
+            next_run = repo.next_scheduled_run() or "—"
+            await _send_reply(
+                f"⏰ *Scheduler Barsi*\n\n"
+                f"• Status: {'🟢 ON' if cfg['enabled'] else '🔴 OFF'}\n"
+                f"• Dias (ISO): `{cfg['days_of_week']}`\n"
+                f"• Horas: `{cfg['hours']}`\n"
+                f"• Minuto: `{cfg['minute']}`\n"
+                f"• Próximo: `{next_run}`\n\n"
+                f"Uso:\n"
+                f"`/schedule on|off`\n"
+                f"`/schedule days 1,2,3,4,5`\n"
+                f"`/schedule hours 9,10,11,12,13,14,15,16,17,18`\n"
+                f"`/schedule minute 30`"
+            )
+        elif len(args) == 1 and args[0] in ("on", "off"):
+            repo.update_scheduler_config(enabled=(args[0] == "on"), updated_by=f"telegram:{chat_id}")
+            await _send_reply(f"✅ Scheduler {'ativado' if args[0] == 'on' else 'desativado'}.")
+        elif len(args) >= 2:
+            key, val = args[0], " ".join(args[1:])
+            try:
+                if key == "days":
+                    repo.update_scheduler_config(days_of_week=val, updated_by=f"telegram:{chat_id}")
+                elif key == "hours":
+                    repo.update_scheduler_config(hours=val, updated_by=f"telegram:{chat_id}")
+                elif key == "minute":
+                    repo.update_scheduler_config(minute=int(val), updated_by=f"telegram:{chat_id}")
+                else:
+                    await _send_reply("⚠️ Chaves válidas: days | hours | minute")
+                    return {"ok": True}
+                await _send_reply(f"✅ `{key}` = `{val}` gravado.")
+            except Exception as e:
+                await _send_reply(f"⚠️ Erro: {e}")
+        else:
+            await _send_reply("⚠️ Uso: `/schedule`, `/schedule on|off`, `/schedule days|hours|minute <valor>`")
+
+    elif cmd == "/notifications":
+        if not args:
+            prefs = repo.list_notification_preferences()
+            linhas = [
+                f"• `{p['alert_type']}`: {'🟢 ON' if p['enabled'] else '🔴 OFF'}"
+                for p in prefs
+            ] or ["_(nenhuma preferência configurada — todas ON por padrão)_"]
+            await _send_reply(
+                "🔔 *Preferências de Notificação*\n\n" + "\n".join(linhas) +
+                "\n\nUso:\n"
+                "`/notifications on` ou `/notifications off`\n"
+                "`/notifications margem_20 off`"
+            )
+        elif len(args) == 1 and args[0] in ("on", "off"):
+            enabled = args[0] == "on"
+            count = repo.set_all_notifications_enabled(enabled, updated_by=f"telegram:{chat_id}")
+            await _send_reply(f"✅ Todas as notificações {'ativadas' if enabled else 'desativadas'} ({count} tipos).")
+        elif len(args) == 2 and args[1] in ("on", "off"):
+            alert_type, state = args[0], args[1]
+            enabled = state == "on"
+            repo.set_notification_enabled(alert_type, enabled, updated_by=f"telegram:{chat_id}")
+            await _send_reply(f"✅ `{alert_type}` agora está {'🟢 ON' if enabled else '🔴 OFF'}.")
+        else:
+            await _send_reply("⚠️ Uso: `/notifications`, `/notifications on|off`, `/notifications <tipo> on|off`")
+
     else:
         ajuda = (
             "🤖 *Comandos do Barsi Quant Bot:*\n\n"
@@ -1081,6 +1154,8 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
             "• `/radar` — Ativos com maior margem de segurança\n"
             "• `/proventos` — Total de dividendos recebidos\n"
             "• `/ticker BBAS3` — Detalhes completos de um ativo\n"
+            "• `/schedule` — Configurar agendamento automático\n"
+            "• `/notifications` — Gerenciar preferências de alerta\n"
             "• `/run` — Disparar ciclo quantitativo B3 agora\n"
             "• `/help` — Exibir este menu de ajuda"
         )
@@ -1423,6 +1498,63 @@ async def health_sync_reconcile(request: Request, master: str = "sqlite"):
         }
     else:
         raise HTTPException(status_code=400, detail="Master inválido. Use 'sqlite' ou 'sheets'.")
+
+@app.get("/api/scheduler")
+async def get_scheduler(request: Request):
+    require_role_action(request, action_type="admin")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    cfg = repo.get_scheduler_config()
+    return {
+        "enabled": bool(cfg["enabled"]),
+        "days_of_week": cfg["days_of_week"],
+        "hours": cfg["hours"],
+        "minute": cfg["minute"],
+        "updated_at": cfg["updated_at"],
+        "updated_by": cfg["updated_by"],
+        "next_run": repo.next_scheduled_run(),
+    }
+
+@app.post("/api/scheduler")
+async def update_scheduler(req: SchedulerUpdate, request: Request):
+    user = require_role_action(request, action_type="admin")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    try:
+        user_name = user.get("user") or user.get("username", "admin")
+        cfg = repo.update_scheduler_config(
+            **req.model_dump(exclude_none=True),
+            updated_by=user_name,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {
+        "ok": True,
+        "config": {
+            "enabled": bool(cfg["enabled"]),
+            "days_of_week": cfg["days_of_week"],
+            "hours": cfg["hours"],
+            "minute": cfg["minute"],
+        },
+        "next_run": repo.next_scheduled_run(),
+    }
+
+@app.get("/api/notifications/preferences")
+async def get_notification_prefs(request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Não autenticado")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    return {"items": repo.list_notification_preferences()}
+
+@app.post("/api/notifications/preferences")
+async def set_notification_pref(req: NotifPrefUpdate, request: Request):
+    user = require_role_action(request, action_type="admin")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    user_name = user.get("user") or user.get("username", "admin")
+    if req.alert_type == "all":
+        count = repo.set_all_notifications_enabled(req.enabled, updated_by=user_name)
+        return {"ok": True, "alert_type": "all", "enabled": req.enabled, "updated": count}
+    repo.set_notification_enabled(req.alert_type, req.enabled, updated_by=user_name)
+    return {"ok": True, "alert_type": req.alert_type, "enabled": req.enabled}
 
 @app.get("/health")
 async def health():
