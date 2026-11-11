@@ -761,118 +761,150 @@ class BudgetRepository:
             return positions
 
     def reconcile_ofx_to_positions(self, resumos: Dict[str, Any]) -> int:
-        """Concilia transações de aporte do OFX com as posições em aberto na carteira.
+        """Concilia transações de aporte do OFX com as posições da carteira.
 
-        Regra:
-        - Itera sobre os resumos mensais do OFX.
-        - Para cada ativo presente em `detalhes_ativos` com valor > 0:
-          - Se o ativo existe na carteira:
-            - Se `qtd_aporte > 0`, a ordem em aberto foi liquidada:
-              `qtd_antes += qtd_aporte`
-              `qtd_aporte = 0`
-            - Senão (compra avulsa sem ordem prévia):
-              se `preco_atual > 0`:
-                `qtd_est = int(valor_compra // preco_atual)`
-                se `qtd_est > 0`:
-                  `qtd_antes += qtd_est`
-            - Recalcula `qtd_total`, `valor_total`, `total_aporte`.
-            - Registra o ticker como atualizado.
-        - Persiste as alterações no SQLite se houver ativos atualizados.
+        Estratégia FITID-first:
+        1. Persiste todas as transações dos resumos com `persist_transacoes` (INSERT OR IGNORE por FITID).
+        2. Seleciona apenas transações pendentes (`categoria = 'Aporte Ações/FIIs' AND conciliado = 0`).
+        3. Se `qtd_aporte > 0`: liquida a ordem em aberto (`qtd_antes += qtd_aporte`, `qtd_aporte = 0`).
+        4. Se `qtd_aporte == 0` (compra direta):
+           - Se todas as transações forem anteriores ao mês limite (compras passadas), apenas marca os
+             FITIDs como conciliados sem alterar `qtd_antes` (já estão embutidas no saldo inicial).
+           - Se for do mês corrente/limite, estima `qtd_est = int(valor // preco_atual)` e adiciona.
+        5. Recalcula custo médio ponderado (com fallback defensivo de preco_atual quando custo_medio == 0).
+        6. Marca cada FITID processado individualmente como `conciliado = 1`.
         """
         positions_list = self.load_positions()
         if not positions_list:
             return 0
 
+        # 1. Garante que todas as transações dos resumos sejam persistidas no SQLite.
+        todas_transacoes = []
+        for mes, resumo in resumos.items():
+            txs = getattr(resumo, "transacoes", None)
+            if txs:
+                todas_transacoes.extend(txs)
+            else:
+                # Suporte a resumos sintéticos ou mocks que fornecem apenas detalhes_ativos
+                detalhes = getattr(resumo, "detalhes_ativos", None)
+                if detalhes is None and isinstance(resumo, dict):
+                    detalhes = resumo.get("detalhes_ativos", {})
+                if isinstance(detalhes, dict):
+                    for tk_synth, val_synth in detalhes.items():
+                        v_flt = float(val_synth or 0.0)
+                        if v_flt > 0:
+                            todas_transacoes.append({
+                                "id_transacao": f"SYNTH_{tk_synth.upper()}_{mes}",
+                                "data": f"{mes}-01",
+                                "tipo": "DEBIT",
+                                "valor": -abs(v_flt),
+                                "descricao": f"Aporte {tk_synth.upper()}",
+                                "categoria": "Aporte Ações/FIIs",
+                                "ticker_relacionado": tk_synth.upper(),
+                                "origem": "OFX_SYNTH"
+                            })
+
+        if todas_transacoes:
+            self.persist_transacoes(todas_transacoes)
+
+        # 2. Busca todas as transações de aporte PENDENTES (conciliado = 0)
+        with self._conn() as c:
+            pendentes = c.execute(
+                """
+                SELECT fitid, ticker, mes_ano, valor
+                  FROM transacoes
+                 WHERE categoria = 'Aporte Ações/FIIs'
+                   AND conciliado = 0
+                   AND ticker IS NOT NULL
+                   AND ticker != ''
+                """
+            ).fetchall()
+
+        if not pendentes:
+            return 0
+
+        # 3. Agrupa transações pendentes por ticker
+        txs_por_ticker: Dict[str, List[Dict[str, Any]]] = {}
+        for row in pendentes:
+            tk = row["ticker"].upper().strip()
+            txs_por_ticker.setdefault(tk, []).append({
+                "fitid": row["fitid"],
+                "mes_ano": row["mes_ano"],
+                "valor": abs(float(row["valor"])),
+            })
+
         positions = {p.ticker.upper(): p for p in positions_list}
         updated_tickers = set()
 
-        for mes, resumo in resumos.items():
-            detalhes = getattr(resumo, "detalhes_ativos", None)
-            if detalhes is None and isinstance(resumo, dict):
-                detalhes = resumo.get("detalhes_ativos", {})
-            if not isinstance(detalhes, dict):
+        from datetime import datetime
+        mes_atual = datetime.now().strftime("%Y-%m")
+        meses_resumo = [k for k in resumos.keys() if k]
+        mes_limite = max([mes_atual] + meses_resumo) if meses_resumo else mes_atual
+
+        fitids_to_mark_conciliated = []
+
+        for tk, transacoes in txs_por_ticker.items():
+            if tk not in positions:
                 continue
 
-            for raw_ticker, valor_compra in detalhes.items():
-                tk = str(raw_ticker).upper().strip()
-                val = float(valor_compra or 0.0)
-                if tk not in positions or val <= 0:
+            p = positions[tk]
+            total_valor = sum(t["valor"] for t in transacoes if t["valor"] > 0)
+            if total_valor <= 0:
+                fitids_to_mark_conciliated.extend(t["fitid"] for t in transacoes)
+                continue
+
+            qtd_adicionada = 0
+            if p.qtd_aporte > 0:
+                # 1. Ordem programada liquidada
+                qtd_adicionada = p.qtd_aporte
+                p.qtd_antes += p.qtd_aporte
+                p.qtd_aporte = 0
+            else:
+                # 2. Compra direta: se todas as transações forem de meses anteriores a mes_limite,
+                # são aportes históricos passados que já estão consolidados em qtd_antes!
+                if all(t["mes_ano"] < mes_limite for t in transacoes):
+                    fitids_to_mark_conciliated.extend(t["fitid"] for t in transacoes)
                     continue
 
-                # --- Verificação de Idempotência via transacoes.conciliado ---
-                with self._conn() as c:
-                    ja_conciliado = c.execute(
-                        """
-                        SELECT 1 FROM transacoes
-                         WHERE ticker = ? AND mes_ano = ?
-                           AND categoria = 'Aporte Ações/FIIs'
-                           AND conciliado = 1
-                         LIMIT 1
-                        """,
-                        (tk, mes),
-                    ).fetchone()
-                    if ja_conciliado:
-                        continue
+                if p.preco_atual > 0:
+                    qtd_est = int(total_valor // p.preco_atual)
+                    if qtd_est > 0:
+                        p.qtd_antes += qtd_est
+                        qtd_adicionada = qtd_est
 
-                    # Marca as transações do OFX deste ticker/mês como conciliadas
-                    cur = c.execute(
-                        """
-                        UPDATE transacoes
-                           SET conciliado = 1
-                         WHERE ticker = ? AND mes_ano = ?
-                           AND categoria = 'Aporte Ações/FIIs'
-                           AND conciliado = 0
-                        """,
-                        (tk, mes),
-                    )
-                    # Se não havia transação no banco (ex: testes sem persist_transacoes prévio),
-                    # registra marcador para garantir idempotência em reexecuções
-                    if cur.rowcount == 0:
-                        c.execute(
-                            """
-                            INSERT OR IGNORE INTO transacoes
-                                (fitid, data, mes_ano, tipo, valor, descricao, categoria, ticker, origem, conciliado)
-                            VALUES (?, ?, ?, 'DEBIT', ?, ?, 'Aporte Ações/FIIs', ?, 'CONCILIACAO', 1)
-                            """,
-                            (f"RECON_{tk}_{mes}", f"{mes}-01", mes, val, f"Aporte conciliado {tk}", tk),
-                        )
-
-                p = positions[tk]
-                qtd_adicionada = 0
-                if p.qtd_aporte > 0:
-                    qtd_adicionada = p.qtd_aporte
-                    p.qtd_antes += p.qtd_aporte
-                    p.qtd_aporte = 0
-                else:
-                    if p.preco_atual > 0:
-                        qtd_est = int(val // p.preco_atual)
-                        if qtd_est > 0:
-                            p.qtd_antes += qtd_est
-                            qtd_adicionada = qtd_est
-
-                # Atualização de Custo Médio Ponderado:
-                if qtd_adicionada > 0 and val > 0 and p.qtd_antes > 0:
-                    qtd_anterior = p.qtd_antes - qtd_adicionada
-                    if qtd_anterior > 0:
-                        if p.custo_medio and p.custo_medio > 0:
-                            custo_antigo = p.custo_medio
-                        else:
-                            custo_antigo = p.preco_atual
-                            logger.warning(
-                                "reconcile_custo_medio_zero_fallback",
-                                ticker=tk,
-                                qtd_anterior=qtd_anterior,
-                                preco_proxy=p.preco_atual,
-                            )
-                        novo_custo = (qtd_anterior * custo_antigo + val) / p.qtd_antes
-                        p.custo_medio = round(novo_custo, 2)
+            # Atualização de Custo Médio Ponderado:
+            if qtd_adicionada > 0 and total_valor > 0 and p.qtd_antes > 0:
+                qtd_anterior = p.qtd_antes - qtd_adicionada
+                if qtd_anterior > 0:
+                    if p.custo_medio and p.custo_medio > 0:
+                        custo_antigo = p.custo_medio
                     else:
-                        p.custo_medio = round(val / qtd_adicionada, 2)
+                        custo_antigo = p.preco_atual
+                        logger.warning(
+                            "reconcile_custo_medio_zero_fallback",
+                            ticker=tk,
+                            qtd_anterior=qtd_anterior,
+                            preco_proxy=p.preco_atual,
+                        )
+                    novo_custo = (qtd_anterior * custo_antigo + total_valor) / p.qtd_antes
+                    p.custo_medio = round(novo_custo, 2)
+                else:
+                    p.custo_medio = round(total_valor / qtd_adicionada, 2)
 
-                p.qtd_total = p.qtd_antes + p.qtd_aporte
-                p.valor_total = round(p.qtd_total * p.preco_atual, 2)
-                p.total_aporte = round(p.qtd_aporte * p.preco_atual, 2)
-                updated_tickers.add(tk)
+            p.qtd_total = p.qtd_antes + p.qtd_aporte
+            p.valor_total = round(p.qtd_total * p.preco_atual, 2)
+            p.total_aporte = round(p.qtd_aporte * p.preco_atual, 2)
+            updated_tickers.add(tk)
+            fitids_to_mark_conciliated.extend(t["fitid"] for t in transacoes)
+
+        # 4. Marca cada FITID individualmente como conciliado no SQLite
+        if fitids_to_mark_conciliated:
+            with self._conn() as c:
+                for fid in fitids_to_mark_conciliated:
+                    c.execute(
+                        "UPDATE transacoes SET conciliado = 1 WHERE fitid = ?",
+                        (fid,),
+                    )
 
         if updated_tickers:
             self.save_positions(list(positions.values()))

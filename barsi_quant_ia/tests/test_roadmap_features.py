@@ -1308,6 +1308,101 @@ def test_reconcile_fallback_keeps_history_when_custo_medio_zero(tmp_path):
     assert p.custo_medio == 27.12, f"Fallback descartou histórico: {p.custo_medio}"
 
 
+def test_reconcile_uses_fitid_as_canonical_key(tmp_path):
+    """Cada FITID é aplicado no máximo uma vez, independente de quantas vezes o OFX é reprocessado."""
+    from barsi.services.ofx_service import Transacao
+    repo = BudgetRepository(str(tmp_path / "fitid_canonical.db"))
+    repo.save_positions([
+        Position(ticker="BBAS3", row_index=1, qtd_antes=100, qtd_aporte=0, preco_atual=28.0, custo_medio=25.0),
+    ])
+
+    tx1 = Transacao(id_transacao="fit-001", tipo="DEBIT", data="2026-11-06",
+                    valor=-300.0, descricao="Compra BBAS3", categoria="Aporte Ações/FIIs",
+                    ticker_relacionado="BBAS3")
+    tx2 = Transacao(id_transacao="fit-002", tipo="DEBIT", data="2026-11-06",
+                    valor=-200.0, descricao="Compra BBAS3", categoria="Aporte Ações/FIIs",
+                    ticker_relacionado="BBAS3")
+
+    class DummyResumo:
+        detalhes_ativos = {"BBAS3": 500.0}
+        transacoes = [tx1, tx2]
+
+    resumos = {"2026-11": DummyResumo()}
+
+    # 1ª execução
+    r1 = repo.reconcile_ofx_to_positions(resumos)
+    assert r1 == 1
+    reloaded = {p.ticker: p for p in repo.load_positions()}
+    assert reloaded["BBAS3"].qtd_antes == 117  # 100 + int(500/28) = 100 + 17
+    custo_1 = reloaded["BBAS3"].custo_medio
+
+    # 2ª execução: nada muda
+    r2 = repo.reconcile_ofx_to_positions(resumos)
+    assert r2 == 0
+
+    # 3ª execução: ainda nada
+    r3 = repo.reconcile_ofx_to_positions(resumos)
+    assert r3 == 0
+    reloaded3 = {p.ticker: p for p in repo.load_positions()}
+    assert reloaded3["BBAS3"].qtd_antes == 117
+    assert reloaded3["BBAS3"].custo_medio == custo_1
+
+
+def test_reconcile_applies_new_fitid_in_same_month(tmp_path):
+    """Se chegar uma nova transação com novo FITID no mesmo mês/ticker, ela é aplicada como delta."""
+    from barsi.services.ofx_service import Transacao
+    repo = BudgetRepository(str(tmp_path / "fitid_complementar.db"))
+    repo.save_positions([
+        Position(ticker="BBAS3", row_index=1, qtd_antes=100, qtd_aporte=0, preco_atual=28.0, custo_medio=25.0),
+    ])
+
+    tx1 = Transacao(id_transacao="fit-001", tipo="DEBIT", data="2026-11-06",
+                    valor=-300.0, descricao="Compra", categoria="Aporte Ações/FIIs",
+                    ticker_relacionado="BBAS3")
+    class R1:
+        detalhes_ativos = {"BBAS3": 300.0}
+        transacoes = [tx1]
+
+    repo.reconcile_ofx_to_positions({"2026-11": R1()})
+    assert {p.ticker: p for p in repo.load_positions()}["BBAS3"].qtd_antes == 110  # 100 + int(300/28)
+
+    # Chega OFX complementar com FITID novo
+    tx2 = Transacao(id_transacao="fit-999", tipo="DEBIT", data="2026-11-20",
+                    valor=-140.0, descricao="Compra", categoria="Aporte Ações/FIIs",
+                    ticker_relacionado="BBAS3")
+    class R2:
+        detalhes_ativos = {"BBAS3": 140.0}
+        transacoes = [tx2]
+
+    r = repo.reconcile_ofx_to_positions({"2026-11": R2()})
+    assert r == 1
+    # 110 + int(140/28) = 110 + 5 = 115
+    assert {p.ticker: p for p in repo.load_positions()}["BBAS3"].qtd_antes == 115
+
+
+def test_reconcile_ignores_historical_direct_buys_prior_to_current_month(tmp_path):
+    """Transações de meses anteriores sem ordem em aberto são compras históricas já consolidadas em qtd_antes."""
+    from barsi.services.ofx_service import Transacao
+    repo = BudgetRepository(str(tmp_path / "historical_ofx.db"))
+    repo.save_positions([
+        Position(ticker="KNCR11", row_index=1, qtd_antes=15, qtd_aporte=0, preco_atual=100.0, custo_medio=98.0),
+    ])
+
+    tx_old = Transacao(id_transacao="fit-old-01", tipo="DEBIT", data="2026-05-10",
+                       valor=-1500.0, descricao="Compra passada KNCR11", categoria="Aporte Ações/FIIs",
+                       ticker_relacionado="KNCR11")
+    class ROld:
+        detalhes_ativos = {"KNCR11": 1500.0}
+        transacoes = [tx_old]
+
+    res = repo.reconcile_ofx_to_positions({"2026-05": ROld(), "2026-11": ROld()})
+    # Como as transações são de 2026-05 e o mês corrente é 2026-11, não deve somar em qtd_antes
+    reloaded = {p.ticker: p for p in repo.load_positions()}["KNCR11"]
+    assert reloaded.qtd_antes == 15
+    assert reloaded.qtd_aporte == 0
+
+
+
 
 
 
