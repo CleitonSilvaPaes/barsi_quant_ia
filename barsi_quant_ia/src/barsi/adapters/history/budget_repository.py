@@ -840,8 +840,8 @@ class BudgetRepository:
         from datetime import datetime
         mes_atual = datetime.now().strftime("%Y-%m")
         meses_resumo = [k for k in resumos.keys() if k]
-        # target_month explícito tem prioridade; senão, usa o mês mais recente do lote (ou mês atual)
-        mes_alvo = target_month or (max(meses_resumo) if meses_resumo else mes_atual)
+        # target_month explícito tem prioridade; senão, adota o mês mais recente do lote ou corrente
+        mes_alvo = target_month or (max([mes_atual] + meses_resumo) if meses_resumo else mes_atual)
 
         fitids_to_mark_conciliated = []
 
