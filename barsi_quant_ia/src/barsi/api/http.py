@@ -107,6 +107,7 @@ def get_sync_service() -> SyncService:
     sheets = AdapterFactory.create_sheets_adapter(settings)
     history = AdapterFactory.create_history_adapter(settings)
     notifier = AdapterFactory.create_notification_adapter(settings)
+    budget_repo = BudgetRepository(settings.sqlite_db_path)
     return SyncService(
         market=market,
         news=news,
@@ -114,6 +115,7 @@ def get_sync_service() -> SyncService:
         sheets=sheets,
         history=history,
         notifier=notifier,
+        budget_repo=budget_repo,
         max_concurrency=settings.max_concurrency
     )
 
@@ -1328,6 +1330,94 @@ async def sync_tvbox_action(request: Request):
         return {"status": "ok", "ofx_synced": count_ofx, "tvbox_ip": tv_ip}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Falha ao sincronizar com TV Box: {e}")
+
+@app.get("/api/health/sync")
+async def health_sync(request: Request):
+    """Compara paridade entre SQLite (canônico) e Sheets/XLSX para detecção de drift."""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Não autenticado")
+
+    repo = BudgetRepository(settings.sqlite_db_path)
+    sqlite_pos = {p.ticker: p for p in repo.load_positions()}
+
+    sheets_pos = {}
+    try:
+        sheets = AdapterFactory.create_sheets_adapter(settings)
+        for p in await sheets.load_positions():
+            sheets_pos[p.ticker] = p
+    except Exception as e:
+        logger.warning("health_sync_sheets_error", error=str(e))
+
+    all_tickers = sorted(list(set(sqlite_pos.keys()) | set(sheets_pos.keys())))
+    divergences = []
+
+    for t in all_tickers:
+        p_sql = sqlite_pos.get(t)
+        p_sh = sheets_pos.get(t)
+
+        if not p_sql:
+            divergences.append({
+                "ticker": t,
+                "divergences": ["Presente apenas no Sheets, ausente no SQLite"]
+            })
+        elif not p_sh:
+            divergences.append({
+                "ticker": t,
+                "divergences": ["Presente apenas no SQLite, ausente no Sheets"]
+            })
+        else:
+            diffs = []
+            if round(p_sql.div_proj or 0.0, 2) != round(p_sh.div_proj or 0.0, 2):
+                diffs.append(f"DPA: SQLite={p_sql.div_proj} vs Sheets={p_sh.div_proj}")
+            if (p_sql.qtd_antes or 0) != (p_sh.qtd_antes or 0):
+                diffs.append(f"Qtd: SQLite={p_sql.qtd_antes} vs Sheets={p_sh.qtd_antes}")
+            if diffs:
+                divergences.append({
+                    "ticker": t,
+                    "divergences": diffs
+                })
+
+    return {
+        "in_sync": len(divergences) == 0,
+        "tickers_checked": len(all_tickers),
+        "divergences": divergences
+    }
+
+@app.post("/api/health/sync/reconcile")
+async def health_sync_reconcile(request: Request, master: str = "sqlite"):
+    """Reconcilia fontes com base no master escolhido (sqlite ou sheets)."""
+    user = get_current_user(request)
+    if not user or user.get("role") not in ("admin", "investidor"):
+        raise HTTPException(status_code=403, detail="Permissão insuficiente")
+
+    repo = BudgetRepository(settings.sqlite_db_path)
+    sheets = AdapterFactory.create_sheets_adapter(settings)
+
+    master_clean = (master or "sqlite").strip().lower()
+
+    if master_clean == "sqlite":
+        positions = repo.load_positions()
+        if not positions:
+            raise HTTPException(status_code=400, detail="SQLite está vazio para ser usado como master")
+        await sheets.update_positions(positions)
+        return {
+            "ok": True,
+            "positions_count": len(positions),
+            "synced_targets": ["sheets", "xlsx"]
+        }
+    elif master_clean in ("sheets", "xlsx"):
+        positions = await sheets.load_positions()
+        if not positions:
+            raise HTTPException(status_code=400, detail="Sheets está vazio para ser usado como master")
+        repo.save_positions(positions)
+        return {
+            "ok": True,
+            "positions_count": len(positions),
+            "synced_targets": ["sqlite"]
+        }
+    else:
+        raise HTTPException(status_code=400, detail="Master inválido. Use 'sqlite' ou 'sheets'.")
 
 @app.get("/health")
 async def health():

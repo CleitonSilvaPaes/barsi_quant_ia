@@ -298,6 +298,7 @@ def test_telegram_webhook_flow(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "sqlite_db_path", test_db)
     monkeypatch.setattr(settings, "telegram_chat_id", "123456789")
     monkeypatch.setattr(settings, "telegram_bot_token", "fake_bot_token")
+    monkeypatch.setattr(settings, "telegram_webhook_secret", "")
 
     repo = BudgetRepository(test_db)
     repo.save_positions([
@@ -440,6 +441,51 @@ def test_telegram_webhook_run_command_blocks_concurrent(monkeypatch, tmp_path):
         assert any("Já existe uma análise quantitativa em andamento" in r for r in replies)
     finally:
         http._telegram_run_lock = False
+
+def test_list_users_includes_totp_enabled(tmp_path):
+    """Garante que list_users retorna o campo totp_enabled corretamente."""
+    db_file = str(tmp_path / "test_list_users_totp.db")
+    repo = UserRepository(db_file)
+    repo.create_user("user_sem_2fa", "SenhaForte123!", role="leitor")
+    repo.create_user("user_com_2fa", "SenhaForte123!", role="investidor")
+
+    u_com = repo.get_by_username("user_com_2fa")
+    repo.setup_totp(u_com["id"])
+    secret = repo.get_by_id(u_com["id"])["totp_secret"]
+    valid_code = generate_totp_code(secret)
+    repo.confirm_and_enable_totp(u_com["id"], valid_code)
+
+    users = repo.list_users()
+    users_map = {u["username"]: u for u in users}
+
+    assert "totp_enabled" in users_map["user_sem_2fa"]
+    assert bool(users_map["user_sem_2fa"]["totp_enabled"]) is False
+
+    assert "totp_enabled" in users_map["user_com_2fa"]
+    assert bool(users_map["user_com_2fa"]["totp_enabled"]) is True
+
+def test_health_sync_and_reconcile_endpoints(tmp_path, monkeypatch):
+    """Garante que /api/health/sync e /api/health/sync/reconcile operam no Path B sem 404."""
+    test_db = str(tmp_path / "test_parity.db")
+    monkeypatch.setattr(settings, "sqlite_db_path", test_db)
+
+    token = create_session_token(1, "admin_user", "admin", settings.secret_key)
+    client.cookies.set("barsi_session", token)
+
+    repo = BudgetRepository(test_db)
+    pos = Position(ticker="ITUB4", row_index=2, preco_atual=30.0, div_proj=2.40, qtd_antes=100)
+    repo.save_positions([pos])
+
+    resp = client.get("/api/health/sync")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "in_sync" in data
+    assert "tickers_checked" in data
+
+    resp_rec = client.post("/api/health/sync/reconcile?master=sqlite")
+    assert resp_rec.status_code == 200
+    assert resp_rec.json()["ok"] is True
+
 
 
 

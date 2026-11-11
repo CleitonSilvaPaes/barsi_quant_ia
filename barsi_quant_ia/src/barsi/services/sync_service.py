@@ -107,8 +107,20 @@ class SyncService:
 
         logger.info("run_started", run_id=run_id, dry_run=dry_run, target=target_ticker)
 
-        # 1. Carrega posições
-        all_positions = await self.sheets.load_positions()
+        # 1. Carrega posições (Path B: SQLite é fonte primária se budget_repo injetado)
+        repo = self.budget_repo
+        if repo:
+            all_positions = repo.load_positions()
+            if not all_positions:
+                try:
+                    all_positions = await self.sheets.load_positions()
+                    if all_positions:
+                        repo.save_positions(all_positions)
+                except Exception as exc:
+                    logger.warning("sheets_load_fallback_failed", error=str(exc))
+        else:
+            all_positions = await self.sheets.load_positions()
+
         if not all_positions:
             logger.warn("no_positions_found")
             return RunSummary(run_id=run_id, errors=["Nenhuma posição encontrada"])
@@ -134,7 +146,15 @@ class SyncService:
             else:
                 valid_positions.append(res)
 
-        # 3. Atualiza na planilha (se não for dry-run)
+        # 3. Salva no SQLite PRIMEIRO (Fonte Canônica da Verdade)
+        if not dry_run and valid_positions and repo:
+            try:
+                repo.save_positions(valid_positions)
+            except Exception as exc:
+                errors.append(f"SQLite save error: {str(exc)}")
+                logger.error("sqlite_save_failed", error=str(exc))
+
+        # Atualiza na planilha (se não for dry-run, best-effort)
         if not dry_run and valid_positions:
             try:
                 await self.sheets.update_positions(valid_positions)
@@ -166,12 +186,11 @@ class SyncService:
         if not dry_run:
             await self.history.record_run(summary)
             try:
-                from barsi.adapters.history.budget_repository import BudgetRepository
-                repo = BudgetRepository()
                 today_str = datetime.now().strftime("%Y-%m-%d")
-                for p in valid_positions:
-                    if p.preco_atual > 0:
-                        repo.save_price_history(p.ticker, today_str, p.preco_atual)
+                if repo:
+                    for p in valid_positions:
+                        if p.preco_atual > 0:
+                            repo.save_price_history(p.ticker, today_str, p.preco_atual)
             except Exception as e:
                 logger.warn("save_price_history_run_failed", error=str(e))
 
@@ -184,4 +203,29 @@ class SyncService:
             errors_count=len(errors)
         )
         return summary
+
+    async def send_hourly_radar_summary(self, positions: Optional[List[Position]] = None) -> bool:
+        """Envia resumo consolidado com o top 5 de oportunidades para canais de notificação."""
+        if not self.notifier:
+            return False
+        if positions is None:
+            positions = self.budget_repo.load_positions() if self.budget_repo else []
+        acumular = [p for p in positions if getattr(p.status_barsi, "value", str(p.status_barsi)) == "ACUMULAR"]
+        if not acumular:
+            return False
+        top = sorted(acumular, key=lambda x: getattr(x, "margem_seguranca", 0.0), reverse=True)[:5]
+        linhas = "\n".join(
+            f"• {p.ticker}: R$ {p.preco_atual:.2f} (margem {getattr(p, 'margem_seguranca', 0.0):.1f}%)"
+            for p in top
+        )
+        try:
+            await self.notifier.notify(
+                title=f"📊 Radar {datetime.now().strftime('%H:%M')} — {len(acumular)} ativos no teto",
+                body=linhas,
+                level="info"
+            )
+            return True
+        except Exception as exc:
+            logger.warning("hourly_radar_notify_failed", error=str(exc))
+            return False
 

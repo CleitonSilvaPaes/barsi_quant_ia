@@ -458,22 +458,88 @@
       }
     }
 
+    .btn-hamburger {
+      display: none;
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 1.25rem;
+      border-radius: 6px;
+      width: 38px;
+      height: 38px;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      margin-right: 0.5rem;
+    }
+
+    .btn-hamburger:hover {
+      background: var(--card-hover);
+    }
+
+    .sidebar-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(2px);
+      z-index: 199;
+    }
+
     @media (max-width: 900px) {
-      body {
-        flex-direction: column;
+      .btn-hamburger {
+        display: inline-flex;
       }
 
       .sidebar {
-        width: 100%;
-        height: auto;
-        position: relative;
-        border-right: none;
-        border-bottom: 1px solid var(--border);
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        width: 280px;
+        height: 100vh;
+        z-index: 200;
+        transform: translateX(-100%);
+        transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 2px 0 16px rgba(0, 0, 0, 0.5);
+      }
+
+      .sidebar.open {
+        transform: translateX(0);
+      }
+
+      .sidebar-overlay.active {
+        display: block;
       }
 
       .nav-section {
-        flex-direction: row;
+        flex-direction: column;
+        flex-wrap: nowrap;
+      }
+
+      .main-wrapper {
+        width: 100%;
+      }
+
+      .content {
+        padding: 1rem 0.75rem;
+      }
+
+      .grid-stats {
+        grid-template-columns: 1fr;
+      }
+
+      .topbar {
+        padding: 0.75rem 1rem;
         flex-wrap: wrap;
+        gap: 0.5rem;
+      }
+
+      .telemetry-pill {
+        display: none;
       }
     }
   </style>
@@ -514,10 +580,13 @@
     </div>
   </aside>
 
+  <div class="sidebar-overlay" onclick="toggleSidebar()"></div>
+
   <!-- CONTEÚDO PRINCIPAL -->
   <div class="main-wrapper">
     <header class="topbar">
       <div class="topbar-left">
+        <button class="btn-hamburger" onclick="toggleSidebar()" aria-label="Abrir Menu">☰</button>
         <h1 class="page-title">{{PAGE_HEADING}}</h1>
       </div>
       <div class="topbar-right">
@@ -556,6 +625,15 @@
 
     function formatPct(val) {
       return ((val || 0)).toFixed(1) + '%';
+    }
+
+    function toggleSidebar() {
+      const sidebar = document.querySelector(".sidebar");
+      const overlay = document.querySelector(".sidebar-overlay");
+      if (sidebar && overlay) {
+        sidebar.classList.toggle("open");
+        overlay.classList.toggle("active");
+      }
     }
   </script>
 </body>

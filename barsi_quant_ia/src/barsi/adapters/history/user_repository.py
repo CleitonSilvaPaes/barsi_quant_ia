@@ -94,7 +94,7 @@ class UserRepository:
     def list_users(self) -> List[Dict[str, Any]]:
         with self._connection() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT id, username, role, permissoes, criado_em FROM usuarios")
+            cur.execute("SELECT id, username, role, permissoes, criado_em, totp_enabled FROM usuarios")
             return [dict(r) for r in cur.fetchall()]
 
     def authenticate(self, username: str, password_plain: str) -> Optional[Dict[str, Any]]:
