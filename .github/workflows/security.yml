@@ -25,34 +25,35 @@ jobs:
           python-version: "3.11"
 
       - name: Run Zero-PII Guard
+        env:
+          FORBIDDEN_PATTERNS: ${{ secrets.PII_PATTERNS }}
         run: |
-          python -c "
-          import base64, subprocess, sys
+          python - << 'EOF'
+          import os, subprocess, sys
 
-          b64_patterns = [
-              'MTkyXC4xNjhcLlxkK1wuXGQr',  # 192.168.\d+.\d+
-              'Y2xlaXRvbg==',              # personal identifiers
-              'cGFlcw==',
-              'bml6aWVsbWE='
-          ]
-          patterns = [base64.b64decode(b).decode('utf-8') for b in b64_patterns]
+          # Padrões genéricos seguros para ficar no código + padrões privados vindos dos Secrets
+          patterns = [r"192\.168\.\d+\.\d+", r"10\.\d+\.\d+\.\d+"]
+          
+          secret_patterns = os.environ.get("FORBIDDEN_PATTERNS", "")
+          if secret_patterns:
+              patterns.extend([p.strip() for p in secret_patterns.split(",") if p.strip()])
 
           errors = []
           for p in patterns:
-              res = subprocess.run(['git', 'grep', '-inE', p], capture_output=True, text=True)
+              res = subprocess.run(["git", "grep", "-inE", p], capture_output=True, text=True)
               if res.returncode == 0 and res.stdout.strip():
                   for line in res.stdout.splitlines():
-                      if not line.startswith('.github/workflows/'):
+                      if not line.startswith(".github/workflows/"):
                           errors.append(line)
 
           if errors:
-              print('❌ SECURITY GUARD DETECTED FORBIDDEN PII OR DOMESTIC IP:')
+              print("❌ SECURITY GUARD DETECTED FORBIDDEN PII OR DOMESTIC IP:")
               for err in errors:
-                  print(f'   {err}')
+                  print(f"   {err}")
               sys.exit(1)
 
-          print('✅ ZERO PII & ZERO DOMESTIC IP: All git tracked files are clean.')
-          "
+          print("✅ ZERO PII & ZERO DOMESTIC IP: All git tracked files are clean.")
+          EOF
 
   # ─────────────────────────────────────────────────────────────
   # Job 2: Lint Check (rápido, < 30s)
