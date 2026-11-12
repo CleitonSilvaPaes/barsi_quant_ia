@@ -40,3 +40,16 @@ jobs:
           body_path: release_notes.md
           draft: false
           prerelease: false
+
+      # Mantem somente ultimos 3 releases
+      - name: Keep only last 3 releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Lista todas as releases ordenadas da mais recente para a mais antiga, pula as 3 primeiras e apaga o resto
+          gh release list --limit 100 --json tagName --jq '.[3:][].tagName' | while read -r TAG; do
+            if [ -n "$TAG" ]; then
+              echo "🗑️ Removendo release antiga: $TAG"
+              gh release delete "$TAG" --yes --cleanup-tag
+            fi
+          done
