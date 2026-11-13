@@ -41,7 +41,7 @@ def test_playwright_e2e_flow(e2e_server, isolate_database):
     base_url = e2e_server
 
     repo = UserRepository(isolate_database)
-    repo.create_user("admin_user", "adminPass123", role="admin", email="cleiton03122000@gmail.com")
+    repo.create_user("admin_user", "adminPass123", role="admin", email="admin.teste@example.com")
     admin = repo.get_by_username("admin_user")
     secret, _ = repo.setup_totp(admin["id"])
     code = generate_totp_code(secret)
@@ -66,7 +66,7 @@ def test_playwright_e2e_flow(e2e_server, isolate_database):
 
         # 3. Login com 2FA (Fluxo automático GitHub-like)
         page.goto(f"{base_url}/login")
-        page.fill('input[name="username"]', "cleiton03122000@gmail.com")
+        page.fill('input[name="username"]', "admin.teste@example.com")
         page.fill('input[name="password"]', "adminPass123")
         page.click('button[type="submit"]')
 

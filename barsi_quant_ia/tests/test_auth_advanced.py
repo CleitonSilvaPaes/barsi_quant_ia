@@ -180,7 +180,7 @@ def test_github_style_two_step_login_flow(tmp_path, monkeypatch):
 def test_google_oauth_flow(tmp_path, monkeypatch):
     db_file = str(tmp_path / "test_oauth.db")
     repo = UserRepository(db_file)
-    repo.create_user("cleiton", "cleitonPass123", role="admin", email="cleiton03122000@gmail.com")
+    repo.create_user("user_admin", "adminPass123", role="admin", email="admin.oauth@example.com")
 
     monkeypatch.setattr("barsi.api.http.get_user_repo", lambda: repo)
     monkeypatch.setattr(settings, "google_client_id", "test-client-id")
@@ -210,8 +210,8 @@ def test_google_oauth_flow(tmp_path, monkeypatch):
     fake_userinfo_resp.status_code = 200
     fake_userinfo_resp.json.return_value = {
         "sub": "google-sub-9999",
-        "email": "cleiton03122000@gmail.com",
-        "name": "Cleiton Paes"
+        "email": "admin.oauth@example.com",
+        "name": "Admin Teste"
     }
 
     mock_client_instance = AsyncMock()
@@ -231,5 +231,5 @@ def test_google_oauth_flow(tmp_path, monkeypatch):
         assert resp_callback.cookies.get("barsi_session") is not None
 
         # Confirma que a conta Google foi vinculada no banco
-        cleiton = repo.get_by_username("cleiton")
-        assert cleiton["google_id"] == "google-sub-9999"
+        user_adm = repo.get_by_username("user_admin")
+        assert user_adm["google_id"] == "google-sub-9999"
