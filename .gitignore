@@ -2,6 +2,7 @@
 .env
 *.env
 *.json
+!repomix.config.json
 credentials.json
 barsi-quant-ia-*.json
 
@@ -36,7 +37,7 @@ scratch/
 scratch_*.py
 
 # Graphify
-graphify-out/
+**/graphify-out/
 
 
 # Repomix outputs (temporários, gerados localmente)
@@ -51,9 +52,6 @@ recente.txt
 
 # git secrets
 .secrets
-
-# Pasta para agents
-.agents
 
 # Pastas de cache acidental
 cleiton/
