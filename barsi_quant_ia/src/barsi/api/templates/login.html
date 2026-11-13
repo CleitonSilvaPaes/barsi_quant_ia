@@ -2,48 +2,204 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="csrf-token" content="{{CSRF_TOKEN}}">
-  <title>Login — Barsi Quant IA</title>
+  <title>Entrar · Barsi Quant IA</title>
   <style>
-    body { background: #0f172a; color: #f8fafc; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-    .card { background: #1e293b; padding: 2.5rem; border-radius: 1rem; border: 1px solid #334155; width: 100%; max-width: 360px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
-    h2 { color: #38bdf8; margin-top: 0; text-align: center; margin-bottom: 1.5rem; }
-    input { width: 100%; box-sizing: border-box; padding: 0.75rem; margin-bottom: 1rem; background: #0f172a; border: 1px solid #475569; border-radius: 0.5rem; color: #fff; font-size: 1rem; }
-    button { width: 100%; padding: 0.75rem; background: #2563eb; color: #fff; border: none; border-radius: 0.5rem; font-weight: bold; font-size: 1rem; cursor: pointer; }
-    button:hover { background: #1d4ed8; }
-    .err { color: #ef4444; margin-bottom: 1rem; font-weight: 500; font-size: 0.9rem; text-align: center; }
+    * { box-sizing: border-box; }
+    body {
+      background-color: #0d1117;
+      color: #c9d1d9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    .logo-container {
+      text-align: center;
+      margin-bottom: 24px;
+    }
+    .logo-container svg {
+      fill: #ffffff;
+      width: 48px;
+      height: 48px;
+    }
+    .logo-title {
+      font-size: 24px;
+      font-weight: 300;
+      color: #f0f6fc;
+      margin-top: 10px;
+    }
+    .auth-card {
+      background-color: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 20px;
+      width: 340px;
+      box-shadow: 0 8px 24px rgba(1, 4, 9, 0.4);
+    }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    .label-wrapper {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+    label {
+      font-size: 14px;
+      font-weight: 400;
+      color: #f0f6fc;
+      display: block;
+    }
+    .forgot-link {
+      font-size: 12px;
+      color: #58a6ff;
+      text-decoration: none;
+    }
+    .forgot-link:hover {
+      text-decoration: underline;
+    }
+    input[type="text"],
+    input[type="password"] {
+      width: 100%;
+      padding: 6px 12px;
+      font-size: 14px;
+      line-height: 20px;
+      color: #c9d1d9;
+      background-color: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      outline: none;
+      transition: border-color 0.15s ease-in-out;
+    }
+    input[type="text"]:focus,
+    input[type="password"]:focus {
+      border-color: #1f6feb;
+      box-shadow: 0 0 0 3px rgba(31, 111, 235, 0.3);
+    }
+    .btn-submit {
+      width: 100%;
+      background-color: #238636;
+      color: #ffffff;
+      border: 1px solid rgba(240, 246, 252, 0.1);
+      border-radius: 6px;
+      padding: 8px 16px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: center;
+      transition: background-color 0.2s;
+    }
+    .btn-submit:hover {
+      background-color: #2ea043;
+    }
+    .btn-google {
+      width: 100%;
+      background-color: #21262d;
+      color: #c9d1d9;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 8px 16px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      text-decoration: none;
+      transition: background-color 0.2s, border-color 0.2s;
+    }
+    .btn-google:hover {
+      background-color: #30363d;
+      border-color: #8b949e;
+      color: #f0f6fc;
+    }
+    .divider {
+      display: flex;
+      align-items: center;
+      text-align: center;
+      margin: 16px 0;
+      color: #8b949e;
+      font-size: 12px;
+    }
+    .divider::before,
+    .divider::after {
+      content: '';
+      flex: 1;
+      border-bottom: 1px solid #30363d;
+    }
+    .divider:not(:empty)::before {
+      margin-right: 0.5em;
+    }
+    .divider:not(:empty)::after {
+      margin-left: 0.5em;
+    }
+    .err {
+      background-color: rgba(248, 81, 73, 0.15);
+      border: 1px solid rgba(248, 81, 73, 0.4);
+      color: #f85149;
+      padding: 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      margin-bottom: 16px;
+      text-align: center;
+    }
+    .footer-note {
+      margin-top: 20px;
+      font-size: 12px;
+      color: #8b949e;
+      text-align: center;
+    }
   </style>
 </head>
 <body>
-  <div class="card">
-    <h2>🔐 Barsi Quant IA</h2>
+  <div class="logo-container">
+    <svg height="48" aria-hidden="true" viewBox="0 0 24 24" version="1.1" width="48" data-view-component="true">
+      <path d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.87 8.17 6.84 9.5.5.08.66-.23.66-.5v-1.69c-2.77.6-3.36-1.34-3.36-1.34-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.87 1.52 2.34 1.07 2.91.83.1-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.92 0-1.11.38-2 1.03-2.71-.1-.25-.45-1.29.1-2.64 0 0 .84-.27 2.75 1.02.79-.22 1.65-.33 2.5-.33.85 0 1.71.11 2.5.33 1.91-1.29 2.75-1.02 2.75-1.02.55 1.35.2 2.39.1 2.64.65.71 1.03 1.6 1.03 2.71 0 3.82-2.34 4.66-4.57 4.91.36.31.69.92.69 1.85V21c0 .27.16.59.67.5C19.14 20.16 22 16.42 22 12A10 10 0 0 0 12 2Z"></path>
+    </svg>
+    <div class="logo-title">Sign in to Barsi Quant</div>
+  </div>
+
+  <div class="auth-card">
     {{ERROR_MSG}}
     <form method="POST" action="/login">
       <input type="hidden" name="csrf_token" value="{{CSRF_TOKEN}}" />
-      <input type="text" name="username" placeholder="Usuário" required />
-      <input type="password" name="password" placeholder="Senha" required />
-      <div id="totp_container" style="display:none;">
-        <input type="text" id="totp_field" name="totp_code" placeholder="Código 2FA (000000)" maxlength="6" style="letter-spacing: 3px; text-align: center; font-size: 1.1rem;" />
+      <div class="form-group">
+        <label for="login_field">Username or email address</label>
+        <input type="text" id="login_field" name="username" autofocus="autofocus" required />
       </div>
-      <button type="submit">Entrar no Painel</button>
+      <div class="form-group">
+        <div class="label-wrapper">
+          <label for="password">Password</label>
+          <a class="forgot-link" href="javascript:void(0)" onclick="alert('Entre em contato com o administrador do sistema para redefinir sua senha.')">Forgot password?</a>
+        </div>
+        <input type="password" id="password" name="password" required />
+      </div>
+      <button type="submit" class="btn-submit">Sign in</button>
     </form>
-    <div style="text-align:center; margin-top:0.75rem;">
-      <a href="javascript:void(0)" id="toggle_totp_btn" onclick="toggleTotp()" style="color:#94a3b8; font-size:0.8rem; text-decoration:none;">Usar autenticação 2FA</a>
-    </div>
+
+    <div class="divider">or</div>
+
+    <a href="/auth/google/login" class="btn-google">
+      <svg width="18" height="18" viewBox="0 0 24 24">
+        <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
+        <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.34 24 12 24z"/>
+        <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.99 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/>
+        <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.34 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
+      </svg>
+      Continue with Google
+    </a>
   </div>
-  <script>
-    function toggleTotp() {
-      const c = document.getElementById("totp_container");
-      const btn = document.getElementById("toggle_totp_btn");
-      if (c) c.style.display = "block";
-      const f = document.getElementById("totp_field");
-      if (f) f.focus();
-      if (btn) btn.style.display = "none";
-    }
-    if (window.location.search.includes("requires_2fa=1")) {
-      toggleTotp();
-    }
-  </script>
+
+  <div class="footer-note">
+    Barsi Quant IA · Ecossistema de Investimento
+  </div>
 </body>
 </html>
-

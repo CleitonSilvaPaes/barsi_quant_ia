@@ -40,7 +40,9 @@ class UserRepository:
                 permissoes TEXT NOT NULL,
                 criado_em TEXT NOT NULL,
                 totp_secret TEXT DEFAULT NULL,
-                totp_enabled INTEGER NOT NULL DEFAULT 0
+                totp_enabled INTEGER NOT NULL DEFAULT 0,
+                email TEXT DEFAULT NULL,
+                google_id TEXT DEFAULT NULL
             );
             """)
             try:
@@ -49,6 +51,10 @@ class UserRepository:
                     conn.execute("ALTER TABLE usuarios ADD COLUMN totp_secret TEXT DEFAULT NULL")
                 if "totp_enabled" not in cols:
                     conn.execute("ALTER TABLE usuarios ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0")
+                if "email" not in cols:
+                    conn.execute("ALTER TABLE usuarios ADD COLUMN email TEXT DEFAULT NULL")
+                if "google_id" not in cols:
+                    conn.execute("ALTER TABLE usuarios ADD COLUMN google_id TEXT DEFAULT NULL")
             except Exception:
                 pass
             conn.commit()
@@ -56,7 +62,7 @@ class UserRepository:
     def get_by_username(self, username: str) -> Optional[Dict[str, Any]]:
         with self._connection() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT id, username, password_hash, role, permissoes, totp_secret, totp_enabled FROM usuarios WHERE username = ?", (username,))
+            cur.execute("SELECT id, username, password_hash, role, permissoes, totp_secret, totp_enabled, email, google_id FROM usuarios WHERE LOWER(username) = LOWER(?)", (username.strip(),))
             row = cur.fetchone()
             if row:
                 return dict(row)
@@ -65,13 +71,51 @@ class UserRepository:
     def get_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
         with self._connection() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT id, username, password_hash, role, permissoes, totp_secret, totp_enabled FROM usuarios WHERE id = ?", (user_id,))
+            cur.execute("SELECT id, username, password_hash, role, permissoes, totp_secret, totp_enabled, email, google_id FROM usuarios WHERE id = ?", (user_id,))
             row = cur.fetchone()
             if row:
                 return dict(row)
         return None
 
-    def create_user(self, username: str, password_plain: str, role: str = "leitor") -> bool:
+    def get_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        if not email:
+            return None
+        with self._connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT id, username, password_hash, role, permissoes, totp_secret, totp_enabled, email, google_id FROM usuarios WHERE LOWER(email) = LOWER(?)", (email.strip(),))
+            row = cur.fetchone()
+            if row:
+                return dict(row)
+        return None
+
+    def get_by_google_id(self, google_id: str) -> Optional[Dict[str, Any]]:
+        if not google_id:
+            return None
+        with self._connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT id, username, password_hash, role, permissoes, totp_secret, totp_enabled, email, google_id FROM usuarios WHERE google_id = ?", (google_id.strip(),))
+            row = cur.fetchone()
+            if row:
+                return dict(row)
+        return None
+
+    def get_by_username_or_email(self, identifier: str) -> Optional[Dict[str, Any]]:
+        if not identifier:
+            return None
+        clean_id = identifier.strip().lower()
+        with self._connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id, username, password_hash, role, permissoes, totp_secret, totp_enabled, email, google_id "
+                "FROM usuarios WHERE LOWER(username) = ? OR LOWER(email) = ?",
+                (clean_id, clean_id)
+            )
+            row = cur.fetchone()
+            if row:
+                return dict(row)
+        return None
+
+    def create_user(self, username: str, password_plain: str, role: str = "leitor", email: Optional[str] = None) -> bool:
         """Cria um usuário com senha hasheada com salt criptográfico."""
         permissoes_map = {
             "admin": "read,edit,run,sync,admin",
@@ -81,12 +125,13 @@ class UserRepository:
         perms = permissoes_map.get(role, "read")
         pwd_hash = hash_password(password_plain)
         now_str = datetime.now().isoformat()
+        clean_email = email.strip() if email else None
 
         try:
             with self._connection() as conn:
                 conn.execute(
-                    "INSERT INTO usuarios (username, password_hash, role, permissoes, criado_em) VALUES (?, ?, ?, ?, ?)",
-                    (username, pwd_hash, role, perms, now_str)
+                    "INSERT INTO usuarios (username, password_hash, role, permissoes, criado_em, email) VALUES (?, ?, ?, ?, ?, ?)",
+                    (username.strip(), pwd_hash, role, perms, now_str, clean_email)
                 )
                 conn.commit()
             return True
@@ -96,17 +141,47 @@ class UserRepository:
     def list_users(self) -> List[Dict[str, Any]]:
         with self._connection() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT id, username, role, permissoes, criado_em, totp_enabled FROM usuarios")
+            cur.execute("SELECT id, username, role, permissoes, criado_em, totp_enabled, email, google_id FROM usuarios")
             return [dict(r) for r in cur.fetchall()]
 
-    def authenticate(self, username: str, password_plain: str) -> Optional[Dict[str, Any]]:
-        """Autentica o usuário validando a criptografia da senha."""
-        user = self.get_by_username(username)
+    def authenticate(self, username_or_email: str, password_plain: str) -> Optional[Dict[str, Any]]:
+        """Autentica o usuário por username ou email, validando a criptografia da senha."""
+        user = self.get_by_username_or_email(username_or_email)
         if not user:
             return None
         if verify_password(password_plain, user["password_hash"]):
             return user
         return None
+
+    def update_password(self, user_id: int, new_password_plain: str) -> bool:
+        """Atualiza a senha de um usuário no banco de dados."""
+        if not new_password_plain or len(new_password_plain) < 6:
+            return False
+        pwd_hash = hash_password(new_password_plain)
+        with self._connection() as conn:
+            cur = conn.execute("UPDATE usuarios SET password_hash = ? WHERE id = ?", (pwd_hash, user_id))
+            conn.commit()
+            return cur.rowcount > 0
+
+    def update_email(self, user_id: int, email: Optional[str]) -> bool:
+        """Atualiza o email de um usuário."""
+        clean_email = email.strip() if email else None
+        with self._connection() as conn:
+            cur = conn.execute("UPDATE usuarios SET email = ? WHERE id = ?", (clean_email, user_id))
+            conn.commit()
+            return cur.rowcount > 0
+
+    def link_google_account(self, user_id: int, google_id: str, email: Optional[str] = None) -> bool:
+        """Vincula um ID de conta Google e opcionalmente o email ao usuário."""
+        if not google_id:
+            return False
+        with self._connection() as conn:
+            if email:
+                cur = conn.execute("UPDATE usuarios SET google_id = ?, email = COALESCE(email, ?) WHERE id = ?", (google_id.strip(), email.strip(), user_id))
+            else:
+                cur = conn.execute("UPDATE usuarios SET google_id = ? WHERE id = ?", (google_id.strip(), user_id))
+            conn.commit()
+            return cur.rowcount > 0
 
     def init_admin_if_empty(self, admin_user: str, admin_pass: str):
         """Se o banco não tiver nenhum usuário, cria o administrador inicial."""

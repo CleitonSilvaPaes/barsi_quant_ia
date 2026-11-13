@@ -151,3 +151,35 @@ def verify_csrf_token(csrf_token: Optional[str], session_token: Optional[str], s
         return False
 
 
+def create_2fa_pending_token(user_id: int, username: str, secret_key: str, expires_in_sec: int = 300) -> str:
+    """Cria um token temporário assinado de 5 minutos para o segundo fator (TOTP) no fluxo GitHub-like."""
+    payload = {
+        "uid": user_id,
+        "user": username,
+        "type": "2fa_pending",
+        "exp": int(time.time() + expires_in_sec)
+    }
+    payload_json = json.dumps(payload, separators=(',', ':')).encode("utf-8")
+    payload_b64 = base64.urlsafe_b64encode(payload_json).decode("utf-8").rstrip("=")
+    sig = hmac.new(secret_key.encode("utf-8"), payload_b64.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"{payload_b64}.{sig}"
+
+
+def decode_2fa_pending_token(token: Optional[str], secret_key: str) -> Optional[Dict[str, Any]]:
+    """Valida o token temporário de 2FA pendente."""
+    if not token or "." not in token or not secret_key:
+        return None
+    try:
+        payload_b64, signature = token.split(".", 1)
+        expected_sig = hmac.new(secret_key.encode("utf-8"), payload_b64.encode("utf-8"), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature, expected_sig):
+            return None
+        padding = 4 - (len(payload_b64) % 4)
+        if padding != 4:
+            payload_b64 += "=" * padding
+        data = json.loads(base64.urlsafe_b64decode(payload_b64).decode("utf-8"))
+        if data.get("type") != "2fa_pending" or data.get("exp", 0) < time.time():
+            return None
+        return data
+    except Exception:
+        return None

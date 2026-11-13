@@ -8,6 +8,8 @@ import urllib.parse
 from datetime import datetime
 import io
 import sqlite3
+import secrets
+import httpx
 import pandas as pd
 from typing import List, Optional, Dict, Any
 from contextlib import asynccontextmanager
@@ -27,6 +29,8 @@ from barsi.infra.security import (
     decode_session_token,
     generate_csrf_token,
     verify_csrf_token,
+    create_2fa_pending_token,
+    decode_2fa_pending_token,
 )
 from barsi.services.sync_service import SyncService
 from barsi.services.ofx_service import OFXParserService
@@ -52,6 +56,9 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 CSRF_EXEMPT_PATHS = {
     "/login",
+    "/login/2fa",
+    "/auth/google/login",
+    "/auth/google/callback",
     "/api/telegram/webhook",
     "/docs",
     "/openapi.json",
@@ -182,6 +189,13 @@ class NewUserRequest(BaseModel):
     username: str
     password: str
     role: str = "leitor"
+    email: Optional[str] = None
+
+class UpdateUserPasswordRequest(BaseModel):
+    new_password: str
+
+class UpdateUserEmailRequest(BaseModel):
+    email: str
 
 class ArtifactCreateRequest(BaseModel):
     name: str
@@ -371,11 +385,17 @@ async def do_login(request: Request):
     user = repo.authenticate(username, password)
     if user:
         if user.get("totp_enabled"):
-            if not totp_code or not repo.verify_totp(user["id"], totp_code):
-                recent_attempts.append(now)
-                _login_attempts[client_ip] = recent_attempts
-                logger.warning("login_totp_failed", ip=client_ip, username=username, attempts=len(recent_attempts))
-                return RedirectResponse(url="/login?error=Código+2FA+(TOTP)+inválido+ou+ausente&requires_2fa=1", status_code=303)
+            if totp_code:
+                if not repo.verify_totp(user["id"], totp_code):
+                    recent_attempts.append(now)
+                    _login_attempts[client_ip] = recent_attempts
+                    logger.warning("login_totp_failed", ip=client_ip, username=username, attempts=len(recent_attempts))
+                    return RedirectResponse(url="/login?error=Código+2FA+(TOTP)+inválido", status_code=303)
+            else:
+                pending_token = create_2fa_pending_token(user["id"], user["username"], settings.secret_key)
+                res = RedirectResponse(url="/login/2fa", status_code=303)
+                res.set_cookie(key="barsi_2fa_pending", value=pending_token, httponly=True, max_age=300, samesite="lax")
+                return res
 
         _login_attempts.pop(client_ip, None)
         logger.info("login_success", ip=client_ip, username=username, role=user["role"])
@@ -390,6 +410,160 @@ async def do_login(request: Request):
     _login_attempts[client_ip] = recent_attempts
     logger.warning("login_failed", ip=client_ip, username=username, attempts=len(recent_attempts))
     return RedirectResponse(url="/login?error=Usuário+ou+senha+incorretos", status_code=303)
+
+@app.get("/login/2fa", response_class=HTMLResponse)
+async def login_2fa_page(request: Request, error: Optional[str] = None):
+    pending_token = request.cookies.get("barsi_2fa_pending")
+    if not pending_token:
+        return RedirectResponse(url="/login?error=Sessão+2FA+não+iniciada.+Faça+login+primeiro.", status_code=303)
+    data = decode_2fa_pending_token(pending_token, settings.secret_key)
+    if not data:
+        return RedirectResponse(url="/login?error=Sessão+2FA+expirada.+Faça+login+novamente.", status_code=303)
+
+    login_2fa_path = os.path.join(TEMPLATES_DIR, "login_2fa.html")
+    with open(login_2fa_path, "r", encoding="utf-8") as f:
+        html = f.read()
+    err_html = f'<div class="err">{error}</div>' if error else ""
+    csrf_token = generate_csrf_token(pending_token, settings.secret_key)
+    html = html.replace("{{ERROR_MSG}}", err_html).replace("{{CSRF_TOKEN}}", csrf_token)
+    res = HTMLResponse(content=html)
+    res.set_cookie(key="barsi_csrf", value=csrf_token, httponly=False, samesite="lax", path="/")
+    return res
+
+@app.post("/login/2fa")
+async def do_login_2fa(request: Request):
+    pending_token = request.cookies.get("barsi_2fa_pending")
+    if not pending_token:
+        return RedirectResponse(url="/login?error=Sessão+2FA+não+iniciada.+Faça+login+primeiro.", status_code=303)
+    data = decode_2fa_pending_token(pending_token, settings.secret_key)
+    if not data:
+        return RedirectResponse(url="/login?error=Sessão+2FA+expirada.+Faça+login+novamente.", status_code=303)
+
+    body = (await request.body()).decode("utf-8", errors="ignore")
+    params = urllib.parse.parse_qs(body)
+    totp_code = params.get("totp_code", [""])[0].strip()
+
+    repo = get_user_repo()
+    user_id = data["uid"]
+    if not totp_code or not repo.verify_totp(user_id, totp_code):
+        logger.warning("login_2fa_invalid_code", user_id=user_id, username=data.get("user"))
+        return RedirectResponse(url="/login/2fa?error=Código+2FA+inválido.+Tente+novamente.", status_code=303)
+
+    user = repo.get_by_id(user_id)
+    if not user:
+        return RedirectResponse(url="/login?error=Usuário+não+encontrado", status_code=303)
+
+    logger.info("login_2fa_success", user_id=user_id, username=user["username"], role=user["role"])
+    token = create_session_token(user["id"], user["username"], user["role"], settings.secret_key)
+    res = RedirectResponse(url="/", status_code=303)
+    res.set_cookie(key="barsi_session", value=token, httponly=True, max_age=86400 * 7, samesite="lax")
+    csrf_token = generate_csrf_token(token, settings.secret_key)
+    res.set_cookie(key="barsi_csrf", value=csrf_token, httponly=False, max_age=86400 * 7, samesite="lax", path="/")
+    res.delete_cookie(key="barsi_2fa_pending")
+    return res
+
+@app.get("/auth/google/login")
+async def google_login(request: Request):
+    if not settings.google_client_id:
+        return RedirectResponse(
+            url="/login?error=Google+OAuth+ainda+não+configurado.+Configure+BARSI_GOOGLE_CLIENT_ID+no+ambiente.",
+            status_code=303
+        )
+    state = secrets.token_urlsafe(24)
+    redirect_uri = settings.google_redirect_uri
+    if not redirect_uri:
+        redirect_uri = str(request.base_url).rstrip("/") + "/auth/google/callback"
+    params = {
+        "client_id": settings.google_client_id,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "state": state,
+        "access_type": "offline",
+        "prompt": "select_account",
+    }
+    auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?{urllib.parse.urlencode(params)}"
+    res = RedirectResponse(url=auth_url, status_code=303)
+    res.set_cookie(key="barsi_oauth_state", value=state, httponly=True, max_age=600, samesite="lax")
+    return res
+
+@app.get("/auth/google/callback")
+async def google_callback(request: Request, code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
+    if error:
+        return RedirectResponse(url=f"/login?error=Autenticação+Google+cancelada:+{urllib.parse.quote(error)}", status_code=303)
+    if not code or not state:
+        return RedirectResponse(url="/login?error=Parâmetros+OAuth+inválidos", status_code=303)
+    cookie_state = request.cookies.get("barsi_oauth_state")
+    if not cookie_state or cookie_state != state:
+        return RedirectResponse(url="/login?error=Estado+OAuth+inválido+ou+expirado", status_code=303)
+
+    redirect_uri = settings.google_redirect_uri
+    if not redirect_uri:
+        redirect_uri = str(request.base_url).rstrip("/") + "/auth/google/callback"
+
+    token_url = "https://oauth2.googleapis.com/token"
+    token_data = {
+        "code": code,
+        "client_id": settings.google_client_id,
+        "client_secret": settings.google_client_secret,
+        "redirect_uri": redirect_uri,
+        "grant_type": "authorization_code",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            token_resp = await client.post(token_url, data=token_data)
+            if token_resp.status_code != 200:
+                logger.error("google_oauth_token_exchange_failed", status=token_resp.status_code, body=token_resp.text)
+                return RedirectResponse(url="/login?error=Falha+na+comunicação+com+o+Google", status_code=303)
+            tokens = token_resp.json()
+            access_token = tokens.get("access_token")
+            userinfo_resp = await client.get(
+                "https://www.googleapis.com/oauth2/v3/userinfo",
+                headers={"Authorization": f"Bearer {access_token}"}
+            )
+            if userinfo_resp.status_code != 200:
+                return RedirectResponse(url="/login?error=Falha+ao+obter+dados+do+Google", status_code=303)
+            userinfo = userinfo_resp.json()
+    except Exception as e:
+        logger.error("google_oauth_exception", error=str(e))
+        return RedirectResponse(url=f"/login?error=Erro+no+login+com+Google:+{urllib.parse.quote(str(e))}", status_code=303)
+
+    google_id = userinfo.get("sub")
+    email = userinfo.get("email")
+    if not email:
+        return RedirectResponse(url="/login?error=Google+não+retornou+o+email+do+usuário", status_code=303)
+
+    repo = get_user_repo()
+    user = repo.get_by_google_id(google_id)
+    if not user:
+        user = repo.get_by_email(email)
+        if user:
+            repo.link_google_account(user["id"], google_id, email)
+        else:
+            users = repo.list_users()
+            if len(users) == 1:
+                user = repo.get_by_id(users[0]["id"])
+                repo.link_google_account(user["id"], google_id, email)
+            else:
+                return RedirectResponse(
+                    url=f"/login?error=Conta+Google+({urllib.parse.quote(email)})+não+vinculada.+Solicite+ao+administrador.",
+                    status_code=303
+                )
+
+    if user.get("totp_enabled"):
+        pending_token = create_2fa_pending_token(user["id"], user["username"], settings.secret_key)
+        res = RedirectResponse(url="/login/2fa", status_code=303)
+        res.set_cookie(key="barsi_2fa_pending", value=pending_token, httponly=True, max_age=300, samesite="lax")
+        res.delete_cookie(key="barsi_oauth_state")
+        return res
+
+    token = create_session_token(user["id"], user["username"], user["role"], settings.secret_key)
+    res = RedirectResponse(url="/", status_code=303)
+    res.set_cookie(key="barsi_session", value=token, httponly=True, max_age=86400 * 7, samesite="lax")
+    csrf_token = generate_csrf_token(token, settings.secret_key)
+    res.set_cookie(key="barsi_csrf", value=csrf_token, httponly=False, max_age=86400 * 7, samesite="lax", path="/")
+    res.delete_cookie(key="barsi_oauth_state")
+    return res
 
 @app.get("/logout")
 async def do_logout():
@@ -1015,6 +1189,8 @@ async def list_admin_users(request: Request):
     return [{
         "id": u["id"],
         "username": u["username"],
+        "email": u.get("email"),
+        "google_id": u.get("google_id"),
         "role": u["role"],
         "totp_enabled": bool(u.get("totp_enabled")),
         "created_at": u.get("criado_em")
@@ -1359,10 +1535,42 @@ async def create_admin_user(req: NewUserRequest, request: Request):
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Acesso restrito a administradores")
     repo = get_user_repo()
-    success = repo.create_user(req.username, req.password, req.role)
+    success = repo.create_user(req.username, req.password, req.role, email=req.email)
     if not success:
         raise HTTPException(status_code=400, detail="Nome de usuário já existe ou inválido")
-    return {"ok": True, "username": req.username, "role": req.role}
+    return {"ok": True, "username": req.username, "role": req.role, "email": req.email}
+
+@app.post("/api/admin/users/{user_id}/password")
+async def update_user_password_admin(user_id: int, req: UpdateUserPasswordRequest, request: Request):
+    user = require_role_action(request, action_type="admin")
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Acesso restrito a administradores")
+    if not req.new_password or len(req.new_password) < 6:
+        raise HTTPException(status_code=400, detail="A nova senha deve ter no mínimo 6 caracteres")
+    repo = get_user_repo()
+    target = repo.get_by_id(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado")
+    success = repo.update_password(user_id, req.new_password)
+    if not success:
+        raise HTTPException(status_code=500, detail="Falha ao atualizar a senha do usuário")
+    logger.info("admin_password_updated", admin=user.get("username"), target=target.get("username"), user_id=user_id)
+    return {"ok": True, "message": f"Senha do usuário '{target.get('username')}' atualizada com sucesso!"}
+
+@app.post("/api/admin/users/{user_id}/email")
+async def update_user_email_admin(user_id: int, req: UpdateUserEmailRequest, request: Request):
+    user = require_role_action(request, action_type="admin")
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Acesso restrito a administradores")
+    repo = get_user_repo()
+    target = repo.get_by_id(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado")
+    success = repo.update_email(user_id, req.email)
+    if not success:
+        raise HTTPException(status_code=500, detail="Falha ao atualizar o email do usuário")
+    logger.info("admin_email_updated", admin=user.get("username"), target=target.get("username"), email=req.email)
+    return {"ok": True, "message": f"Email do usuário '{target.get('username')}' atualizado para '{req.email}'."}
 
 @app.get("/api/backup/download")
 async def download_backup_sqlite(request: Request):
