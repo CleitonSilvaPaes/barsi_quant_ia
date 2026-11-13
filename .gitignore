@@ -53,5 +53,5 @@ recente.txt
 # git secrets
 .secrets
 
-# Pastas de cache acidental
-cleiton/
+# Pasta agents
+.agents/

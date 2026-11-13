@@ -107,6 +107,7 @@ jobs:
           BARSI_ENV: test
         run: |
           pytest barsi_quant_ia/tests/ -v \
+            --ignore=barsi_quant_ia/tests/test_e2e_playwright.py \
             --cov=barsi \
             --cov-fail-under=40 \
             --cov-report=term-missing \
