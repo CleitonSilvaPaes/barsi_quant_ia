@@ -383,6 +383,25 @@ def test_snapshot_today_skipped_when_empty_portfolio(auth_client, monkeypatch):
     assert data["reason"] == "empty_portfolio"
 
 
+def test_security_headers_present(auth_client):
+    """Valida a presença de headers de segurança e CSP nas respostas HTTP."""
+    res = auth_client.get("/carteira")
+    assert res.status_code == 200
+    assert res.headers.get("X-Content-Type-Options") == "nosniff"
+    assert res.headers.get("X-Frame-Options") == "DENY"
+    assert "Content-Security-Policy" in res.headers
+    assert "script-src 'self'" in res.headers["Content-Security-Policy"]
+
+
+def test_static_files_served(auth_client):
+    """Valida que os scripts estáticos extraídos são servidos corretamente via /static."""
+    for script_name in ["common.js", "carteira.js", "insights.js", "admin.js", "extratos.js"]:
+        res = auth_client.get(f"/static/js/{script_name}")
+        assert res.status_code == 200, f"Falha ao servir /static/js/{script_name}"
+        assert "javascript" in res.headers.get("content-type", "")
+
+
+
 
 
 

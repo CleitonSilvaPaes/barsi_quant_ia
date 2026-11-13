@@ -244,7 +244,7 @@ def sync_tvbox(
         remote_dirs = set()
         for root, _, files in os.walk(root_src):
             for file in files:
-                if file.endswith((".py", ".html", ".json", ".sql")) and "__pycache__" not in root:
+                if file.endswith((".py", ".html", ".json", ".sql", ".js", ".css")) and "__pycache__" not in root:
                     local_p = os.path.join(root, file)
                     rel_p = os.path.relpath(local_p, root_src).replace("\\", "/")
                     remote_p = f"{remote_home}/src/barsi/{rel_p}"
