@@ -23,6 +23,7 @@
 
 <div class="actions-bar">
   <button class="btn btn-green" onclick="salvarAlteracoes()">💾 Salvar Edições</button>
+  <button class="btn btn-primary" onclick="abrirModalNovoAtivo()">➕ Adicionar Ativo</button>
   <button class="btn btn-primary" onclick="executarSync()">🚀 Sincronizar Cotações B3</button>
   <button class="btn btn-amber" onclick="conciliarOFXCarteira()">📑 Conciliar Aportes OFX</button>
   <button class="btn btn-outline" onclick="exportarSheets()">📤 Exportar Sheets</button>
@@ -30,7 +31,8 @@
   <button class="btn btn-outline" onclick="carregarCarteira()">🔄 Recarregar</button>
 
   <div style="margin-left: auto; display: flex; gap: 0.5rem; flex-wrap: wrap;">
-    <input type="text" id="filtro-busca" class="tbl-input" placeholder="🔍 Buscar ticker ou empresa..." style="width: 220px;" oninput="aplicarFiltros()" />
+    <input type="text" id="filtro-busca" class="tbl-input" placeholder="🔍 Buscar ticker ou empresa..."
+      style="width: 220px;" oninput="aplicarFiltros()" />
     <select id="filtro-setor" class="tbl-input" style="width: 150px;" onchange="aplicarFiltros()">
       <option value="">Todos os Setores</option>
       <option value="Bancos">Bancos</option>
@@ -47,11 +49,13 @@
   </div>
 </div>
 
-<div id="aviso-custo-medio-zero" style="display: none; margin-bottom: 1rem; padding: 0.75rem 1rem; border-radius: 8px; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); color: #f59e0b; font-size: 0.85rem; align-items: center; gap: 0.6rem;">
+<div id="aviso-custo-medio-zero"
+  style="display: none; margin-bottom: 1rem; padding: 0.75rem 1rem; border-radius: 8px; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); color: #f59e0b; font-size: 0.85rem; align-items: center; gap: 0.6rem;">
   <span style="font-size: 1.1rem;">⚠️</span>
   <div>
-    <strong>Atenção ao Custo Médio:</strong> Existem ativos na carteira com Custo Médio não preenchido (R$ 0,00). 
-    Recomendamos informar o custo médio das suas cotas antigas na tabela abaixo e salvar antes de conciliar novos aportes para assegurar o cálculo correto do Yield on Cost (YoC).
+    <strong>Atenção ao Custo Médio:</strong> Existem ativos na carteira com Custo Médio não preenchido (R$ 0,00).
+    Recomendamos informar o custo médio das suas cotas antigas na tabela abaixo e salvar antes de conciliar novos
+    aportes para assegurar o cálculo correto do Yield on Cost (YoC).
   </div>
 </div>
 
@@ -63,22 +67,29 @@
           <th onclick="ordenarPor('ticker')" style="cursor:pointer;">Ativo / Setor ⬍</th>
           <th style="text-align: right; min-width: 90px;">Qtd Atual</th>
           <th style="text-align: right; min-width: 90px;">Aporte (Qtd)</th>
-          <th style="text-align: right; min-width: 80px;" onclick="ordenarPor('qtd_total')" style="cursor:pointer;">Qtd Total ⬍</th>
+          <th style="text-align: right; min-width: 80px;" onclick="ordenarPor('qtd_total')" style="cursor:pointer;">Qtd
+            Total ⬍</th>
           <th style="text-align: right;" onclick="ordenarPor('preco')" style="cursor:pointer;">Cotação ⬍</th>
           <th style="text-align: right;" onclick="ordenarPor('teto')" style="cursor:pointer;">Preço Teto ⬍</th>
           <th style="text-align: right;" onclick="ordenarPor('margem')" style="cursor:pointer;">Margem ⬍</th>
-          <th style="text-align: right; min-width: 85px;" onclick="ordenarPor('custo_medio')" style="cursor:pointer;">Custo Médio ⬍</th>
-          <th style="text-align: right; min-width: 75px;" onclick="ordenarPor('yield_on_cost')" style="cursor:pointer;">YoC ⬍</th>
+          <th style="text-align: right; min-width: 85px;" onclick="ordenarPor('custo_medio')" style="cursor:pointer;">
+            Custo Médio ⬍</th>
+          <th style="text-align: right; min-width: 75px;" onclick="ordenarPor('yield_on_cost')" style="cursor:pointer;">
+            YoC ⬍</th>
           <th style="text-align: right; min-width: 85px;">DPA Proj.</th>
-          <th style="text-align: right;" onclick="ordenarPor('valor_atual')" style="cursor:pointer;">Patrimônio Atual ⬍</th>
-          <th style="text-align: right;" onclick="ordenarPor('total_aporte')" style="cursor:pointer;">Total Aporte ⬍</th>
+          <th style="text-align: right;" onclick="ordenarPor('valor_atual')" style="cursor:pointer;">Patrimônio Atual ⬍
+          </th>
+          <th style="text-align: right;" onclick="ordenarPor('total_aporte')" style="cursor:pointer;">Total Aporte ⬍
+          </th>
           <th style="text-align: center;">Decisão</th>
           <th style="min-width: 200px;">Feedback do Usuário</th>
           <th style="text-align: center; width: 60px;">Ações</th>
         </tr>
       </thead>
       <tbody id="tbl-body">
-        <tr><td colspan="15" style="text-align:center; color: var(--text-muted);">Carregando ativos da carteira...</td></tr>
+        <tr>
+          <td colspan="15" style="text-align:center; color: var(--text-muted);">Carregando ativos da carteira...</td>
+        </tr>
       </tbody>
     </table>
   </div>
@@ -88,14 +99,17 @@
 <div id="carteira-artifacts-section" style="display: none; margin-top: 1.5rem;">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
     <h3 style="color: var(--accent); font-size: 1.05rem; margin: 0;">🎨 Relatórios & Artefatos Personalizados</h3>
-    <a href="/analytics" style="color: var(--accent); font-size: 0.8rem; text-decoration: none;">Gerenciar no Analytics →</a>
+    <a href="/analytics" style="color: var(--accent); font-size: 0.8rem; text-decoration: none;">Gerenciar no Analytics
+      →</a>
   </div>
   <div id="carteira-artifacts-container" class="responsive-grid-artifacts"></div>
 </div>
 
 <!-- Drawer Lateral de Detalhes do Ativo -->
-<div id="asset-drawer" style="display:none; position:fixed; top:0; right:0; width:400px; height:100vh; background:#0f172a; border-left:1px solid var(--border); box-shadow:-10px 0 25px rgba(0,0,0,0.5); z-index:200; padding:1.5rem; overflow-y:auto;">
-  <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); padding-bottom:1rem; margin-bottom:1rem;">
+<div id="asset-drawer"
+  style="display:none; position:fixed; top:0; right:0; width:400px; height:100vh; background:#0f172a; border-left:1px solid var(--border); box-shadow:-10px 0 25px rgba(0,0,0,0.5); z-index:200; padding:1.5rem; overflow-y:auto;">
+  <div
+    style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); padding-bottom:1rem; margin-bottom:1rem;">
     <div>
       <h2 id="drawer-ticker" style="color:var(--accent); font-size:1.4rem;">TICKER</h2>
       <div id="drawer-empresa" style="font-size:0.85rem; color:var(--text-muted);">Empresa S.A.</div>
@@ -117,13 +131,81 @@
     </div>
 
     <div style="background:#1e293b; border:1px solid var(--border); border-radius:8px; padding:1rem;">
-      <h4 style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; margin-bottom:0.5rem;">Último Insight da IA</h4>
+      <h4 style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; margin-bottom:0.5rem;">Último
+        Insight da IA</h4>
       <div id="drawer-insight" style="font-size:0.85rem; color:#cbd5e1; line-height:1.4;">Carregando análise...</div>
     </div>
 
     <div style="margin-top:0.5rem;">
-      <a href="/insights" class="btn btn-primary" style="width:100%; justify-content:center;">🧠 Ver e Validar na Central de Insights</a>
+      <a href="/insights" class="btn btn-primary" style="width:100%; justify-content:center;">🧠 Ver e Validar na
+        Central de Insights</a>
     </div>
+  </div>
+</div>
+
+<!-- Modal Adicionar Novo Ativo -->
+<div id="modal-novo-ativo"
+  style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:250; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+  <div
+    style="background:#1e293b; border:1px solid var(--border); border-radius:12px; width:90%; max-width:480px; padding:1.5rem; box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
+    <div
+      style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; border-bottom:1px solid var(--border); padding-bottom:0.75rem;">
+      <h3 style="color:var(--accent); font-size:1.1rem; margin:0;">➕ Adicionar Ativo à Carteira</h3>
+      <button onclick="fecharModalNovoAtivo()" class="btn btn-outline" style="padding:0.2rem 0.5rem;">✕</button>
+    </div>
+    <form onsubmit="adicionarAtivo(event)" style="display:flex; flex-direction:column; gap:0.9rem;">
+      <div>
+        <label style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Ticker (ex: BBAS3, TAEE11,
+          MXRF11)</label>
+        <input type="text" id="novo-ticker" class="tbl-input" required placeholder="BBAS3"
+          style="width:100%; text-transform:uppercase; font-weight:700;" />
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.75rem;">
+        <div>
+          <label style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Qtd Custodiada</label>
+          <input type="number" id="novo-qtd" class="tbl-input" min="0" value="0" style="width:100%;" />
+        </div>
+        <div>
+          <label style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Cotação Atual
+            (R$)</label>
+          <input type="number" step="0.01" id="novo-preco" class="tbl-input" min="0" value="0.00" style="width:100%;" />
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.75rem;">
+        <div>
+          <label style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Preço Teto (R$)</label>
+          <input type="number" step="0.01" id="novo-teto" class="tbl-input" min="0" value="0.00" style="width:100%;" />
+        </div>
+        <div>
+          <label style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">DPA Projetado
+            (R$)</label>
+          <input type="number" step="0.01" id="novo-dpa" class="tbl-input" min="0" value="0.00" style="width:100%;" />
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.75rem;">
+        <div>
+          <label style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Custo Médio (R$)</label>
+          <input type="number" step="0.01" id="novo-cmedio" class="tbl-input" min="0" value="0.00"
+            style="width:100%;" />
+        </div>
+        <div>
+          <label style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Setor</label>
+          <select id="novo-setor" class="tbl-input" style="width:100%;">
+            <option value="Bancos">Bancos</option>
+            <option value="Energia">Energia</option>
+            <option value="Saneamento">Saneamento</option>
+            <option value="Seguros">Seguros</option>
+            <option value="Telecomunicações">Telecomunicações</option>
+            <option value="FII">FII</option>
+            <option value="Outros">Outros</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:0.5rem;">
+        <button type="button" onclick="fecharModalNovoAtivo()" class="btn btn-outline">Cancelar</button>
+        <button type="submit" class="btn btn-green">Salvar Ativo</button>
+      </div>
+    </form>
   </div>
 </div>
 

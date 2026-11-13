@@ -8,6 +8,7 @@
 
 <div class="actions-bar" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
   <button class="btn btn-green" onclick="conciliarExtratos()">📑 Executar Conciliação com SQLite & Sheets</button>
+  <button class="btn btn-primary" onclick="abrirModalCategorias()">🏷️ Gerenciar Categorias</button>
   <button class="btn btn-outline" onclick="arquivarExtratos()">📦 Mover para Processados</button>
   <button class="btn btn-amber" onclick="sincronizarTVBox()">🔄 Sincronizar com TV Box</button>
   <button class="btn btn-outline" onclick="carregarExtratos()">🔄 Recarregar</button>
@@ -20,9 +21,28 @@
 <div id="extrato-log" style="display:none; background:#090d16; border:1px solid var(--border); border-radius:6px; padding:0.75rem 1rem; font-family:monospace; font-size:0.8rem; color:#38bdf8; margin-bottom:1.5rem;"></div>
 
 <div class="card" style="padding:0; overflow:hidden;">
-  <div style="padding: 1rem 1.25rem; border-bottom: 1px solid var(--border);">
-    <h3 style="font-size: 1rem; color: #fff;">📋 Últimas Transações Conciliadas</h3>
+  <div style="padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+    <h3 style="font-size: 1rem; color: #fff; margin: 0;">📋 Transações Bancárias Conciliadas</h3>
+    
+    <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+      <input type="text" id="filtro-busca-transacoes" class="tbl-input" placeholder="🔍 Buscar por descrição ou categoria..." style="width: 240px; font-size: 0.82rem;" oninput="onSearchInput()" />
+      
+      <select id="filtro-cat-transacoes" class="tbl-input" style="width: 160px; font-size: 0.82rem;" onchange="onCategoryChange()">
+        <option value="">Todas as Categorias</option>
+      </select>
+
+      <div style="display: flex; align-items: center; gap: 0.3rem;">
+        <label style="font-size: 0.8rem; color: var(--text-muted);">Exibir:</label>
+        <select id="select-limit-transacoes" class="tbl-input" style="width: 75px; font-size: 0.82rem;" onchange="onLimitChange(this.value)">
+          <option value="10" selected>10</option>
+          <option value="25">25</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+        </select>
+      </div>
+    </div>
   </div>
+
   <div style="overflow-x: auto;">
     <table>
       <thead>
@@ -33,16 +53,125 @@
           <th>Tipo</th>
           <th style="text-align: right;">Valor (R$)</th>
           <th style="text-align: center;">Status</th>
+          <th style="text-align: center; width: 100px;">Ações</th>
         </tr>
       </thead>
       <tbody id="transacoes-body">
         <tr>
-          <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">
+          <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 2rem;">
             Nenhum extrato importado ainda. Selecione ou arraste um arquivo <strong>.OFX</strong> acima para conciliar suas contas.
           </td>
         </tr>
       </tbody>
     </table>
+  </div>
+
+  <!-- Barra de Paginação -->
+  <div style="padding: 0.75rem 1.25rem; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: rgba(15, 23, 42, 0.4);">
+    <div id="paginacao-info" style="font-size: 0.82rem; color: var(--text-muted);">
+      Mostrando 0 de 0 transações
+    </div>
+    <div style="display: flex; gap: 0.5rem; align-items: center;">
+      <button class="btn btn-outline" id="btn-pag-prev" onclick="paginaAnterior()" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;" disabled>◀ Anterior</button>
+      <span style="font-size: 0.82rem; color: var(--text-muted);">Página <strong id="pag-atual" style="color: #fff;">1</strong> de <strong id="pag-total" style="color: #fff;">1</strong></span>
+      <button class="btn btn-outline" id="btn-pag-next" onclick="proximaPagina()" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;" disabled>Próxima ▶</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Editar Transação -->
+<div id="modal-editar-transacao" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:250; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+  <div style="background:#1e293b; border:1px solid var(--border); border-radius:12px; width:90%; max-width:480px; padding:1.5rem; box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; border-bottom:1px solid var(--border); padding-bottom:0.75rem;">
+      <h3 style="color:var(--accent); font-size:1.1rem; margin:0;">✏️ Editar Transação</h3>
+      <button onclick="fecharModalEditarTransacao()" class="btn btn-outline" style="padding:0.2rem 0.5rem;">✕</button>
+    </div>
+    <form onsubmit="salvarEdicaoTransacao(event)" style="display:flex; flex-direction:column; gap:0.9rem;">
+      <input type="hidden" id="edit-t-id" />
+      <div>
+        <label style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Descrição</label>
+        <input type="text" id="edit-t-desc" class="tbl-input" required style="width:100%; font-weight:600;" />
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.75rem;">
+        <div>
+          <label style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Data (YYYY-MM-DD)</label>
+          <input type="date" id="edit-t-data" class="tbl-input" required style="width:100%;" />
+        </div>
+        <div>
+          <label style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Valor (R$)</label>
+          <input type="number" step="0.01" id="edit-t-valor" class="tbl-input" required min="0" style="width:100%; font-weight:600;" />
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.75rem;">
+        <div>
+          <label style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Categoria</label>
+          <select id="edit-t-cat" class="tbl-input" style="width:100%;">
+            <!-- Populado dinamicamente -->
+          </select>
+        </div>
+        <div>
+          <label style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Tipo</label>
+          <select id="edit-t-tipo" class="tbl-input" style="width:100%;">
+            <option value="DEBIT">DEBIT (Despesa / Saída)</option>
+            <option value="CREDIT">CREDIT (Receita / Entrada)</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:0.5rem;">
+        <button type="button" onclick="fecharModalEditarTransacao()" class="btn btn-outline">Cancelar</button>
+        <button type="submit" class="btn btn-green">Salvar Alterações</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Modal Gerenciar Categorias (CRUD) -->
+<div id="modal-categorias" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:250; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+  <div style="background:#1e293b; border:1px solid var(--border); border-radius:12px; width:92%; max-width:650px; padding:1.5rem; max-height:85vh; display:flex; flex-direction:column; box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; border-bottom:1px solid var(--border); padding-bottom:0.75rem;">
+      <h3 style="color:var(--accent); font-size:1.1rem; margin:0;">🏷️ Gerenciar Categorias de Despesas & Receitas</h3>
+      <button onclick="fecharModalCategorias()" class="btn btn-outline" style="padding:0.2rem 0.5rem;">✕</button>
+    </div>
+
+    <!-- Formulário Nova Categoria -->
+    <form onsubmit="adicionarCategoria(event)" style="background:#0f172a; padding:0.85rem; border-radius:8px; border:1px solid var(--border); display:flex; gap:0.6rem; align-items:flex-end; margin-bottom:1rem; flex-wrap:wrap;">
+      <div style="flex:1; min-width:180px;">
+        <label style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Nome da Categoria</label>
+        <input type="text" id="nova-cat-nome" class="tbl-input" placeholder="Ex: Farmácia, Academia..." required style="width:100%; font-size:0.85rem;" />
+      </div>
+      <div style="width:150px;">
+        <label style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Tipo</label>
+        <select id="nova-cat-tipo" class="tbl-input" style="width:100%; font-size:0.85rem;">
+          <option value="variavel">Variável</option>
+          <option value="fixa">Fixa</option>
+          <option value="tributo">Tributo</option>
+          <option value="reserva">Reserva</option>
+          <option value="investimento">Investimento</option>
+          <option value="entrada">Entrada</option>
+        </select>
+      </div>
+      <button type="submit" class="btn btn-green" style="font-size:0.85rem; padding:0.4rem 0.8rem;">➕ Adicionar</button>
+    </form>
+
+    <!-- Lista de Categorias -->
+    <div style="overflow-y:auto; flex:1; border:1px solid var(--border); border-radius:8px;">
+      <table style="width:100%; font-size:0.85rem;">
+        <thead style="position:sticky; top:0; background:#0f172a;">
+          <tr>
+            <th style="padding:0.6rem 0.8rem;">Nome</th>
+            <th style="padding:0.6rem 0.8rem;">Tipo</th>
+            <th style="padding:0.6rem 0.8rem; text-align:center; width:90px;">Ações</th>
+          </tr>
+        </thead>
+        <tbody id="categorias-lista-body">
+          <tr><td colspan="3" style="text-align:center; color:var(--text-muted); padding:1.5rem;">Carregando categorias...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div style="display:flex; justify-content:flex-end; margin-top:1rem;">
+      <button onclick="fecharModalCategorias()" class="btn btn-outline">Fechar</button>
+    </div>
   </div>
 </div>
 

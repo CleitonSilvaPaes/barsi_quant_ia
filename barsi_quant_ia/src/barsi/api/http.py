@@ -140,15 +140,29 @@ def get_user_repo() -> UserRepository:
 
 class EditItem(BaseModel):
     ticker: str
-    row_index: int
-    div_proj: float
+    row_index: Optional[int] = 0
+    div_proj: Optional[float] = None
     preco_atual: Optional[float] = Field(default=None, ge=0)
     qtd_antes: Optional[int] = Field(default=None, ge=0)
     qtd_aporte: Optional[int] = Field(default=None, ge=0)
     preco_teto: Optional[float] = Field(default=None, ge=0)
+    margem: Optional[float] = None
+    patrimonio: Optional[float] = Field(default=None, ge=0)
     teto_manual: Optional[bool] = None
     custo_medio: Optional[float] = Field(default=None, ge=0)
     feedback: str = ""
+
+class CategoryRequest(BaseModel):
+    name: str
+    kind: str = "variavel"
+    active: bool = True
+
+class UpdateTransacaoRequest(BaseModel):
+    descricao: str
+    categoria: str
+    valor: float
+    data: str
+    tipo: Optional[str] = None
 
 class DividendItem(BaseModel):
     ticker: str
@@ -230,18 +244,18 @@ def get_sync_service() -> SyncService:
 
 async def get_canonical_positions() -> List[Position]:
     """Obtém as posições canônicas do SQLite (fonte da verdade).
-    Caso o SQLite esteja vazio (primeiro boot ou banco novo), busca seed do Google Sheets."""
+    Em ambiente de teste automatizado (pytest), caso o SQLite esteja vazio, permite mock seed."""
     budget_repo = BudgetRepository(settings.sqlite_db_path)
     positions = budget_repo.load_positions()
-    if not positions:
+    if not positions and (os.getenv("PYTEST_CURRENT_TEST") or settings.env in ("test", "testing")):
         try:
             sheets = AdapterFactory.create_sheets_adapter(settings)
             positions = await sheets.load_positions()
             if positions:
                 budget_repo.save_positions(positions)
-                logger.info("sqlite_seeded_from_sheets", count=len(positions))
+                logger.info("sqlite_test_seeded_from_sheets", count=len(positions))
         except Exception as e:
-            logger.warning("sheets_initial_seed_failed", error=str(e))
+            logger.warning("sheets_test_seed_failed", error=str(e))
     return positions
 
 def get_current_user(request: Request) -> Optional[Dict[str, Any]]:
@@ -747,7 +761,7 @@ async def save_carteira_edits(req: SaveEditsRequest, request: Request):
 
     for item in req.items:
         preco_ref = item.preco_atual or (pos_map[item.ticker].preco_atual if item.ticker in pos_map else 0.0)
-        if item.div_proj > 0:
+        if item.div_proj is not None and item.div_proj > 0:
             if preco_ref <= 0:
                 raise HTTPException(
                     status_code=400,
@@ -763,7 +777,8 @@ async def save_carteira_edits(req: SaveEditsRequest, request: Request):
 
         if item.ticker in pos_map:
             p = pos_map[item.ticker]
-            p.div_proj = item.div_proj
+            if item.div_proj is not None:
+                p.div_proj = item.div_proj
             if item.preco_atual is not None and item.preco_atual > 0:
                 p.preco_atual = item.preco_atual
             if item.teto_manual is not None:
@@ -772,6 +787,16 @@ async def save_carteira_edits(req: SaveEditsRequest, request: Request):
                 p.custo_medio = item.custo_medio
             if item.preco_teto is not None and item.preco_teto > 0:
                 p.preco_teto = item.preco_teto
+                p.teto_manual = True
+            if item.margem is not None:
+                p.margem_seguranca = item.margem
+                if p.preco_atual > 0:
+                    p.preco_teto = round(p.preco_atual * (1.0 + (item.margem / 100.0)), 2)
+                    p.teto_manual = True
+            if item.patrimonio is not None and item.patrimonio >= 0:
+                if p.preco_atual > 0:
+                    p.qtd_antes = max(0, int(round(item.patrimonio / p.preco_atual)))
+                p.valor_total = round(item.patrimonio, 2)
             if item.qtd_antes is not None:
                 p.qtd_antes = max(0, item.qtd_antes)
             if item.qtd_aporte is not None:
@@ -779,21 +804,32 @@ async def save_carteira_edits(req: SaveEditsRequest, request: Request):
             p.qtd_total = p.qtd_antes + p.qtd_aporte
             p.valor_total = round(p.qtd_total * p.preco_atual, 2)
             p.total_aporte = round(p.qtd_aporte * p.preco_atual, 2)
-            p.feedback_usuario = item.feedback
+            if item.feedback:
+                p.feedback_usuario = item.feedback
             atualizar_posicao_quant(p, p.preco_atual, p.div_proj)
         else:
-            # Caso a posição não exista previamente, cria com preço informado ou 0.0
-            # (Se 0.0, será atualizado na próxima sincronização de mercado via /api/run)
             preco = item.preco_atual if (item.preco_atual is not None and item.preco_atual > 0) else 0.0
+            div_p = item.div_proj or 0.0
+            teto = item.preco_teto or 0.0
+            teto_man = bool(item.teto_manual) or (item.preco_teto is not None and item.preco_teto > 0)
+            if item.margem is not None:
+                if preco > 0:
+                    teto = round(preco * (1.0 + (item.margem / 100.0)), 2)
+                    teto_man = True
+
+            q_antes = max(0, item.qtd_antes or 0)
+            if item.patrimonio is not None and item.patrimonio >= 0 and preco > 0:
+                q_antes = max(0, int(round(item.patrimonio / preco)))
+
             p = Position(
-                ticker=item.ticker,
+                ticker=item.ticker.strip().upper(),
                 row_index=item.row_index if item.row_index and item.row_index >= 10 else 10 + len(positions),
                 preco_atual=preco,
-                div_proj=item.div_proj,
-                qtd_antes=max(0, item.qtd_antes or 0),
+                div_proj=div_p,
+                qtd_antes=q_antes,
                 qtd_aporte=max(0, item.qtd_aporte or 0),
-                preco_teto=item.preco_teto or 0.0,
-                teto_manual=bool(item.teto_manual),
+                preco_teto=teto,
+                teto_manual=teto_man,
                 custo_medio=item.custo_medio or 0.0,
                 feedback_usuario=item.feedback
             )
@@ -811,6 +847,23 @@ async def save_carteira_edits(req: SaveEditsRequest, request: Request):
         "status": "ok",
         "updated_count": len(req.items)
     }
+
+@app.put("/api/carteira/{ticker}")
+async def update_single_carteira_position(ticker: str, item: EditItem, request: Request):
+    """Atualiza ou cria uma única posição da carteira."""
+    require_role_action(request, action_type="edit")
+    item.ticker = ticker.strip().upper()
+    return await save_carteira_edits(SaveEditsRequest(items=[item]), request)
+
+@app.delete("/api/carteira/{ticker}")
+async def delete_carteira_position(ticker: str, request: Request):
+    """Exclui uma posição da carteira pelo ticker."""
+    require_role_action(request, action_type="edit")
+    budget_repo = BudgetRepository(settings.sqlite_db_path)
+    success = budget_repo.delete_position(ticker)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Ativo {ticker} não encontrado na carteira.")
+    return {"status": "ok", "message": f"Ativo {ticker} excluído com sucesso."}
 
 @app.get("/api/simulador")
 async def get_simulador(request: Request):
@@ -1067,10 +1120,13 @@ async def get_analytics_data(request: Request, months: int = 12):
         setores[setor] = round(setores.get(setor, 0.0) + val, 2)
 
     budget_repo = BudgetRepository(settings.sqlite_db_path)
-    snapshots = budget_repo.build_real_portfolio_snapshots(limit_months=months)
-    if not snapshots or len(snapshots) < 3:
-        budget_repo.seed_initial_snapshots_if_empty(round(soma_patrimonio, 2), soma_cotas, setores)
-        snapshots = budget_repo.get_portfolio_snapshots(months)
+    if not positions or soma_patrimonio <= 0:
+        snapshots = []
+    else:
+        snapshots = budget_repo.build_real_portfolio_snapshots(limit_months=months)
+        if not snapshots or len(snapshots) < 3:
+            budget_repo.seed_initial_snapshots_if_empty(round(soma_patrimonio, 2), soma_cotas, setores)
+            snapshots = budget_repo.get_portfolio_snapshots(months)
 
     # Gera histórico de dividendos dinamicamente a partir dos snapshots
     dividendos = []
@@ -1293,16 +1349,89 @@ async def get_transacoes_endpoint(
     request: Request,
     mes_ano: Optional[str] = None,
     categoria: Optional[str] = None,
-    limit: int = 50,
+    search: Optional[str] = None,
+    limit: int = 10,
     offset: int = 0
 ):
-    """Lista as transações bancárias/cartão persistidas no SQLite com paginação."""
+    """Lista as transações bancárias/cartão persistidas no SQLite com paginação e busca."""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Não autorizado")
+    limit = max(1, min(limit, 100))
+    offset = max(0, offset)
+    repo = BudgetRepository(settings.sqlite_db_path)
+    rows = repo.list_transacoes(mes_ano=mes_ano, categoria=categoria, search=search, limit=limit, offset=offset)
+    total = repo.count_transacoes(mes_ano=mes_ano, categoria=categoria, search=search)
+    return {"transacoes": rows, "count": len(rows), "total_count": total, "offset": offset, "limit": limit}
+
+@app.put("/api/extratos/transacoes/{transacao_id}")
+async def update_transacao_endpoint(transacao_id: int, req: UpdateTransacaoRequest, request: Request):
+    """Atualiza dados de uma transação bancária."""
+    require_role_action(request, action_type="edit")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    success = repo.update_transacao(
+        transacao_id=transacao_id,
+        descricao=req.descricao,
+        categoria=req.categoria,
+        valor=req.valor,
+        data=req.data,
+        tipo=req.tipo
+    )
+    if not success:
+        raise HTTPException(status_code=404, detail="Transação não encontrada.")
+    return {"status": "ok", "message": "Transação atualizada com sucesso."}
+
+@app.delete("/api/extratos/transacoes/{transacao_id}")
+async def delete_transacao_endpoint(transacao_id: int, request: Request):
+    """Exclui uma transação bancária."""
+    require_role_action(request, action_type="edit")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    success = repo.delete_transacao(transacao_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Transação não encontrada.")
+    return {"status": "ok", "message": "Transação excluída com sucesso."}
+
+# ----------------- CRUD DE CATEGORIAS DE DESPESA -----------------
+@app.get("/api/categories")
+async def list_categories_endpoint(request: Request, active_only: bool = False):
+    """Lista as categorias de despesa cadastradas."""
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Não autorizado")
     repo = BudgetRepository(settings.sqlite_db_path)
-    rows = repo.list_transacoes(mes_ano=mes_ano, categoria=categoria, limit=limit, offset=offset)
-    return {"transacoes": rows, "count": len(rows), "offset": offset}
+    cats = repo.list_categories(active_only=active_only)
+    return {"categories": cats, "count": len(cats)}
+
+@app.post("/api/categories")
+async def create_category_endpoint(req: CategoryRequest, request: Request):
+    """Cria uma nova categoria de despesa."""
+    require_role_action(request, action_type="edit")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    try:
+        cat = repo.create_category(req.name, req.kind)
+        return {"status": "ok", "category": cat}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Erro ao criar categoria: {str(e)}")
+
+@app.put("/api/categories/{category_id}")
+async def update_category_endpoint(category_id: int, req: CategoryRequest, request: Request):
+    """Atualiza uma categoria de despesa existente."""
+    require_role_action(request, action_type="edit")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    success = repo.update_category(category_id, req.name, req.kind, req.active)
+    if not success:
+        raise HTTPException(status_code=404, detail="Categoria não encontrada.")
+    return {"status": "ok", "message": "Categoria atualizada com sucesso."}
+
+@app.delete("/api/categories/{category_id}")
+async def delete_category_endpoint(category_id: int, request: Request):
+    """Exclui uma categoria de despesa."""
+    require_role_action(request, action_type="edit")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    success = repo.delete_category(category_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Categoria não encontrada.")
+    return {"status": "ok", "message": "Categoria excluída com sucesso."}
 
 # ----------------- WEBHOOK INTERATIVO TELEGRAM BOT -----------------
 _telegram_run_lock = False

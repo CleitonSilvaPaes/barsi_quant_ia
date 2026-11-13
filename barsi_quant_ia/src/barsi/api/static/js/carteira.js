@@ -95,8 +95,12 @@ function renderizarTabela(data) {
         </td>
         <td style="text-align: right; font-weight:600; color:#94a3b8;" class="cell-qtd-total">${qtdTotal}</td>
         <td style="text-align: right;">R$ ${preco.toFixed(2)}</td>
-        <td style="text-align: right;">R$ ${p.teto.toFixed(2)}</td>
-        <td style="text-align: right; color: ${margemColor}; font-weight: 700;">${p.margem.toFixed(1)}%</td>
+        <td style="text-align: right;">
+          <input type="number" step="0.01" class="tbl-input input-teto" value="${p.teto.toFixed(2)}" ${readOnlyAttr} oninput="recalcularPorTeto(this)" style="width:75px; text-align:right;" title="Editar Preço Teto" />
+        </td>
+        <td style="text-align: right;">
+          <input type="number" step="0.1" class="tbl-input input-margem" value="${p.margem.toFixed(1)}" ${readOnlyAttr} oninput="recalcularPorMargem(this)" style="width:65px; text-align:right; color:${margemColor}; font-weight:700;" title="Editar Margem (%)" />
+        </td>
         <td style="text-align: right;">
           <input type="number" step="0.01" class="tbl-input input-cmedio" value="${(p.custo_medio || 0).toFixed(2)}" ${readOnlyAttr} style="width:75px; text-align:right;" title="Preço Médio de Aquisição" />
         </td>
@@ -106,12 +110,15 @@ function renderizarTabela(data) {
         <td style="text-align: right;">
           <input type="number" step="0.01" class="tbl-input input-dpa" value="${p.div_proj.toFixed(2)}" ${readOnlyAttr} style="width:75px; text-align:right;" />
         </td>
-        <td style="text-align: right; font-weight: 600;" class="cell-patrimonio-atual">R$ ${valAtual.toFixed(2)}</td>
+        <td style="text-align: right;">
+          <input type="number" step="0.01" class="tbl-input input-patrimonio" value="${valAtual.toFixed(2)}" ${readOnlyAttr} oninput="recalcularPorPatrimonio(this)" style="width:90px; text-align:right; font-weight:600;" title="Editar Patrimônio Atual" />
+        </td>
         <td style="text-align: right; color: var(--green); font-weight: 600;" class="cell-total-aporte">R$ ${valAporte.toFixed(2)}</td>
         <td style="text-align: center;"><span class="${esc(badgeClass)}">${esc(p.status)}</span></td>
         <td><input type="text" class="tbl-input input-fb" value="${esc(p.feedback || '')}" placeholder="Ex: Priorizar compras em margem > 15%" ${readOnlyAttr} /></td>
-        <td style="text-align: center;">
+        <td style="text-align: center; white-space:nowrap;">
           <button onclick="abrirDrawer('${esc(p.ticker)}')" class="btn btn-outline" style="padding:0.2rem 0.45rem; font-size:0.8rem;" title="Ver detalhes">👁️</button>
+          <button onclick="excluirPosicao('${esc(p.ticker)}')" class="btn btn-outline" style="padding:0.2rem 0.45rem; font-size:0.8rem; color:var(--red);" title="Excluir ativo">🗑️</button>
         </td>
       </tr>
     `;
@@ -165,6 +172,110 @@ function recalcularTotais() {
   document.getElementById("card-patrimonio-pos").innerText = formatBRL(somaAtual + somaAporte);
 }
 
+function recalcularPorTeto(el) {
+  const row = el.closest("tr");
+  if (!row) return;
+  const preco = parseFloat(row.getAttribute("data-preco")) || 0;
+  const teto = parseFloat(el.value) || 0;
+  if (preco > 0) {
+    const margem = ((teto - preco) / preco) * 100;
+    const inMargem = row.querySelector(".input-margem");
+    if (inMargem) {
+      inMargem.value = margem.toFixed(1);
+      inMargem.style.color = margem >= 0 ? "var(--green)" : "var(--red)";
+    }
+  }
+}
+
+function recalcularPorMargem(el) {
+  const row = el.closest("tr");
+  if (!row) return;
+  const preco = parseFloat(row.getAttribute("data-preco")) || 0;
+  const margem = parseFloat(el.value) || 0;
+  if (preco > 0) {
+    const teto = preco * (1 + margem / 100);
+    const inTeto = row.querySelector(".input-teto");
+    if (inTeto) inTeto.value = teto.toFixed(2);
+    el.style.color = margem >= 0 ? "var(--green)" : "var(--red)";
+  }
+}
+
+function recalcularPorPatrimonio(el) {
+  const row = el.closest("tr");
+  if (!row) return;
+  const preco = parseFloat(row.getAttribute("data-preco")) || 0;
+  const pat = parseFloat(el.value) || 0;
+  if (preco > 0) {
+    const qtd = Math.max(0, Math.round(pat / preco));
+    const inQtd = row.querySelector(".input-qtd");
+    if (inQtd) inQtd.value = qtd;
+  }
+  recalcularTotais();
+}
+
+async function excluirPosicao(ticker) {
+  if (!confirm(`Deseja realmente excluir o ativo ${ticker} da carteira?`)) return;
+  try {
+    const res = await fetch(`/api/carteira/${ticker}`, { method: "DELETE" });
+    const data = await res.json();
+    if (res.ok) {
+      showToast(data.message || `Ativo ${ticker} excluído com sucesso!`);
+      carregarCarteira();
+    } else {
+      showToast(data.detail || "Erro ao excluir ativo", "error");
+    }
+  } catch (err) {
+    showToast("Erro na requisição: " + err, "error");
+  }
+}
+
+function abrirModalNovoAtivo() {
+  const el = document.getElementById("modal-novo-ativo");
+  if (el) el.style.display = "flex";
+}
+
+function fecharModalNovoAtivo() {
+  const el = document.getElementById("modal-novo-ativo");
+  if (el) el.style.display = "none";
+}
+
+async function adicionarAtivo(e) {
+  e.preventDefault();
+  const ticker = document.getElementById("novo-ticker").value.trim().toUpperCase();
+  const qtd_antes = parseInt(document.getElementById("novo-qtd").value) || 0;
+  const preco_atual = parseFloat(document.getElementById("novo-preco").value) || 0.0;
+  const preco_teto = parseFloat(document.getElementById("novo-teto").value) || 0.0;
+  const div_proj = parseFloat(document.getElementById("novo-dpa").value) || 0.0;
+  const custo_medio = parseFloat(document.getElementById("novo-cmedio").value) || 0.0;
+  const setor = document.getElementById("novo-setor").value;
+
+  try {
+    const res = await fetch(`/api/carteira/${ticker}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ticker,
+        preco_atual,
+        preco_teto,
+        div_proj,
+        custo_medio,
+        qtd_antes,
+        teto_manual: preco_teto > 0
+      })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showToast(`Ativo ${ticker} adicionado à carteira!`);
+      fecharModalNovoAtivo();
+      carregarCarteira();
+    } else {
+      showToast(data.detail || "Erro ao adicionar ativo", "error");
+    }
+  } catch (err) {
+    showToast("Erro na requisição: " + err, "error");
+  }
+}
+
 async function salvarAlteracoes() {
   const rows = document.querySelectorAll("#tbl-body tr");
   const items = [];
@@ -172,12 +283,25 @@ async function salvarAlteracoes() {
     const ticker = r.getAttribute("data-ticker");
     const row_index = parseInt(r.getAttribute("data-row"));
     if (!ticker || isNaN(row_index)) return;
-    const div_proj = parseFloat(r.querySelector(".input-dpa").value) || 0.0;
+    const div_proj = parseFloat(r.querySelector(".input-dpa") ? r.querySelector(".input-dpa").value : 0) || 0.0;
     const custo_medio = parseFloat(r.querySelector(".input-cmedio") ? r.querySelector(".input-cmedio").value : 0) || 0.0;
-    const qtd_antes = parseInt(r.querySelector(".input-qtd").value) || 0;
-    const qtd_aporte = parseInt(r.querySelector(".input-aporte").value) || 0;
-    const feedback = r.querySelector(".input-fb").value || "";
-    items.push({ ticker, row_index, div_proj, custo_medio, qtd_antes, qtd_aporte, feedback });
+    const qtd_antes = parseInt(r.querySelector(".input-qtd") ? r.querySelector(".input-qtd").value : 0) || 0;
+    const qtd_aporte = parseInt(r.querySelector(".input-aporte") ? r.querySelector(".input-aporte").value : 0) || 0;
+    const preco_teto = parseFloat(r.querySelector(".input-teto") ? r.querySelector(".input-teto").value : 0) || 0.0;
+    const margem = parseFloat(r.querySelector(".input-margem") ? r.querySelector(".input-margem").value : 0);
+    const feedback = r.querySelector(".input-fb") ? r.querySelector(".input-fb").value : "";
+    items.push({
+      ticker,
+      row_index,
+      div_proj,
+      custo_medio,
+      qtd_antes,
+      qtd_aporte,
+      preco_teto,
+      margem: isNaN(margem) ? null : margem,
+      teto_manual: preco_teto > 0,
+      feedback
+    });
   });
 
   try {
@@ -187,8 +311,12 @@ async function salvarAlteracoes() {
       body: JSON.stringify({ items })
     });
     const out = await res.json();
-    showToast("Edições salvas com sucesso na base de dados!");
-    carregarCarteira();
+    if (res.ok) {
+      showToast("Edições salvas com sucesso na base de dados!");
+      carregarCarteira();
+    } else {
+      showToast("Erro ao salvar: " + (out.detail || res.statusText), "error");
+    }
   } catch (err) {
     showToast("Erro ao salvar alterações: " + err, "error");
   }

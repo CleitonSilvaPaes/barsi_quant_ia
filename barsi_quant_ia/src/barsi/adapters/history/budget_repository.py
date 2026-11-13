@@ -122,8 +122,93 @@ class BudgetRepository:
                     conn.execute("ALTER TABLE positions ADD COLUMN custo_medio REAL DEFAULT 0.0")
             except Exception:
                 pass
+        self.seed_default_categories()
         self.seed_default_keywords()
         self.seed_default_notification_prefs()
+
+    DEFAULT_EXPENSE_CATEGORIES = [
+        ("Moradia", "fixa"),
+        ("Alimentação", "variavel"),
+        ("Transporte", "variavel"),
+        ("Saúde", "variavel"),
+        ("Educação", "fixa"),
+        ("Lazer", "variavel"),
+        ("Tributos & Taxas", "tributo"),
+        ("Reserva / RDB", "reserva"),
+        ("Investimentos", "investimento"),
+        ("Salário / Proventos", "entrada"),
+        ("Despesas Variáveis", "variavel"),
+        ("Cooperativa Ailos", "fixa"),
+    ]
+
+    def seed_default_categories(self) -> int:
+        """Garante que as categorias de despesa padrão existam de forma idempotente."""
+        inserted = 0
+        with self._conn() as c:
+            for name, kind in self.DEFAULT_EXPENSE_CATEGORIES:
+                cur = c.execute(
+                    """
+                    INSERT OR IGNORE INTO expense_categories (name, kind, active)
+                    VALUES (?, ?, 1)
+                """,
+                    (name, kind),
+                )
+                inserted += cur.rowcount
+        return inserted
+
+    def list_categories(self, active_only: bool = False) -> List[Dict[str, Any]]:
+        """Retorna todas as categorias de despesa cadastradas."""
+        query = "SELECT id, name, kind, active, created_at FROM expense_categories"
+        if active_only:
+            query += " WHERE active = 1"
+        query += " ORDER BY name ASC"
+        with self._conn() as c:
+            rows = c.execute(query).fetchall()
+            return [dict(r) for r in rows]
+
+    def create_category(self, name: str, kind: str = "variavel") -> Dict[str, Any]:
+        """Cria uma nova categoria de despesa."""
+        name = name.strip()
+        kind = kind.strip().lower()
+        valid_kinds = {"fixa", "variavel", "tributo", "reserva", "investimento", "entrada"}
+        if kind not in valid_kinds:
+            kind = "variavel"
+        with self._conn() as c:
+            c.execute(
+                """
+                INSERT INTO expense_categories (name, kind, active)
+                VALUES (?, ?, 1)
+            """,
+                (name, kind),
+            )
+            row = c.execute(
+                "SELECT id, name, kind, active, created_at FROM expense_categories WHERE name = ?", (name,)
+            ).fetchone()
+            return dict(row)
+
+    def update_category(self, category_id: int, name: str, kind: str, active: bool = True) -> bool:
+        """Atualiza nome, tipo ou status de uma categoria."""
+        name = name.strip()
+        kind = kind.strip().lower()
+        valid_kinds = {"fixa", "variavel", "tributo", "reserva", "investimento", "entrada"}
+        if kind not in valid_kinds:
+            kind = "variavel"
+        with self._conn() as c:
+            cur = c.execute(
+                """
+                UPDATE expense_categories
+                   SET name = ?, kind = ?, active = ?
+                 WHERE id = ?
+            """,
+                (name, kind, 1 if active else 0, category_id),
+            )
+            return cur.rowcount > 0
+
+    def delete_category(self, category_id: int) -> bool:
+        """Exclui uma categoria de despesa pelo ID."""
+        with self._conn() as c:
+            cur = c.execute("DELETE FROM expense_categories WHERE id = ?", (category_id,))
+            return cur.rowcount > 0
 
     def seed_default_keywords(self) -> int:
         """Popula a tabela category_keywords de forma estritamente idempotente."""
@@ -366,7 +451,11 @@ class BudgetRepository:
         inserted = 0
         with self._conn() as c:
             for t in transacoes:
-                fitid = getattr(t, "id_transacao", None) or (t.get("id_transacao") if isinstance(t, dict) else "")
+                fitid = (
+                    getattr(t, "id_transacao", None)
+                    or getattr(t, "fitid", None)
+                    or (t.get("id_transacao") or t.get("fitid") if isinstance(t, dict) else "")
+                )
                 data = getattr(t, "data", None) or (t.get("data") if isinstance(t, dict) else "")
                 tipo = getattr(t, "tipo", None) or (t.get("tipo") if isinstance(t, dict) else "")
                 valor = (
@@ -470,6 +559,13 @@ class BudgetRepository:
     def save_positions(self, positions: List[Position]) -> int:
         """Alias para persist_positions para compatibilidade de interface."""
         return self.persist_positions(positions)
+
+    def delete_position(self, ticker: str) -> bool:
+        """Exclui uma posição da carteira de forma definitiva no SQLite."""
+        with self._conn() as c:
+            cur = c.execute("DELETE FROM positions WHERE UPPER(ticker) = UPPER(?)", (ticker.strip(),))
+            c.execute("DELETE FROM sheets_positions_cache WHERE UPPER(ticker) = UPPER(?)", (ticker.strip(),))
+            return cur.rowcount > 0
 
     def load_positions(self) -> List[Position]:
         """Carrega posições salvas no SQLite para restauração sem Google Sheets."""
@@ -1104,8 +1200,10 @@ class BudgetRepository:
             ).fetchall()
 
             if not dates or len(dates) < 3:
-                self.seed_initial_snapshots_if_empty(round(soma_pat, 2), soma_cotas, setores_base)
-                return self.get_portfolio_snapshots(limit_months)
+                if soma_pat > 0 and len(positions) > 0:
+                    self.seed_initial_snapshots_if_empty(round(soma_pat, 2), soma_cotas, setores_base)
+                    return self.get_portfolio_snapshots(limit_months)
+                return []
 
             # Quando há histórico real suficiente (>= 3 meses), limpa snapshots anteriores para reconstrução canônica
             c.execute("DELETE FROM portfolio_snapshots")
@@ -1374,23 +1472,94 @@ class BudgetRepository:
     # Orçamento & Transações Conciliadas (Onda 2)
     # ------------------------------------------------------------------ #
     def list_transacoes(
-        self, mes_ano: Optional[str] = None, categoria: Optional[str] = None, limit: int = 50, offset: int = 0
+        self,
+        mes_ano: Optional[str] = None,
+        categoria: Optional[str] = None,
+        search: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0
     ) -> List[Dict[str, Any]]:
-        """Retorna transações bancárias/cartão persistidas com filtros."""
+        """Retorna transações bancárias/cartão persistidas com filtros e busca."""
         query = "SELECT * FROM transacoes WHERE 1=1"
-        params = []
+        params: List[Any] = []
         if mes_ano:
             query += " AND mes_ano = ?"
             params.append(mes_ano)
         if categoria:
             query += " AND categoria = ?"
             params.append(categoria)
+        if search:
+            query += " AND (descricao LIKE ? OR categoria LIKE ?)"
+            term = f"%{search.strip()}%"
+            params.extend([term, term])
         query += " ORDER BY data DESC, id DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
 
         with self._conn() as c:
             rows = c.execute(query, params).fetchall()
             return [dict(r) for r in rows]
+
+    def count_transacoes(
+        self,
+        mes_ano: Optional[str] = None,
+        categoria: Optional[str] = None,
+        search: Optional[str] = None
+    ) -> int:
+        """Retorna a contagem total de transações de acordo com os filtros."""
+        query = "SELECT COUNT(*) FROM transacoes WHERE 1=1"
+        params: List[Any] = []
+        if mes_ano:
+            query += " AND mes_ano = ?"
+            params.append(mes_ano)
+        if categoria:
+            query += " AND categoria = ?"
+            params.append(categoria)
+        if search:
+            query += " AND (descricao LIKE ? OR categoria LIKE ?)"
+            term = f"%{search.strip()}%"
+            params.extend([term, term])
+
+        with self._conn() as c:
+            row = c.execute(query, params).fetchone()
+            return row[0] if row else 0
+
+    def delete_transacao(self, transacao_id: int) -> bool:
+        """Exclui uma transação bancária persistida por ID."""
+        with self._conn() as c:
+            cur = c.execute("DELETE FROM transacoes WHERE id = ?", (transacao_id,))
+            return cur.rowcount > 0
+
+    def update_transacao(
+        self,
+        transacao_id: int,
+        descricao: str,
+        categoria: str,
+        valor: float,
+        data: str,
+        tipo: Optional[str] = None
+    ) -> bool:
+        """Atualiza campos de uma transação existente."""
+        mes_ano = data[:7] if len(data) >= 7 else None
+        with self._conn() as c:
+            if tipo:
+                cur = c.execute(
+                    """
+                    UPDATE transacoes
+                       SET descricao = ?, categoria = ?, valor = ?, data = ?, tipo = ?, mes_ano = COALESCE(?, mes_ano)
+                     WHERE id = ?
+                """,
+                    (descricao.strip(), categoria.strip(), float(valor), data.strip(), tipo.strip().upper(), mes_ano, transacao_id),
+                )
+            else:
+                cur = c.execute(
+                    """
+                    UPDATE transacoes
+                       SET descricao = ?, categoria = ?, valor = ?, data = ?, mes_ano = COALESCE(?, mes_ano)
+                     WHERE id = ?
+                """,
+                    (descricao.strip(), categoria.strip(), float(valor), data.strip(), mes_ano, transacao_id),
+                )
+            return cur.rowcount > 0
 
     def get_budget_overview(self, mes_ano: Optional[str] = None) -> Dict[str, Any]:
         """Calcula a visão consolidada de Orçamento (Previsto vs Realizado) do mês."""
