@@ -151,8 +151,8 @@ def test_github_style_two_step_login_flow(tmp_path, monkeypatch):
     # 2. Clara acessa /login/2fa
     resp_page_2fa = client.get("/login/2fa", cookies={"barsi_2fa_pending": pending_cookie})
     assert resp_page_2fa.status_code == 200
-    assert "Two-factor authentication" in resp_page_2fa.text
-    assert "XXXXXX" in resp_page_2fa.text
+    assert "Autenticação 2FA" in resp_page_2fa.text
+    assert "000000" in resp_page_2fa.text
 
     # 3. Código 2FA inválido
     resp_invalid_code = client.post(
