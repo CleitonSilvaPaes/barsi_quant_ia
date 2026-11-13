@@ -1,0 +1,36 @@
+{
+  "output": {
+    "filePath": "repomix-output.xml",
+    "style": "xml",
+    "parsableStyle": true,
+    "headerText": "Barsi Quant IA - Contexto Compactado para Economia de Tokens",
+    "removeComments": false,
+    "removeEmptyLines": true,
+    "showLineNumbers": true
+  },
+  "ignore": {
+    "useGitignore": true,
+    "useDefaultPatterns": true,
+    "customPatterns": [
+      ".git/**",
+      ".venv/**",
+      "node_modules/**",
+      "memory/**",
+      "cache/**",
+      "extratos/**",
+      "graphify-out/**",
+      "*.pyc",
+      "__pycache__/**",
+      ".secrets",
+      ".env",
+      "*.json.sig",
+      "credentials.json",
+      "*.png",
+      "*.jpg",
+      "*.jpeg",
+      "*.zip",
+      "*.ofx",
+      "*.db"
+    ]
+  }
+}
