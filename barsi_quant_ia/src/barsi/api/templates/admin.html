@@ -113,10 +113,10 @@
         tbody.innerHTML += `
           <tr>
             <td>#${u.id}</td>
-            <td><strong>${u.username}</strong></td>
-            <td><span class="badge-acumular" style="text-transform:uppercase;">${u.role}</span></td>
+            <td><strong>${esc(u.username)}</strong></td>
+            <td><span class="badge-acumular" style="text-transform:uppercase;">${esc(u.role)}</span></td>
             <td>${badge2fa}</td>
-            <td style="color:var(--text-muted); font-size:0.8rem;">${u.created_at || '—'}</td>
+            <td style="color:var(--text-muted); font-size:0.8rem;">${esc(u.created_at || '—')}</td>
           </tr>
         `;
       });

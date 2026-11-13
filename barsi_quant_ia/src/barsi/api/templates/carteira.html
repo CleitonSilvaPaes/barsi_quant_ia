@@ -208,10 +208,10 @@
       if (p.status === "ACUMULAR") abaixoDoTeto++;
 
       tbody.innerHTML += `
-        <tr data-ticker="${p.ticker}" data-row="${p.row_index}" data-preco="${preco}">
+        <tr data-ticker="${esc(p.ticker)}" data-row="${p.row_index}" data-preco="${preco}">
           <td>
-            <strong>${p.ticker}</strong>
-            <div style="font-size:0.75rem; color:var(--text-muted);">${p.setor || 'B.E.S.T.'} • ${p.empresa || ''}</div>
+            <strong>${esc(p.ticker)}</strong>
+            <div style="font-size:0.75rem; color:var(--text-muted);">${esc(p.setor || 'B.E.S.T.')} • ${esc(p.empresa || '')}</div>
           </td>
           <td style="text-align: right;">
             <input type="number" class="tbl-input input-qtd" value="${qtdAtual}" min="0" ${readOnlyAttr} oninput="recalcularTotais()" style="width:75px; text-align:right;" />
@@ -234,10 +234,10 @@
           </td>
           <td style="text-align: right; font-weight: 600;" class="cell-patrimonio-atual">R$ ${valAtual.toFixed(2)}</td>
           <td style="text-align: right; color: var(--green); font-weight: 600;" class="cell-total-aporte">R$ ${valAporte.toFixed(2)}</td>
-          <td style="text-align: center;"><span class="${badgeClass}">${p.status}</span></td>
-          <td><input type="text" class="tbl-input input-fb" value="${p.feedback || ''}" placeholder="Ex: Priorizar compras em margem > 15%" ${readOnlyAttr} /></td>
+          <td style="text-align: center;"><span class="${esc(badgeClass)}">${esc(p.status)}</span></td>
+          <td><input type="text" class="tbl-input input-fb" value="${esc(p.feedback || '')}" placeholder="Ex: Priorizar compras em margem > 15%" ${readOnlyAttr} /></td>
           <td style="text-align: center;">
-            <button onclick="abrirDrawer('${p.ticker}')" class="btn btn-outline" style="padding:0.2rem 0.45rem; font-size:0.8rem;" title="Ver detalhes">👁️</button>
+            <button onclick="abrirDrawer('${esc(p.ticker)}')" class="btn btn-outline" style="padding:0.2rem 0.45rem; font-size:0.8rem;" title="Ver detalhes">👁️</button>
           </td>
         </tr>
       `;

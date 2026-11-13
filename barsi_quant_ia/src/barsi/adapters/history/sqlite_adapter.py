@@ -9,8 +9,10 @@ from barsi.infra.logging import logger
 from barsi.adapters.history.budget_repository import INIT_BUDGET_SCHEMA_SQL
 
 class SQLiteHistoryAdapter(HistoryPort):
-    def __init__(self, db_path: str = "./memory/barsi_memory.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: Optional[str] = None):
+        from barsi.adapters.history.budget_repository import resolve_db_path
+
+        self.db_path = resolve_db_path(db_path)
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._init_tables()
 

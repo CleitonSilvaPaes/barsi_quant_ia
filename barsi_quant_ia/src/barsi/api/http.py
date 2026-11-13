@@ -1459,6 +1459,16 @@ async def trigger_extratos_web(request: Request, target_month: Optional[str] = N
         "message": f"Extratos processados. {reconciled_count} ativo(s) conciliado(s) na carteira." if reconciled_count > 0 else "Extratos processados com sucesso."
     }
 
+@app.post("/api/extratos/arquivar")
+async def arquivar_extratos_api(request: Request):
+    require_role_action(request, action_type="sync")
+    movidos = OFXParserService.arquivar_arquivos_processados("extratos", subpasta="processados")
+    return {
+        "status": "ok",
+        "movidos": movidos,
+        "message": f"{movidos} arquivo(s) arquivado(s) em 'extratos/processados/'." if movidos > 0 else "Nenhum arquivo pendente para arquivar."
+    }
+
 @app.post("/api/upload-extrato")
 async def upload_extrato(file: UploadFile = File(...), target_month: Optional[str] = None, request: Request = None):
     require_role_action(request, action_type="sync")

@@ -8,6 +8,7 @@
 
 <div class="actions-bar" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
   <button class="btn btn-green" onclick="conciliarExtratos()">📑 Executar Conciliação com SQLite & Sheets</button>
+  <button class="btn btn-outline" onclick="arquivarExtratos()">📦 Mover para Processados</button>
   <button class="btn btn-amber" onclick="sincronizarTVBox()">🔄 Sincronizar com TV Box</button>
   <button class="btn btn-outline" onclick="carregarExtratos()">🔄 Recarregar</button>
   <div style="margin-left: auto; display: flex; align-items: center; gap: 0.4rem;">
@@ -129,6 +130,21 @@
     } catch (err) {
       log.innerText = `[${new Date().toLocaleTimeString()}] ❌ Erro: ` + err;
       showToast("Erro na conciliação: " + err.message, "error");
+    }
+  }
+
+  async function arquivarExtratos() {
+    const log = document.getElementById("extrato-log");
+    log.style.display = "block";
+    log.innerText = `[${new Date().toLocaleTimeString()}] Arquivando extratos processados...`;
+    try {
+      const res = await fetch("/api/extratos/arquivar", { method: "POST" });
+      const out = await res.json();
+      log.innerText = `[${new Date().toLocaleTimeString()}] 📦 ${out.message}`;
+      showToast(out.message);
+    } catch (err) {
+      log.innerText = `[${new Date().toLocaleTimeString()}] ❌ Erro ao arquivar: ` + err;
+      showToast("Erro ao arquivar extratos", "error");
     }
   }
 

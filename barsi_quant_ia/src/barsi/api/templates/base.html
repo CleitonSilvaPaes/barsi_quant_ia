@@ -657,6 +657,13 @@
       }, 3500);
     }
 
+    function esc(s) {
+      if (s === null || s === undefined) return '';
+      return String(s).replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[c]));
+    }
+
     function formatBRL(val) {
       return (val || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     }
