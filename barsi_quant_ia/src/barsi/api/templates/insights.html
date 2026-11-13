@@ -148,10 +148,10 @@
         <div>
           <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem;">
             <div>
-              <strong style="font-size: 1.15rem; color: #fff;">${item.ticker}</strong>
-              <div style="font-size: 0.78rem; color: var(--text-muted);">${item.empresa || ''} • <span style="color:var(--accent);">${item.setor || 'B.E.S.T.'}</span></div>
+              <strong style="font-size: 1.15rem; color: #fff;">${esc(item.ticker)}</strong>
+              <div style="font-size: 0.78rem; color: var(--text-muted);">${esc(item.empresa || '')} • <span style="color:var(--accent);">${esc(item.setor || 'B.E.S.T.')}</span></div>
             </div>
-            <span class="${badgeClass}" style="font-size: 0.8rem;">${item.acao_sugerida}</span>
+            <span class="${esc(badgeClass)}" style="font-size: 0.8rem;">${esc(item.acao_sugerida)}</span>
           </div>
 
           <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; background: rgba(0,0,0,0.25); border-radius: 6px; padding: 0.6rem; margin-bottom: 1rem; text-align: center;">
@@ -172,7 +172,7 @@
           <div style="margin-bottom: 1rem;">
             <div style="font-size: 0.72rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 0.25rem; font-weight: 700;">Raciocínio da IA (Chain-of-Thought):</div>
             <p style="font-size: 0.84rem; color: #cbd5e1; line-height: 1.45; background: #090d16; padding: 0.65rem 0.85rem; border-radius: 6px; border: 1px solid var(--border);">
-              ${item.insight_ia || 'Margem de segurança atrativa para acúmulo previdenciário com base no Método Barsi.'}
+              ${esc(item.insight_ia || 'Margem de segurança atrativa para acúmulo previdenciário com base no Método Barsi.')}
             </p>
           </div>
         </div>
@@ -180,21 +180,21 @@
         <div>
           <div style="font-size: 0.72rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 0.4rem; font-weight: 700;">
             Validação Humana (RLHF):
-            ${feedbackAtual ? `<span style="color:var(--green); text-transform:none; font-weight:normal; margin-left:5px;">✓ Atual: ${feedbackAtual}</span>` : ''}
+            ${feedbackAtual ? `<span style="color:var(--green); text-transform:none; font-weight:normal; margin-left:5px;">✓ Atual: ${esc(feedbackAtual)}</span>` : ''}
           </div>
 
           <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
-            <button onclick="enviarFeedback('${item.ticker}', 'CONCORDO')" class="btn ${isConcordo ? 'btn-green' : 'btn-outline'}" style="flex:1; justify-content:center; font-size:0.8rem;">
+            <button onclick="enviarFeedback('${esc(item.ticker)}', 'CONCORDO')" class="btn ${isConcordo ? 'btn-green' : 'btn-outline'}" style="flex:1; justify-content:center; font-size:0.8rem;">
               👍 Concordo
             </button>
-            <button onclick="enviarFeedback('${item.ticker}', 'DISCORDO')" class="btn ${isDiscordo ? 'btn-amber' : 'btn-outline'}" style="flex:1; justify-content:center; font-size:0.8rem;">
+            <button onclick="enviarFeedback('${esc(item.ticker)}', 'DISCORDO')" class="btn ${isDiscordo ? 'btn-amber' : 'btn-outline'}" style="flex:1; justify-content:center; font-size:0.8rem;">
               👎 Discordo
             </button>
           </div>
 
           <div style="display: flex; gap: 0.35rem;">
-            <input type="text" id="custom-fb-${item.ticker}" class="tbl-input" placeholder="Justificativa ou nota personalizada..." value="${(feedbackAtual !== 'CONCORDO' && feedbackAtual !== 'DISCORDO') ? feedbackAtual : ''}" style="font-size:0.78rem;" />
-            <button onclick="enviarCustomFeedback('${item.ticker}')" class="btn btn-outline" style="padding:0.25rem 0.6rem; font-size:0.75rem;">Salvar</button>
+            <input type="text" id="custom-fb-${esc(item.ticker)}" class="tbl-input" placeholder="Justificativa ou nota personalizada..." value="${(feedbackAtual !== 'CONCORDO' && feedbackAtual !== 'DISCORDO') ? esc(feedbackAtual) : ''}" style="font-size:0.78rem;" />
+            <button onclick="enviarCustomFeedback('${esc(item.ticker)}')" class="btn btn-outline" style="padding:0.25rem 0.6rem; font-size:0.75rem;">Salvar</button>
           </div>
         </div>
       `;

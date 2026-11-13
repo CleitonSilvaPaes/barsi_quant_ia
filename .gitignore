@@ -47,3 +47,13 @@ recent.xml
 domain-tests.xml
 *.diff
 recente.txt
+
+
+# git secrets
+.secrets
+
+# Pasta para agents
+.agents
+
+# Pastas de cache acidental
+cleiton/

@@ -349,7 +349,11 @@ class OFXParserService:
         rdb_aplicacoes: Dict[str, float] = {}
         rdb_resgates: Dict[str, float] = {}
 
-        arquivos_ofx = glob.glob(os.path.join(dir_path, "**", "*.ofx"), recursive=True)
+        todos_ofx = glob.glob(os.path.join(dir_path, "**", "*.ofx"), recursive=True)
+        arquivos_ofx = [
+            arq for arq in todos_ofx
+            if not any(p.lower() in ("processado", "processados") for p in os.path.normpath(arq).split(os.sep))
+        ]
         for arq in sorted(arquivos_ofx):
             try:
                 with open(arq, "r", encoding="utf-8", errors="ignore") as file_handle:
@@ -510,3 +514,35 @@ class OFXParserService:
             r.saldo_livre = round(r.total_entradas - r.total_saidas, 2)
 
         return resumos
+
+    @classmethod
+    def arquivar_arquivos_processados(cls, dir_path: str = "extratos", subpasta: str = "processados") -> int:
+        """Move arquivos .ofx e .zip do diretório de extratos para uma subpasta de arquivamento.
+
+        Evita que arquivos já processados permaneçam soltos na pasta raiz de extratos.
+        """
+        import shutil
+        from datetime import datetime
+
+        if not os.path.exists(dir_path):
+            return 0
+
+        dest_dir = os.path.join(dir_path, subpasta)
+        os.makedirs(dest_dir, exist_ok=True)
+
+        movidos = 0
+        for pattern in ("*.ofx", "*.zip"):
+            for src_file in glob.glob(os.path.join(dir_path, pattern)):
+                if os.path.isfile(src_file):
+                    fname = os.path.basename(src_file)
+                    dest_file = os.path.join(dest_dir, fname)
+                    if os.path.exists(dest_file):
+                        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        name, ext = os.path.splitext(fname)
+                        dest_file = os.path.join(dest_dir, f"{name}_{ts}{ext}")
+                    try:
+                        shutil.move(src_file, dest_file)
+                        movidos += 1
+                    except Exception as exc:
+                        logger.warning("archive_file_failed", file=src_file, error=str(exc))
+        return movidos

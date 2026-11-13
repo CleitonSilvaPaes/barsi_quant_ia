@@ -41,24 +41,27 @@ class RecurringExpense:
     source: str
 
 
-def resolve_db_path(path: str = "./memory/barsi_memory.db") -> str:
+def resolve_db_path(path: Optional[str] = None) -> str:
     """Resolve o caminho do SQLite com segurança para execução na raiz ou em subpastas."""
-    if os.path.isabs(path):
-        return path
-    if os.path.exists(path):
-        return os.path.abspath(path)
+    from barsi.config import settings
+
+    target = path if path is not None else settings.sqlite_db_path
+    if os.path.isabs(target):
+        return target
+    if os.path.exists(target):
+        return os.path.abspath(target)
 
     # Procura em subdiretório barsi_quant_ia
-    sub_path = os.path.join("barsi_quant_ia", path.lstrip("./"))
+    sub_path = os.path.join("barsi_quant_ia", target.lstrip("./"))
     if os.path.exists(sub_path):
         return os.path.abspath(sub_path)
 
     # Procura no diretório pai
-    parent_path = os.path.join("..", path.lstrip("./"))
+    parent_path = os.path.join("..", target.lstrip("./"))
     if os.path.exists(parent_path):
         return os.path.abspath(parent_path)
 
-    return os.path.abspath(path)
+    return os.path.abspath(target)
 
 
 def validate_target_month(target_month: Optional[str]) -> Optional[str]:
@@ -89,7 +92,7 @@ def validate_target_month(target_month: Optional[str]) -> Optional[str]:
 class BudgetRepository:
     """Leitura e escrita de orçamento no SQLite. Sem I/O de rede, sem dependência do Google Sheets."""
 
-    def __init__(self, db_path: str = "./memory/barsi_memory.db"):
+    def __init__(self, db_path: Optional[str] = None):
         self.db_path = resolve_db_path(db_path)
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._init_tables()
