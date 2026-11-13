@@ -70,3 +70,4 @@ async function criarUsuario(e) {
 }
 
 window.addEventListener("DOMContentLoaded", carregarUsuarios);
+

@@ -2,6 +2,51 @@
  * Barsi Quant IA - Scripts Comuns & Helpers Globais
  */
 
+/**
+ * Retorna o token CSRF atual obtido da meta tag ou do cookie barsi_csrf.
+ */
+function getCsrfToken() {
+  const meta = document.querySelector('meta[name="csrf-token"]');
+  if (meta && meta.content && meta.content !== '{{CSRF_TOKEN}}') {
+    return meta.content;
+  }
+  const match = document.cookie.match(/(?:^|;\s*)barsi_csrf=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : '';
+}
+
+/**
+ * Interceptor global do Fetch: anexa automaticamente o cabeçalho X-CSRF-Token
+ * em requisições mutantes (POST, PUT, DELETE, PATCH).
+ */
+(function() {
+  const _origFetch = window.fetch;
+  window.fetch = function(url, options = {}) {
+    const opts = Object.assign({}, options);
+    const method = (opts.method || 'GET').toUpperCase();
+    if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
+      const token = getCsrfToken();
+      if (token) {
+        if (!opts.headers) {
+          opts.headers = {};
+        }
+        if (opts.headers instanceof Headers) {
+          if (!opts.headers.has('X-CSRF-Token')) {
+            opts.headers.set('X-CSRF-Token', token);
+          }
+        } else if (Array.isArray(opts.headers)) {
+          const exists = opts.headers.some(h => h[0].toLowerCase() === 'x-csrf-token');
+          if (!exists) opts.headers.push(['X-CSRF-Token', token]);
+        } else {
+          if (!opts.headers['X-CSRF-Token'] && !opts.headers['x-csrf-token']) {
+            opts.headers['X-CSRF-Token'] = token;
+          }
+        }
+      }
+    }
+    return _origFetch(url, opts);
+  };
+})();
+
 function showToast(msg, type = "success") {
   const container = document.getElementById("toast-container");
   if (!container) return;
@@ -136,3 +181,4 @@ function renderDynamicArtifactChart(canvasId, art, data, chartInstances) {
   }
   return instance;
 }
+

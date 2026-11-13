@@ -141,3 +141,4 @@ async function carregarExtratos() {
 }
 
 document.addEventListener("DOMContentLoaded", carregarExtratos);
+
