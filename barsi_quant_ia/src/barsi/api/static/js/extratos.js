@@ -114,9 +114,14 @@ async function carregarExtratos() {
     const res = await fetch("/api/extratos/transacoes?limit=50");
     if (!res.ok) return;
     const data = await res.json();
-    if (!data || !data.transacoes || data.transacoes.length === 0) return;
-
     const tbody = document.getElementById("transacoes-body");
+    if (!tbody) return;
+
+    if (!data || !data.transacoes || data.transacoes.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">Nenhum extrato importado ainda. Selecione ou arraste um arquivo <strong>.OFX</strong> acima para conciliar suas contas.</td></tr>`;
+      return;
+    }
+
     tbody.innerHTML = "";
     data.transacoes.forEach(t => {
       const isCredit = t.tipo === "CREDIT";
