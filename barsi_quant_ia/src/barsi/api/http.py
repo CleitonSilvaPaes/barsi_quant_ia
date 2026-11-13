@@ -126,8 +126,9 @@ _user_repo_cache: Optional[UserRepository] = None
 
 def get_user_repo() -> UserRepository:
     global _user_repo_cache
-    if _user_repo_cache is None:
-        _user_repo_cache = UserRepository(settings.sqlite_db_path)
+    target_path = os.path.abspath(settings.sqlite_db_path)
+    if _user_repo_cache is None or os.path.abspath(_user_repo_cache.db_path) != target_path:
+        _user_repo_cache = UserRepository(target_path)
         if settings.initial_admin_user and settings.initial_admin_pass:
             _user_repo_cache.init_admin_if_empty(settings.initial_admin_user, settings.initial_admin_pass)
         elif not _user_repo_cache.list_users():
