@@ -1,0 +1,3 @@
+# Configuração do act para execução local do GitHub Actions
+-P ubuntu-latest=catthehacker/ubuntu:act-latest
+--secret-file .secrets

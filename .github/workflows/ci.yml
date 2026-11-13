@@ -31,7 +31,7 @@ jobs:
           python - << 'EOF'
           import os, subprocess, sys
 
-          # Padrões genéricos seguros para ficar no código + padrões privados vindos dos Secrets
+          # Padrões genéricos para evitar IPs privados rastreados no git
           patterns = [r"192\.168\.\d+\.\d+", r"10\.\d+\.\d+\.\d+"]
           
           secret_patterns = os.environ.get("FORBIDDEN_PATTERNS", "")
@@ -56,24 +56,28 @@ jobs:
           EOF
 
   # ─────────────────────────────────────────────────────────────
-  # Job 2: Lint Check (rápido, < 30s)
+  # Job 2: Lint Check (Ruff - 100% compatível com act e GitHub Actions)
   # ─────────────────────────────────────────────────────────────
   lint:
-    name: 🧹 Lint Check (ruff)
+    name: 🧹 Lint Check (Ruff)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Ruff
-        uses: astral-sh/ruff-action@v3
+      - uses: actions/setup-python@v5
         with:
-          version: "0.6.9"
+          python-version: "3.11"
 
-      - name: Ruff check
+      - name: Install Ruff
+        run: |
+          python -m pip install --upgrade pip
+          pip install "ruff>=0.6.0"
+
+      - name: Ruff Check
         run: ruff check barsi_quant_ia/src barsi_quant_ia/tests --output-format=github
 
   # ─────────────────────────────────────────────────────────────
-  # Job 3 & 4: Pytest com matriz (3.11 + 3.12)
+  # Job 3: Pytest Matrix com Isolamento Estrito & Cobertura
   # ─────────────────────────────────────────────────────────────
   pytest:
     name: 🧪 Pytest (Python ${{ matrix.python }})
@@ -95,9 +99,12 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e barsi_quant_ia/[dev]
+          pip install -e "./barsi_quant_ia[dev]"
 
       - name: Run Pytest with Coverage Gate (≥40%)
+        env:
+          PYTHONPATH: barsi_quant_ia/src
+          BARSI_ENV: test
         run: |
           pytest barsi_quant_ia/tests/ -v \
             --cov=barsi \
@@ -106,7 +113,7 @@ jobs:
             --cov-report=xml:coverage.xml
 
   # ─────────────────────────────────────────────────────────────
-  # Job 5: CI success summary (para o branch protection)
+  # Job 4: CI Success Gate (para Branch Protection)
   # ─────────────────────────────────────────────────────────────
   ci-success:
     name: ✅ CI Success
@@ -122,4 +129,4 @@ jobs:
             echo "❌ CI FAILED"
             exit 1
           fi
-          echo "✅ All CI checks passed"
+          echo "✅ All CI checks passed successfully!"
