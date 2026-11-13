@@ -247,3 +247,4 @@ async function executarSync() {
 }
 
 window.addEventListener("DOMContentLoaded", carregarInsights);
+

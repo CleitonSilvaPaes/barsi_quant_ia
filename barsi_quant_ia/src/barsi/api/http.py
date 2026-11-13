@@ -22,7 +22,12 @@ from barsi.config import settings
 from barsi.adapters.factory import AdapterFactory
 from barsi.adapters.history.user_repository import UserRepository
 from barsi.adapters.history.budget_repository import BudgetRepository, validate_target_month
-from barsi.infra.security import create_session_token, decode_session_token
+from barsi.infra.security import (
+    create_session_token,
+    decode_session_token,
+    generate_csrf_token,
+    verify_csrf_token,
+)
 from barsi.services.sync_service import SyncService
 from barsi.services.ofx_service import OFXParserService
 from barsi.domain.models import RunSummary, Position, SimuladorOrder
@@ -44,6 +49,48 @@ security = HTTPBearer(auto_error=False)
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 os.makedirs(STATIC_DIR, exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+CSRF_EXEMPT_PATHS = {
+    "/login",
+    "/api/telegram/webhook",
+    "/docs",
+    "/openapi.json",
+    "/redoc",
+}
+
+@app.middleware("http")
+async def csrf_protection_middleware(request: Request, call_next):
+    """Valida tokens CSRF em requisições de alteração de estado autenticadas via cookies."""
+    if settings.csrf_enabled and request.method in ("POST", "PUT", "DELETE", "PATCH"):
+        path = request.url.path
+        if path not in CSRF_EXEMPT_PATHS:
+            session_token = request.cookies.get("barsi_session")
+            if session_token:
+                csrf_token = (
+                    request.headers.get("X-CSRF-Token")
+                    or request.headers.get("X-CSRFToken")
+                    or request.query_params.get("csrf_token")
+                )
+                if not csrf_token or not verify_csrf_token(str(csrf_token), session_token, settings.secret_key):
+                    logger.warning("csrf_validation_failed", path=path, method=request.method)
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": "Falha na validação CSRF: Token CSRF ausente ou inválido."}
+                    )
+
+    response = await call_next(request)
+
+    session_token = request.cookies.get("barsi_session")
+    if session_token and not request.url.path.startswith("/static"):
+        token_csrf = generate_csrf_token(session_token, settings.secret_key)
+        response.set_cookie(
+            key="barsi_csrf",
+            value=token_csrf,
+            httponly=False,
+            samesite="lax",
+            path="/"
+        )
+    return response
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
@@ -240,10 +287,14 @@ def render_page(template_name: str, request: Request, page_title: str, active_na
     is_admin = (user.get("role") == "admin")
     admin_nav_html = f'<a href="/admin" class="nav-item {"active" if active_nav == "admin" else ""}"><span class="icon">🔐</span> Admin & Usuários</a>' if is_admin else ""
 
+    session_token = request.cookies.get("barsi_session", "")
+    csrf_token = generate_csrf_token(session_token, settings.secret_key)
+
     html = (
         base_html.replace("{{TITLE}}", page_title)
                  .replace("{{PAGE_HEADING}}", page_title)
                  .replace("{{PAGE_CONTENT}}", content_html)
+                 .replace("{{CSRF_TOKEN}}", csrf_token)
                  .replace("{{FREE_MB}}", str(free_mb))
                  .replace("{{TOTAL_MB}}", str(total_mb))
                  .replace("{{RSS_MB}}", str(rss_mb))
@@ -255,7 +306,9 @@ def render_page(template_name: str, request: Request, page_title: str, active_na
     for n in navs:
         html = html.replace(f"{{{{NAV_{n.upper()}}}}}", "active" if n == active_nav else "")
 
-    return HTMLResponse(content=html)
+    res = HTMLResponse(content=html)
+    res.set_cookie(key="barsi_csrf", value=csrf_token, httponly=False, samesite="lax", path="/")
+    return res
 
 # ----------------- ROTAS DE AUTENTICAÇÃO & RATE LIMITING -----------------
 _login_attempts: Dict[str, List[float]] = {}
@@ -277,12 +330,17 @@ def _get_client_ip(request: Request) -> str:
     return real_ip
 
 @app.get("/login", response_class=HTMLResponse)
-async def login_page(error: Optional[str] = None):
+async def login_page(request: Request, error: Optional[str] = None):
     login_path = os.path.join(TEMPLATES_DIR, "login.html")
     with open(login_path, "r", encoding="utf-8") as f:
         html = f.read()
     err_html = f'<div class="err">{error}</div>' if error else ""
-    return html.replace("{{ERROR_MSG}}", err_html)
+    session_token = request.cookies.get("barsi_session", "")
+    csrf_token = generate_csrf_token(session_token, settings.secret_key)
+    html = html.replace("{{ERROR_MSG}}", err_html).replace("{{CSRF_TOKEN}}", csrf_token)
+    res = HTMLResponse(content=html)
+    res.set_cookie(key="barsi_csrf", value=csrf_token, httponly=False, samesite="lax", path="/")
+    return res
 
 @app.post("/login")
 async def do_login(request: Request):
@@ -324,6 +382,8 @@ async def do_login(request: Request):
         token = create_session_token(user["id"], user["username"], user["role"], settings.secret_key)
         res = RedirectResponse(url="/", status_code=303)
         res.set_cookie(key="barsi_session", value=token, httponly=True, max_age=86400 * 7, samesite="lax")
+        csrf_token = generate_csrf_token(token, settings.secret_key)
+        res.set_cookie(key="barsi_csrf", value=csrf_token, httponly=False, max_age=86400 * 7, samesite="lax", path="/")
         return res
 
     recent_attempts.append(now)
@@ -335,6 +395,7 @@ async def do_login(request: Request):
 async def do_logout():
     res = RedirectResponse(url="/login", status_code=303)
     res.delete_cookie(key="barsi_session")
+    res.delete_cookie(key="barsi_csrf")
     return res
 
 # ----------------- ROTAS DAS PÁGINAS DEDICADAS -----------------

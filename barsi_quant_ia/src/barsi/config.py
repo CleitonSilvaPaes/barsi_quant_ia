@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_bearer_token: str = Field(default_factory=lambda: os.getenv("BARSI_API_BEARER_TOKEN", ""))
     secret_key: str = Field(default_factory=lambda: os.getenv("BARSI_SECRET_KEY") or secrets.token_urlsafe(32))
+    csrf_enabled: bool = Field(default_factory=lambda: os.getenv("BARSI_CSRF_ENABLED", "true").lower() in ("true", "1", "yes"))
     initial_admin_user: str = Field(default_factory=lambda: os.getenv("BARSI_INITIAL_ADMIN_USER", ""))
     initial_admin_pass: str = Field(default_factory=lambda: os.getenv("BARSI_INITIAL_ADMIN_PASS", ""))
     titular_nomes: Union[List[str], str] = Field(default_factory=list)

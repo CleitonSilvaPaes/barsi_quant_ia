@@ -322,3 +322,4 @@ window.addEventListener("DOMContentLoaded", () => {
   carregarCarteira();
   carregarArtefatosCarteira();
 });
+
