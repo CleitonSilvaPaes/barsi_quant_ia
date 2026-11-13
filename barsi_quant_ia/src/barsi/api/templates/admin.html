@@ -48,14 +48,16 @@
           <tr>
             <th>ID</th>
             <th>Usuário</th>
+            <th>Email / Google</th>
             <th>Perfil (RBAC)</th>
             <th>2FA (TOTP)</th>
             <th>Criado em</th>
+            <th style="text-align:center;">Ações</th>
           </tr>
         </thead>
         <tbody id="tbl-users">
           <tr>
-            <td colspan="5" style="text-align:center; color:var(--text-muted);">Carregando usuários...</td>
+            <td colspan="7" style="text-align:center; color:var(--text-muted);">Carregando usuários...</td>
           </tr>
         </tbody>
       </table>
@@ -71,6 +73,10 @@
         <input type="text" id="new-user-name" class="tbl-input" required />
       </div>
       <div>
+        <label style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Email (Para login com Google)</label>
+        <input type="email" id="new-user-email" class="tbl-input" placeholder="ex: usuario@gmail.com" />
+      </div>
+      <div>
         <label style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Senha Inicial</label>
         <input type="password" id="new-user-pass" class="tbl-input" required />
       </div>
@@ -82,8 +88,30 @@
           <option value="admin">Administrador (Total)</option>
         </select>
       </div>
-      <button type="submit" class="btn btn-green" style="margin-top:0.5rem; justify-content:center;">Criar
-        Usuário</button>
+      <button type="submit" class="btn btn-green" style="margin-top:0.5rem; justify-content:center;">Criar Usuário</button>
+    </form>
+  </div>
+</div>
+
+<!-- Modal para Trocar Senha -->
+<div id="modal-trocar-senha" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:9999; align-items:center; justify-content:center;">
+  <div class="card" style="width:100%; max-width:400px; padding:1.5rem; background:#1e293b; border:1px solid #334155; border-radius:8px;">
+    <h3 style="margin-top:0; color:#38bdf8; font-size:1.1rem;">🔑 Redefinir Senha do Usuário</h3>
+    <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1rem;">Usuário selecionado: <strong id="modal-pass-username" style="color:#fff;"></strong></p>
+    <form onsubmit="confirmarTrocaSenha(event)" style="display:flex; flex-direction:column; gap:0.75rem;">
+      <input type="hidden" id="modal-pass-userid" />
+      <div>
+        <label style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Nova Senha (mínimo 6 caracteres)</label>
+        <input type="password" id="modal-new-pass" class="tbl-input" minlength="6" required />
+      </div>
+      <div>
+        <label style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Confirmar Nova Senha</label>
+        <input type="password" id="modal-new-pass-confirm" class="tbl-input" minlength="6" required />
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:0.5rem;">
+        <button type="button" class="btn" onclick="fecharModalTrocarSenha()" style="background:#475569; color:#fff;">Cancelar</button>
+        <button type="submit" class="btn btn-primary">Salvar Nova Senha</button>
+      </div>
     </form>
   </div>
 </div>
