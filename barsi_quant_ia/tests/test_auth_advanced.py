@@ -109,14 +109,14 @@ def test_admin_change_password_and_email_api(tmp_path, monkeypatch):
     assert repo.authenticate("bob", "superSecretBob456") is not None
     assert repo.authenticate("bob", "bobPass123") is None
 
-    # Admin altera o email de Bob
-    resp_email = client.post(
+    # Admin altera o email de Bob via PUT
+    resp_email_put = client.put(
         f"/api/admin/users/{bob['id']}/email",
         json={"email": "bob@dominio.com"},
         cookies={"barsi_session": admin_token},
         headers={"X-CSRF-Token": admin_csrf}
     )
-    assert resp_email.status_code == 200
+    assert resp_email_put.status_code == 200
     assert repo.authenticate("bob@dominio.com", "superSecretBob456") is not None
 
 

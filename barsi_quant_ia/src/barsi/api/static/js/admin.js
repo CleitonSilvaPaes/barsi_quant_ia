@@ -38,8 +38,9 @@ async function carregarUsuarios() {
           <td><span class="badge-acumular" style="text-transform:uppercase;">${esc(u.role)}</span></td>
           <td>${badge2fa}</td>
           <td style="color:var(--text-muted); font-size:0.8rem;">${esc(u.created_at || '—')}</td>
-          <td style="text-align:center;">
-            <button type="button" class="btn btn-secondary" onclick="abrirModalTrocarSenha(${u.id}, '${esc(u.username)}')" style="padding:0.25rem 0.5rem; font-size:0.75rem;">🔑 Trocar Senha</button>
+          <td style="text-align:center; white-space:nowrap;">
+            <button type="button" class="btn btn-secondary" onclick="abrirModalTrocarSenha(${u.id}, '${esc(u.username)}')" style="padding:0.25rem 0.5rem; font-size:0.75rem;" title="Redefinir Senha">🔑 Senha</button>
+            <button type="button" class="btn btn-secondary" onclick="vincularEmail(${u.id}, '${esc(u.email || '')}')" style="padding:0.25rem 0.5rem; font-size:0.75rem; margin-left:4px;" title="Vincular Google">📧 Email</button>
           </td>
         </tr>
       `;
@@ -121,6 +122,28 @@ async function confirmarTrocaSenha(e) {
       fecharModalTrocarSenha();
     } else {
       showToast(data.detail || "Erro ao atualizar senha", "error");
+    }
+  } catch (err) {
+    showToast("Erro na requisição: " + err, "error");
+  }
+}
+
+async function vincularEmail(userId, currentEmail) {
+  const email = prompt("Digite o e-mail do Google para vincular a este usuário:", currentEmail);
+  if (email === null) return;
+
+  try {
+    const res = await fetch(`/api/admin/users/${userId}/email`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: email.trim() })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showToast(data.message || "E-mail vinculado com sucesso!");
+      carregarUsuarios();
+    } else {
+      showToast(data.detail || "Erro ao vincular e-mail", "error");
     }
   } catch (err) {
     showToast("Erro na requisição: " + err, "error");

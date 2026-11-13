@@ -197,6 +197,8 @@ class UpdateUserPasswordRequest(BaseModel):
 class UpdateUserEmailRequest(BaseModel):
     email: str
 
+UpdateEmailRequest = UpdateUserEmailRequest
+
 class ArtifactCreateRequest(BaseModel):
     name: str
     description: Optional[str] = ""
@@ -1558,6 +1560,7 @@ async def update_user_password_admin(user_id: int, req: UpdateUserPasswordReques
     return {"ok": True, "message": f"Senha do usuário '{target.get('username')}' atualizada com sucesso!"}
 
 @app.post("/api/admin/users/{user_id}/email")
+@app.put("/api/admin/users/{user_id}/email")
 async def update_user_email_admin(user_id: int, req: UpdateUserEmailRequest, request: Request):
     user = require_role_action(request, action_type="admin")
     if user.get("role") != "admin":
@@ -1568,9 +1571,9 @@ async def update_user_email_admin(user_id: int, req: UpdateUserEmailRequest, req
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
     success = repo.update_email(user_id, req.email)
     if not success:
-        raise HTTPException(status_code=500, detail="Falha ao atualizar o email do usuário")
+        raise HTTPException(status_code=400, detail="E-mail inválido ou já em uso por outro usuário.")
     logger.info("admin_email_updated", admin=user.get("username"), target=target.get("username"), email=req.email)
-    return {"ok": True, "message": f"Email do usuário '{target.get('username')}' atualizado para '{req.email}'."}
+    return {"ok": True, "message": "E-mail vinculado com sucesso!"}
 
 @app.get("/api/backup/download")
 async def download_backup_sqlite(request: Request):

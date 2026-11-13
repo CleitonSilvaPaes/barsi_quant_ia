@@ -164,12 +164,17 @@ class UserRepository:
             return cur.rowcount > 0
 
     def update_email(self, user_id: int, email: Optional[str]) -> bool:
-        """Atualiza o email de um usuário."""
-        clean_email = email.strip() if email else None
-        with self._connection() as conn:
-            cur = conn.execute("UPDATE usuarios SET email = ? WHERE id = ?", (clean_email, user_id))
-            conn.commit()
-            return cur.rowcount > 0
+        """Atualiza o e-mail do usuário para permitir vínculo com OAuth."""
+        clean_email = email.strip().lower() if email else None
+        if clean_email == "":
+            clean_email = None
+        try:
+            with self._connection() as conn:
+                cur = conn.execute("UPDATE usuarios SET email = ? WHERE id = ?", (clean_email, user_id))
+                conn.commit()
+                return cur.rowcount > 0
+        except sqlite3.IntegrityError:
+            return False
 
     def link_google_account(self, user_id: int, google_id: str, email: Optional[str] = None) -> bool:
         """Vincula um ID de conta Google e opcionalmente o email ao usuário."""
