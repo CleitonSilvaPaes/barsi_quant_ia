@@ -1,0 +1,62 @@
+/**
+ * Barsi Quant IA - Analytics & Charts Stylesheet
+ */
+
+.chart-container {
+  position: relative;
+  height: 300px;
+  width: 100%;
+}
+
+.responsive-grid-2-1 {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.responsive-grid-1-1 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.responsive-grid-artifacts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.card-analytics-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.benchmark-badge-win {
+  color: var(--green);
+  font-weight: 700;
+}
+
+.benchmark-badge-loss {
+  color: var(--red);
+  font-weight: 700;
+}
+
+@media (max-width: 900px) {
+  .chart-container {
+    height: 240px !important;
+  }
+
+  .responsive-grid-2-1,
+  .responsive-grid-1-1,
+  .responsive-grid-artifacts {
+    grid-template-columns: 1fr !important;
+    gap: 1rem;
+  }
+}

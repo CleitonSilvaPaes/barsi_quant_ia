@@ -20,6 +20,8 @@ async def test_partial_update_does_not_invalidate_cache(tmp_path, monkeypatch):
 
     # Mock completo do cliente GSpread
     class FakeWS:
+        def get(self, range_name):
+            return [["BBAS3"], ["SAPR4"]]
         def batch_update(self, updates):
             pass
         def update(self, **kw):

@@ -1,0 +1,58 @@
+/**
+ * Barsi Quant IA - Design System Theme Tokens & Root Variables
+ * Suporte a Tema Escuro (Padrão) e Tema Claro
+ */
+
+:root {
+  --bg: #0b0f19;
+  --sidebar-bg: #070a12;
+  --card-bg: #111827;
+  --card-hover: #1e293b;
+  --border: #1f293d;
+  --border-accent: #2563eb;
+  --text: #f8fafc;
+  --text-muted: #94a3b8;
+  --accent: #38bdf8;
+  --green: #22c55e;
+  --green-bg: rgba(34, 197, 94, 0.12);
+  --red: #ef4444;
+  --red-bg: rgba(239, 68, 68, 0.12);
+  --amber: #f59e0b;
+  --amber-bg: rgba(245, 158, 11, 0.12);
+  --topbar-bg: rgba(11, 15, 25, 0.85);
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+[data-theme="light"] {
+  --bg: #f8fafc;
+  --sidebar-bg: #ffffff;
+  --card-bg: #ffffff;
+  --card-hover: #f1f5f9;
+  --border: #e2e8f0;
+  --border-accent: #0284c7;
+  --text: #0f172a;
+  --text-muted: #64748b;
+  --accent: #0284c7;
+  --green: #16a34a;
+  --green-bg: rgba(22, 163, 74, 0.12);
+  --red: #dc2626;
+  --red-bg: rgba(220, 38, 38, 0.12);
+  --amber: #d97706;
+  --amber-bg: rgba(217, 119, 6, 0.12);
+  --topbar-bg: rgba(255, 255, 255, 0.88);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font);
+  background-color: var(--bg);
+  color: var(--text);
+  display: flex;
+  min-height: 100vh;
+  line-height: 1.5;
+}

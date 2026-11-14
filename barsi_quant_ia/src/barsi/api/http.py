@@ -92,6 +92,35 @@ async def get_service_worker():
         headers={"Service-Worker-Allowed": "/"}
     )
 
+def is_request_secure(request: Optional[Request]) -> bool:
+    """Verifica se a requisição trafega sobre HTTPS direto ou através de proxy reverso/Tailscale."""
+    if not request:
+        return False
+    proto = request.headers.get("x-forwarded-proto", "").lower()
+    return proto == "https" or request.url.scheme == "https"
+
+def set_barsi_cookie(
+    response: Response,
+    key: str,
+    value: str,
+    request: Optional[Request] = None,
+    httponly: bool = True,
+    max_age: Optional[int] = 86400 * 7,
+    samesite: str = "lax",
+    path: str = "/"
+):
+    """Define cookie com atributos de segurança (HttpOnly, SameSite e Secure em HTTPS)."""
+    secure_flag = is_request_secure(request)
+    response.set_cookie(
+        key=key,
+        value=value,
+        httponly=httponly,
+        max_age=max_age,
+        samesite=samesite,
+        path=path,
+        secure=secure_flag
+    )
+
 @app.middleware("http")
 async def csrf_protection_middleware(request: Request, call_next):
     """Valida tokens CSRF em requisições de alteração de estado autenticadas via cookies."""
@@ -117,9 +146,11 @@ async def csrf_protection_middleware(request: Request, call_next):
     session_token = request.cookies.get("barsi_session")
     if session_token and not request.url.path.startswith("/static"):
         token_csrf = generate_csrf_token(session_token, settings.secret_key)
-        response.set_cookie(
+        set_barsi_cookie(
+            response=response,
             key="barsi_csrf",
             value=token_csrf,
+            request=request,
             httponly=False,
             samesite="lax",
             path="/"
@@ -133,6 +164,7 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=(), payment=()"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
@@ -140,8 +172,12 @@ async def add_security_headers(request: Request, call_next):
         "font-src 'self' data:; "
         "img-src 'self' data: https:; "
         "connect-src 'self'; "
-        "frame-ancestors 'none';"
+        "frame-ancestors 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self';"
     )
+    if is_request_secure(request):
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
 
 START_TIME = time.time()
@@ -414,7 +450,7 @@ def render_page(template_name: str, request: Request, page_title: str, active_na
         html = html.replace(f"{{{{NAV_{n.upper()}}}}}", "active" if n == active_nav else "")
 
     res = HTMLResponse(content=html)
-    res.set_cookie(key="barsi_csrf", value=csrf_token, httponly=False, samesite="lax", path="/")
+    set_barsi_cookie(response=res, key="barsi_csrf", value=csrf_token, request=request, httponly=False, samesite="lax", path="/")
     return res
 
 # ----------------- ROTAS DE AUTENTICAÇÃO & RATE LIMITING -----------------
@@ -446,7 +482,7 @@ async def login_page(request: Request, error: Optional[str] = None):
     csrf_token = generate_csrf_token(session_token, settings.secret_key)
     html = html.replace("{{ERROR_MSG}}", err_html).replace("{{CSRF_TOKEN}}", csrf_token)
     res = HTMLResponse(content=html)
-    res.set_cookie(key="barsi_csrf", value=csrf_token, httponly=False, samesite="lax", path="/")
+    set_barsi_cookie(response=res, key="barsi_csrf", value=csrf_token, request=request, httponly=False, samesite="lax", path="/")
     return res
 
 @app.post("/login")
@@ -487,16 +523,16 @@ async def do_login(request: Request):
             else:
                 pending_token = create_2fa_pending_token(user["id"], user["username"], settings.secret_key)
                 res = RedirectResponse(url="/login/2fa", status_code=303)
-                res.set_cookie(key="barsi_2fa_pending", value=pending_token, httponly=True, max_age=300, samesite="lax")
+                set_barsi_cookie(response=res, key="barsi_2fa_pending", value=pending_token, request=request, httponly=True, max_age=300, samesite="lax")
                 return res
 
         _login_attempts.pop(client_ip, None)
         logger.info("login_success", ip=client_ip, username=username, role=user["role"])
         token = create_session_token(user["id"], user["username"], user["role"], settings.secret_key)
         res = RedirectResponse(url="/", status_code=303)
-        res.set_cookie(key="barsi_session", value=token, httponly=True, max_age=86400 * 7, samesite="lax")
+        set_barsi_cookie(response=res, key="barsi_session", value=token, request=request, httponly=True, max_age=86400 * 7, samesite="lax")
         csrf_token = generate_csrf_token(token, settings.secret_key)
-        res.set_cookie(key="barsi_csrf", value=csrf_token, httponly=False, max_age=86400 * 7, samesite="lax", path="/")
+        set_barsi_cookie(response=res, key="barsi_csrf", value=csrf_token, request=request, httponly=False, max_age=86400 * 7, samesite="lax", path="/")
         return res
 
     recent_attempts.append(now)
@@ -520,7 +556,7 @@ async def login_2fa_page(request: Request, error: Optional[str] = None):
     csrf_token = generate_csrf_token(pending_token, settings.secret_key)
     html = html.replace("{{ERROR_MSG}}", err_html).replace("{{CSRF_TOKEN}}", csrf_token)
     res = HTMLResponse(content=html)
-    res.set_cookie(key="barsi_csrf", value=csrf_token, httponly=False, samesite="lax", path="/")
+    set_barsi_cookie(response=res, key="barsi_csrf", value=csrf_token, request=request, httponly=False, samesite="lax", path="/")
     return res
 
 @app.post("/login/2fa")
@@ -549,9 +585,9 @@ async def do_login_2fa(request: Request):
     logger.info("login_2fa_success", user_id=user_id, username=user["username"], role=user["role"])
     token = create_session_token(user["id"], user["username"], user["role"], settings.secret_key)
     res = RedirectResponse(url="/", status_code=303)
-    res.set_cookie(key="barsi_session", value=token, httponly=True, max_age=86400 * 7, samesite="lax")
+    set_barsi_cookie(response=res, key="barsi_session", value=token, request=request, httponly=True, max_age=86400 * 7, samesite="lax")
     csrf_token = generate_csrf_token(token, settings.secret_key)
-    res.set_cookie(key="barsi_csrf", value=csrf_token, httponly=False, max_age=86400 * 7, samesite="lax", path="/")
+    set_barsi_cookie(response=res, key="barsi_csrf", value=csrf_token, request=request, httponly=False, max_age=86400 * 7, samesite="lax", path="/")
     res.delete_cookie(key="barsi_2fa_pending")
     return res
 
@@ -577,7 +613,7 @@ async def google_login(request: Request):
     }
     auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?{urllib.parse.urlencode(params)}"
     res = RedirectResponse(url=auth_url, status_code=303)
-    res.set_cookie(key="barsi_oauth_state", value=state, httponly=True, max_age=600, samesite="lax")
+    set_barsi_cookie(response=res, key="barsi_oauth_state", value=state, request=request, httponly=True, max_age=600, samesite="lax")
     return res
 
 @app.get("/auth/google/callback")
@@ -646,15 +682,15 @@ async def google_callback(request: Request, code: Optional[str] = None, state: O
     if user.get("totp_enabled"):
         pending_token = create_2fa_pending_token(user["id"], user["username"], settings.secret_key)
         res = RedirectResponse(url="/login/2fa", status_code=303)
-        res.set_cookie(key="barsi_2fa_pending", value=pending_token, httponly=True, max_age=300, samesite="lax")
+        set_barsi_cookie(response=res, key="barsi_2fa_pending", value=pending_token, request=request, httponly=True, max_age=300, samesite="lax")
         res.delete_cookie(key="barsi_oauth_state")
         return res
 
     token = create_session_token(user["id"], user["username"], user["role"], settings.secret_key)
     res = RedirectResponse(url="/", status_code=303)
-    res.set_cookie(key="barsi_session", value=token, httponly=True, max_age=86400 * 7, samesite="lax")
+    set_barsi_cookie(response=res, key="barsi_session", value=token, request=request, httponly=True, max_age=86400 * 7, samesite="lax")
     csrf_token = generate_csrf_token(token, settings.secret_key)
-    res.set_cookie(key="barsi_csrf", value=csrf_token, httponly=False, max_age=86400 * 7, samesite="lax", path="/")
+    set_barsi_cookie(response=res, key="barsi_csrf", value=csrf_token, request=request, httponly=False, max_age=86400 * 7, samesite="lax", path="/")
     res.delete_cookie(key="barsi_oauth_state")
     return res
 
