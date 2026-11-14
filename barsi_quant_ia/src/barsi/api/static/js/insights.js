@@ -246,5 +246,105 @@ async function executarSync() {
   }
 }
 
-window.addEventListener("DOMContentLoaded", carregarInsights);
+async function carregarAlertasTese() {
+  const section = document.getElementById("thesis-alerts-section");
+  const listEl = document.getElementById("thesis-alerts-list");
+  if (!section || !listEl) return;
+
+  try {
+    const res = await fetch("/api/early-warning/alerts");
+    if (!res.ok) return;
+    const data = await res.json();
+    const alerts = data.alerts || [];
+
+    if (alerts.length === 0) {
+      section.style.display = "none";
+      listEl.innerHTML = "";
+      return;
+    }
+
+    section.style.display = "block";
+    listEl.innerHTML = "";
+
+    alerts.forEach(alert => {
+      const isCritical = alert.severity === "CRITICAL";
+      const borderCol = isCritical ? "rgba(239, 68, 68, 0.4)" : "rgba(245, 158, 11, 0.4)";
+      const bgCol = isCritical ? "rgba(239, 68, 68, 0.12)" : "rgba(245, 158, 11, 0.12)";
+      const badgeCol = isCritical ? "#ef4444" : "#f59e0b";
+
+      const item = document.createElement("div");
+      item.style.cssText = `background: ${bgCol}; border: 1px solid ${borderCol}; border-radius: 6px; padding: 0.85rem; display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem;`;
+      item.innerHTML = `
+        <div style="flex: 1;">
+          <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; flex-wrap: wrap;">
+            <strong style="color: #fff; font-size: 0.95rem;">${alert.ticker}</strong>
+            <span style="background: ${badgeCol}; color: #000; font-size: 0.7rem; font-weight: 700; padding: 0.15rem 0.4rem; border-radius: 4px;">
+              ${alert.severity} • ${alert.category.replace('_', ' ')}
+            </span>
+            <span style="font-size: 0.75rem; color: var(--text-muted);">
+              Detectado em ${new Date(alert.detected_at).toLocaleDateString()}
+            </span>
+          </div>
+          <div style="font-size: 0.85rem; color: #fff; margin-bottom: 0.35rem;">
+            ${alert.news_title}
+          </div>
+          <div style="font-size: 0.78rem; color: var(--text-muted); font-style: italic;">
+            "${alert.snippet}"
+          </div>
+          ${alert.news_url ? `<div style="margin-top: 0.3rem;"><a href="${alert.news_url}" target="_blank" rel="noopener noreferrer" style="font-size: 0.75rem; color: var(--accent);">🔗 Ler notícia na fonte</a></div>` : ''}
+        </div>
+        <button class="btn btn-outline" style="font-size: 0.75rem; padding: 0.25rem 0.5rem; border-color: var(--border);" onclick="dispensarAlertaTese(${alert.id})">
+          Dispensar
+        </button>
+      `;
+      listEl.appendChild(item);
+    });
+  } catch (e) {
+    console.warn("Erro ao buscar alertas de tese:", e);
+  }
+}
+
+async function escanearAlertasTese() {
+  const btn = document.getElementById("btn-scan-alerts");
+  if (btn) {
+    btn.disabled = true;
+    btn.innerText = "⏳ Escaneando...";
+  }
+  try {
+    showToast("Iniciando varredura de notícias via Google News RSS...");
+    const res = await fetch("/api/early-warning/scan", { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Erro na varredura");
+
+    if (data.alerts_found > 0) {
+      showToast(`⚠️ Atenção: ${data.alerts_found} alerta(s) de risco identificados!`, "error");
+    } else {
+      showToast("✓ Nenhuma ameaça de tese detectada nas notícias recentes.", "success");
+    }
+    await carregarAlertasTese();
+  } catch (err) {
+    showToast("Erro ao escanear notícias: " + err.message, "error");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerText = "🔍 Escanear Notícias Agora";
+    }
+  }
+}
+
+async function dispensarAlertaTese(id) {
+  try {
+    const res = await fetch(`/api/early-warning/${id}/dismiss`, { method: "POST" });
+    if (!res.ok) throw new Error("Erro ao dispensar alerta");
+    showToast("Alerta dispensado.");
+    await carregarAlertasTese();
+  } catch (e) {
+    showToast(e.message, "error");
+  }
+}
+
+window.addEventListener("DOMContentLoaded", () => {
+  carregarInsights();
+  carregarAlertasTese();
+});
 

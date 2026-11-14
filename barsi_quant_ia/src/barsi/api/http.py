@@ -36,6 +36,8 @@ from barsi.services.sync_service import SyncService
 from barsi.services.ofx_service import OFXParserService
 from barsi.services.drip_service import DripService
 from barsi.services.monthly_closing_service import MonthlyClosingService
+from barsi.services.early_warning_service import EarlyWarningService
+from barsi.services.snowball_backtest_service import SnowballBacktestService
 from barsi.domain.models import RunSummary, Position, SimuladorOrder
 from barsi.domain.rules import atualizar_posicao_quant
 from barsi.infra.logging import logger
@@ -254,6 +256,14 @@ class DripApplyItem(BaseModel):
 
 class DripApplyRequest(BaseModel):
     ordens: List[DripApplyItem]
+
+class SnowballSimulateRequest(BaseModel):
+    aporte_mensal: float = Field(default=1000.0, ge=0)
+    taxa_reinvestimento: float = Field(default=1.0, ge=0, le=1.0)
+    anos: int = Field(default=20, ge=1, le=50)
+    dy_base: Optional[float] = Field(default=None, ge=0)
+    crescimento_anual_proventos: float = Field(default=6.0, ge=0)
+    valor_inicial: Optional[float] = Field(default=None, ge=0)
 
 def get_sync_service() -> SyncService:
     market = AdapterFactory.create_market_adapter(settings)
@@ -1385,6 +1395,59 @@ async def preview_monthly_closing_html(request: Request, mes_ano: Optional[str] 
     closing_service = MonthlyClosingService(repo)
     html = closing_service.generate_html_report(target_month)
     return HTMLResponse(content=html)
+
+# ----------------- ROTAS EARLY WARNING (ALERTA DE QUEBRA DE TESE) (ROADMAP V3.0) -----------------
+@app.get("/api/early-warning/alerts")
+async def list_early_warning_alerts(request: Request, active_only: bool = True):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Não autorizado")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    news = AdapterFactory.create_news_adapter(settings)
+    service = EarlyWarningService(repo, news)
+    return JSONResponse(content=service.list_alerts(active_only=active_only))
+
+@app.post("/api/early-warning/scan")
+async def scan_early_warning_portfolio(request: Request):
+    require_role_action(request, action_type="edit")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    news = AdapterFactory.create_news_adapter(settings)
+    notifier = AdapterFactory.create_notification_adapter(settings)
+    service = EarlyWarningService(repo, news, notifier)
+    alerts = await service.scan_portfolio()
+    return JSONResponse(content={"status": "ok", "alerts_count": len(alerts), "alerts": alerts})
+
+@app.post("/api/early-warning/{alert_id}/dismiss")
+async def dismiss_early_warning_alert(alert_id: int, request: Request):
+    require_role_action(request, action_type="edit")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    news = AdapterFactory.create_news_adapter(settings)
+    service = EarlyWarningService(repo, news)
+    ok = service.dismiss_alert(alert_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Alerta não encontrado")
+    return JSONResponse(content={"status": "ok"})
+
+# ----------------- ROTAS BACKTESTING DE BOLA DE NEVE (ROADMAP V3.0) -----------------
+@app.post("/api/snowball/simulate")
+async def simulate_snowball_api(req: SnowballSimulateRequest, request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Não autorizado")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    service = SnowballBacktestService(repo)
+    try:
+        res = service.simulate_snowball(
+            aporte_mensal=req.aporte_mensal,
+            taxa_reinvestimento=req.taxa_reinvestimento,
+            anos=req.anos,
+            dy_base=req.dy_base,
+            crescimento_anual_proventos=req.crescimento_anual_proventos,
+            valor_inicial=req.valor_inicial
+        )
+        return JSONResponse(content=res)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/api/admin/users")
 async def list_admin_users(request: Request):
