@@ -48,6 +48,9 @@ INIT_BUDGET_SCHEMA_SQL = """
         origem            TEXT NOT NULL DEFAULT 'CONTA',   -- 'CONTA'|'CARTAO'
         categoria_id      INTEGER REFERENCES expense_categories(id),
         conciliado        INTEGER NOT NULL DEFAULT 0,
+        user_id           INTEGER DEFAULT 1,
+        feedback_usuario  TEXT,
+        anomaly_score     REAL,
         UNIQUE(fitid, tipo, valor)
     );
     CREATE INDEX IF NOT EXISTS idx_transacoes_mes ON transacoes(mes_ano, categoria);

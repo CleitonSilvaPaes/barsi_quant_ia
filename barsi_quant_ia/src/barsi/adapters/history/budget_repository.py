@@ -141,6 +141,10 @@ class BudgetRepository:
                 cols_tx = [r["name"] for r in conn.execute("PRAGMA table_info(transacoes)").fetchall()]
                 if "user_id" not in cols_tx:
                     conn.execute("ALTER TABLE transacoes ADD COLUMN user_id INTEGER DEFAULT 1")
+                if "feedback_usuario" not in cols_tx:
+                    conn.execute("ALTER TABLE transacoes ADD COLUMN feedback_usuario TEXT")
+                if "anomaly_score" not in cols_tx:
+                    conn.execute("ALTER TABLE transacoes ADD COLUMN anomaly_score REAL")
 
                 cols_rec = [r["name"] for r in conn.execute("PRAGMA table_info(recurring_expenses)").fetchall()]
                 if "user_id" not in cols_rec:
@@ -1599,6 +1603,30 @@ class BudgetRepository:
                 """,
                     (descricao.strip(), categoria.strip(), float(valor), data.strip(), mes_ano, transacao_id),
                 )
+            return cur.rowcount > 0
+
+    def get_transacao_by_id(self, transacao_id: int) -> Optional[Dict[str, Any]]:
+        """Retorna uma transação persistida por ID."""
+        with self._conn() as c:
+            row = c.execute("SELECT * FROM transacoes WHERE id = ?", (transacao_id,)).fetchone()
+            return dict(row) if row else None
+
+    def set_transacao_feedback(self, transacao_id: int, feedback: str) -> bool:
+        """Registra o feedback do usuário para uma transação (ex: 'OK_ANOMALIA', 'NORMAL')."""
+        with self._conn() as c:
+            cur = c.execute(
+                "UPDATE transacoes SET feedback_usuario = ? WHERE id = ?",
+                (feedback.strip(), transacao_id),
+            )
+            return cur.rowcount > 0
+
+    def update_transacao_anomaly_score(self, transacao_id: int, score: float) -> bool:
+        """Atualiza a pontuação de anomalia calculada para uma transação persistida."""
+        with self._conn() as c:
+            cur = c.execute(
+                "UPDATE transacoes SET anomaly_score = ? WHERE id = ?",
+                (float(score), transacao_id),
+            )
             return cur.rowcount > 0
 
     def get_budget_overview(self, mes_ano: Optional[str] = None) -> Dict[str, Any]:

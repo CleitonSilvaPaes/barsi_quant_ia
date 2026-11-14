@@ -104,6 +104,101 @@ class EarlyWarningService:
         """Lista os alertas históricos ou ativos registrados no SQLite."""
         return self.repo.list_thesis_alerts(active_only=active_only)
 
+    async def scan_ofx_anomalies(
+        self,
+        transacoes: Optional[List[Dict[str, Any]]] = None,
+        limit: int = 50,
+        model_path: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Avalia transações bancárias/cartão recentes contra o modelo Isolation Forest.
+        
+        Gera alertas quando transações forem anômalas e não marcadas com feedback 'OK_ANOMALIA'.
+        """
+        from barsi.domain.anomaly_detector import AnomalyDetector
+        detector = AnomalyDetector.get_instance(model_path=model_path)
+
+        txs_to_check = transacoes
+        if txs_to_check is None:
+            txs_to_check = self.repo.list_transacoes(limit=limit)
+
+        anomalies: List[Dict[str, Any]] = []
+        for t in txs_to_check:
+            # Pula transações já validadas pelo usuário
+            if t.get("feedback_usuario") == "OK_ANOMALIA":
+                continue
+
+            detection = detector.detect(t)
+            if detection["is_anomaly"]:
+                tx_id = t.get("id")
+                if tx_id:
+                    self.repo.update_transacao_anomaly_score(tx_id, detection["score"])
+
+                ticker = (t.get("ticker") or t.get("ticker_relacionado") or "EXTRATO").strip().upper()
+                fitid = t.get("fitid") or f"id_{tx_id}"
+                risk_type = "ANOMALIA_EXTRATO"
+                headline = f"Transação Incomum: {str(t.get('descricao', ''))[:35]}"
+                snippet = f"Valor R$ {abs(float(t.get('valor', 0.0))):,.2f} ({t.get('origem', 'CONTA')}) | Score: {detection['score']:.2f} | {detection['reason']}"
+
+                # Deduplicação: verifica se já foi registrado alerta ativo para este fitid/id
+                existing = self.repo.list_thesis_alerts(ticker=ticker, active_only=True)
+                ja_registrado = any(
+                    e["risk_type"] == risk_type and fitid in e.get("snippet", "")
+                    for e in existing
+                )
+
+                alert_id = None
+                if not ja_registrado:
+                    alert_id = self.repo.record_thesis_alert(
+                        ticker=ticker,
+                        risk_type=risk_type,
+                        severity=detection["severity"],
+                        headline=headline,
+                        snippet=f"[{fitid}] {snippet}",
+                        source="isolation_forest"
+                    )
+
+                    if self.notifier:
+                        msg = (
+                            f"🚨 *ALERTA DE ANOMALIA EM EXTRATO*\n\n"
+                            f"💳 *Transação:* {t.get('descricao')}\n"
+                            f"💵 *Valor:* R$ {abs(float(t.get('valor', 0.0))):,.2f} ({t.get('tipo')})\n"
+                            f"📅 *Data:* {t.get('data')} | *Origem:* {t.get('origem', 'CONTA')}\n"
+                            f"⚠️ *Severidade:* {detection['severity']} (Score: {detection['score']:.2f})\n"
+                            f"🔍 *Motivo:* {detection['reason']}\n\n"
+                            f"_Confirme no painel caso a transação seja legítima._"
+                        )
+                        try:
+                            if hasattr(self.notifier, "notify"):
+                                await self.notifier.notify(
+                                    title=f"🚨 ANOMALIA: {headline}",
+                                    body=snippet,
+                                    level="warning" if detection["severity"] == "MEDIA" else "error"
+                                )
+                            elif hasattr(self.notifier, "send_message"):
+                                await self.notifier.send_message(msg)
+                            logger.info("ofx_anomaly_notified", fitid=fitid, score=detection["score"])
+                        except Exception as notif_err:
+                            logger.warning("ofx_anomaly_notif_failed", fitid=fitid, error=str(notif_err))
+
+                anomalies.append({
+                    "alert_id": alert_id or (existing[0]["id"] if existing else None),
+                    "transacao_id": tx_id,
+                    "fitid": fitid,
+                    "descricao": t.get("descricao"),
+                    "valor": float(t.get("valor", 0.0)),
+                    "tipo": t.get("tipo"),
+                    "data": t.get("data"),
+                    "origem": t.get("origem"),
+                    "ticker": ticker,
+                    "score": detection["score"],
+                    "threshold": detection["threshold"],
+                    "severity": detection["severity"],
+                    "reason": detection["reason"],
+                    "is_new": not ja_registrado
+                })
+
+        return anomalies
+
     def dismiss_alert(self, alert_id: int) -> bool:
         """Marca o alerta como arquivado/reconhecido."""
         return self.repo.dismiss_thesis_alert(alert_id)

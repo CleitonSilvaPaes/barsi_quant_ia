@@ -11,6 +11,7 @@ from barsi.adapters.factory import AdapterFactory
 from barsi.adapters.history.budget_repository import BudgetRepository, validate_target_month
 from barsi.services.ofx_service import OFXParserService
 from barsi.services.monthly_closing_service import MonthlyClosingService
+from barsi.services.early_warning_service import EarlyWarningService
 from barsi.api.common import (
     get_current_user,
     require_role_action,
@@ -19,6 +20,7 @@ from barsi.api.common import (
     GoalCreateRequest,
     GoalUpdateRequest,
     UpdateTransacaoRequest,
+    TransacaoFeedbackRequest,
     CategoryRequest,
 )
 
@@ -83,6 +85,50 @@ async def delete_transacao_endpoint(transacao_id: int, request: Request):
         raise HTTPException(status_code=404, detail="Transação não encontrada.")
     return {"status": "ok", "message": "Transação excluída com sucesso."}
 
+@router.post("/api/extratos/transacoes/{transacao_id}/feedback")
+async def set_transacao_feedback_endpoint(transacao_id: int, req: TransacaoFeedbackRequest, request: Request):
+    """Registra feedback do usuário sobre uma transação (ex: 'OK_ANOMALIA', 'NORMAL').
+    
+    Se feedback for 'OK_ANOMALIA', arquiva/dispensa eventuais alertas ativos vinculados a esta transação.
+    """
+    require_role_action(request, action_type="edit")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    tx = repo.get_transacao_by_id(transacao_id)
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transação não encontrada.")
+
+    success = repo.set_transacao_feedback(transacao_id, req.feedback)
+    if not success:
+        raise HTTPException(status_code=500, detail="Falha ao salvar feedback.")
+
+    # Se confirmado como OK_ANOMALIA, arquiva alertas ativos da transação
+    if req.feedback.strip().upper() == "OK_ANOMALIA":
+        fitid = tx.get("fitid") or f"id_{transacao_id}"
+        ticker = (tx.get("ticker") or tx.get("ticker_relacionado") or "EXTRATO").strip().upper()
+        active_alerts = repo.list_thesis_alerts(ticker=ticker, active_only=True)
+        for a in active_alerts:
+            if a["risk_type"] == "ANOMALIA_EXTRATO" and fitid in a.get("snippet", ""):
+                repo.dismiss_thesis_alert(a["id"])
+
+    return {
+        "status": "ok",
+        "transacao_id": transacao_id,
+        "feedback": req.feedback,
+        "message": f"Feedback '{req.feedback}' registrado com sucesso."
+    }
+
+@router.get("/api/extratos/anomalias")
+async def get_extrato_anomalies_endpoint(request: Request, limit: int = 50):
+    """Executa a inferência de anomalias (Isolation Forest) sobre as transações recentes."""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Não autorizado")
+    limit = max(1, min(limit, 200))
+    repo = BudgetRepository(settings.sqlite_db_path)
+    service = EarlyWarningService(repo)
+    anomalies = await service.scan_ofx_anomalies(limit=limit)
+    return {"anomalies": anomalies, "count": len(anomalies)}
+
 # ----------------- CRUD DE CATEGORIAS DE DESPESA -----------------
 
 @router.get("/api/categories")
@@ -143,6 +189,7 @@ async def trigger_extratos_web(request: Request, target_month: Optional[str] = N
     if todas:
         try:
             repo.persist_transacoes(todas)
+            await EarlyWarningService(repo).scan_ofx_anomalies(todas)
         except Exception as e:
             logger.warning("persist_transacoes_failed", error=str(e))
 
@@ -200,6 +247,7 @@ async def upload_extrato(file: UploadFile = File(...), target_month: Optional[st
     if todas:
         try:
             repo.persist_transacoes(todas)
+            await EarlyWarningService(repo).scan_ofx_anomalies(todas)
         except Exception as e:
             logger.warning("persist_transacoes_failed", error=str(e))
 

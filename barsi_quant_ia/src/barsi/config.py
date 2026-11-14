@@ -52,6 +52,11 @@ class Settings(BaseSettings):
     max_concurrency: int = 3
     cache_dir: str = "./cache"
     sqlite_db_path: str = "./memory/barsi_memory.db"
+
+    @property
+    def memory_dir(self) -> str:
+        return os.path.dirname(self.sqlite_db_path) or "./memory"
+
     sheets_cache_ttl_sec: float = Field(default_factory=lambda: float(os.getenv("BARSI_SHEETS_CACHE_TTL_SEC", "60.0")))
 
     # Providers

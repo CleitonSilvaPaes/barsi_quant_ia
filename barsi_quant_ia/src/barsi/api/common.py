@@ -66,6 +66,9 @@ class UpdateTransacaoRequest(BaseModel):
     data: str
     tipo: Optional[str] = None
 
+class TransacaoFeedbackRequest(BaseModel):
+    feedback: str = "OK_ANOMALIA"
+
 class DividendItem(BaseModel):
     ticker: str
     data_pagamento: str
