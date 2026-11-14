@@ -50,20 +50,24 @@ def calcular_preco_teto(
 
 def calcular_margem_seguranca(preco_teto: float, preco_atual: float) -> float:
     """
-    Margem de segurança percentual frente ao Preço Teto:
-    Fórmula: ((Preço Teto - Preço Atual) / Preço Atual) * 100
+    Margem de segurança percentual (desconto real frente ao Preço Teto):
+    Fórmula de Análise de Valor: ((Preço Teto - Preço Atual) / Preço Teto) * 100
     """
-    if preco_atual <= 0:
+    if preco_teto <= 0:
         return 0.0
-    margem = ((preco_teto - preco_atual) / preco_atual) * 100
+    margem = ((preco_teto - preco_atual) / preco_teto) * 100
     return round(margem, 2)
 
-def determinar_acao_barsi(margem_seguranca: float) -> AcaoBarsi:
+def determinar_acao_barsi(margem_seguranca: float, dy_real: float = 6.0, div_proj: float = 1.0) -> AcaoBarsi:
     """
-    Determina a ação mandatória conforme a metodologia de acumulação de patrimônio:
-    - Margem >= 0%: ACUMULAR (compras contínuas em empresas perenes)
-    - Margem < 0%: AGUARDAR (ativo acima do teto estipulado)
+    Determina a ação mandatória conforme a metodologia Barsi:
+    - Regra 1: Se DY_REAL < 6.0% ou div_proj <= 0, classifique como AGUARDAR
+      (mesmo que o preço esteja abaixo do teto manual).
+    - Regra 2: Margem >= 0% e DY >= 6%: ACUMULAR
+    - Regra 3: Margem < 0%: AGUARDAR
     """
+    if div_proj <= 0.0 or dy_real < 6.0:
+        return AcaoBarsi.AGUARDAR
     if margem_seguranca >= 0.0:
         return AcaoBarsi.ACUMULAR
     return AcaoBarsi.AGUARDAR
@@ -84,8 +88,15 @@ def atualizar_posicao_quant(posicao: Position, preco_novo: float, div_proj: floa
             setor=posicao.setor
         )
 
+    dy_real = ((posicao.div_proj or 0.0) / posicao.preco_atual * 100.0) if posicao.preco_atual > 0 else 0.0
     posicao.margem_seguranca = calcular_margem_seguranca(posicao.preco_teto, posicao.preco_atual)
-    posicao.status_barsi = determinar_acao_barsi(posicao.margem_seguranca)
+    posicao.status_barsi = determinar_acao_barsi(
+        posicao.margem_seguranca,
+        dy_real=dy_real,
+        div_proj=posicao.div_proj or 0.0
+    )
+    if hasattr(posicao, "decisao"):
+        posicao.decisao = posicao.status_barsi.value
     return posicao
 
 def gerar_insight_deterministico(posicao: Position, noticias: str = "", feedback_usuario: str = "") -> InsightResult:

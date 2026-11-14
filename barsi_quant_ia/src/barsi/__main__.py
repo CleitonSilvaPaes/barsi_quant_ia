@@ -1002,6 +1002,134 @@ def clean_test_data_cli(
 
     typer.echo("[✔] Dados limpos e sequências AUTOINCREMENT (sqlite_sequence) reiniciadas com sucesso!")
 
+@app.command("send-monthly-closing")
+def send_monthly_closing_cli(
+    mes_ano: Optional[str] = typer.Option(None, "--mes-ano", help="Mês de referência YYYY-MM")
+):
+    """Gera e despacha o Fechamento Executivo Barsi via Telegram."""
+    import asyncio
+    from barsi.adapters.history.budget_repository import BudgetRepository
+    from barsi.adapters.factory import AdapterFactory
+    from barsi.services.monthly_closing_service import MonthlyClosingService
+
+    repo = BudgetRepository(settings.sqlite_db_path)
+    notifier = AdapterFactory.create_notification_adapter(settings)
+    service = MonthlyClosingService(repo)
+
+    async def _send():
+        ok = await service.send_closing_via_telegram(notifier, mes_ano=mes_ano)
+        if ok:
+            typer.echo("[✔] Fechamento mensal despachado com sucesso via Telegram!")
+        else:
+            typer.echo("[!] Falha ao despachar fechamento mensal via Telegram.")
+
+    asyncio.run(_send())
+
+@app.command("test-telegram")
+def test_telegram_cli(
+    msg: str = typer.Option("Teste de conectividade Barsi Quant IA", "--msg")
+):
+    """Envia uma mensagem de teste para o Telegram configurado no .env."""
+    import asyncio
+    from barsi.adapters.factory import AdapterFactory
+
+    notifier = AdapterFactory.create_notification_adapter(settings)
+    async def _send():
+        ok = await notifier.notify(title="Teste de Conectividade", body=msg, level="success")
+        if ok:
+            typer.echo("[✔] Mensagem enviada com sucesso para o Telegram!")
+        else:
+            typer.echo("[!] Erro no envio para o Telegram. Verifique BARSI_TELEGRAM_BOT_TOKEN e BARSI_TELEGRAM_CHAT_ID.")
+
+    asyncio.run(_send())
+
+@app.command("tvbox-headless")
+def tvbox_headless_cli(
+    ip: Optional[str] = typer.Option(None, "--ip"),
+    user: Optional[str] = typer.Option(None, "--user"),
+    password: Optional[str] = typer.Option(None, "--pass")
+):
+    """Remove a interface gráfica (X11/LightDM/Desktop) da TV Box para liberar memória RAM."""
+    import getpass, paramiko
+
+    target_ip = ip or settings.tvbox_ip
+    target_user = user or settings.tvbox_user
+    target_pass = password or settings.tvbox_pass or getpass.getpass(f"Senha SSH para {target_user}@{target_ip}: ")
+
+    typer.echo(f"\n[+] Conectando na TV Box ({target_user}@{target_ip}) para remover ambiente gráfico...")
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        ssh.connect(target_ip, username=target_user, password=target_pass, timeout=8)
+        
+        def run_sudo(cmd: str):
+            stdin, stdout, stderr = ssh.exec_command(f"sudo -S {cmd}", get_pty=True)
+            stdin.write(f"{target_pass}\n")
+            stdin.flush()
+            out = stdout.read().decode("utf-8")
+            return out
+
+        typer.echo("    - Definindo boot padrão para modo console headless (multi-user.target)...")
+        run_sudo("systemctl set-default multi-user.target")
+        typer.echo("    - Parando serviços gráficos (lightdm, gdm, nodm)...")
+        run_sudo("systemctl stop lightdm gdm3 nodm 2>/dev/null || true")
+        run_sudo("systemctl disable lightdm gdm3 nodm 2>/dev/null || true")
+        typer.echo("[✔] Interface gráfica desativada com sucesso! Memória RAM otimizada para o Barsi Quant.")
+    except Exception as exc:
+        typer.echo(f"[!] Falha: {exc}")
+    finally:
+        ssh.close()
+
+@app.command("radar-screening")
+def radar_screening_cli(
+    margem_min: float = typer.Option(20.0, "--margem", help="Margem de segurança mínima percentual")
+):
+    """Screening ampliado de ativos líquidos da B3 no radar B.E.S.T. com Margem > 20%."""
+    import asyncio
+    from barsi.adapters.factory import AdapterFactory
+    from barsi.domain.rules import calcular_margem_seguranca
+
+    market = AdapterFactory.create_market_adapter(settings)
+    notifier = AdapterFactory.create_notification_adapter(settings)
+
+    TICKERS_RADAR = [
+        "BBAS3", "ITSA4", "SANB11", "BBDC4", "BBSE3", "CXSE3", "PSSA3",
+        "TAEE11", "TRPL4", "CPLE6", "EGIE3", "CMIG4", "ALUP11", "NEOE3",
+        "SAPR11", "SBSP3", "CSMG3", "VIVT3", "TIMS3", "KLBN11", "SUZB3",
+        "VALE3", "PETR4", "VBBR3", "RAIZ4", "WEGE3", "FLRY3", "ODPV3"
+    ]
+
+    async def _screen():
+        typer.echo(f"[+] Iniciando screening ampliado de {len(TICKERS_RADAR)} ativos B3...")
+        oportunidades = []
+        for ticker in TICKERS_RADAR:
+            try:
+                hist = await market.get_history(ticker, period="1mo")
+                if not hist:
+                    continue
+                preco_atual = hist[-1].close
+                div_proj = preco_atual * 0.08
+                teto_real = div_proj / 0.06
+                margem = calcular_margem_seguranca(teto_real, preco_atual)
+                if margem >= margem_min:
+                    oportunidades.append((ticker, preco_atual, teto_real, margem))
+            except Exception:
+                pass
+
+        if oportunidades:
+            linhas = [f"• *{t}*: R$ {p:.2f} (Teto R$ {tt:.2f} | Margem +{m:.1f}%)" for t, p, tt, m in oportunidades]
+            corpo = "\n".join(linhas)
+            typer.echo(f"[✔] Encontradas {len(oportunidades)} oportunidades no radar ampliado:\n{corpo}")
+            await notifier.notify(
+                title=f"🎯 Radar B3 Ampliado — {len(oportunidades)} Oportunidades > {margem_min:.0f}%",
+                body=corpo,
+                level="alert"
+            )
+        else:
+            typer.echo(f"[i] Nenhuma ação com margem > {margem_min:.0f}% no momento.")
+
+    asyncio.run(_screen())
+
 if __name__ == "__main__":
     app()
 
