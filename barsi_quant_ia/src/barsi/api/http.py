@@ -407,9 +407,13 @@ def get_current_user(request: Request) -> Optional[Dict[str, Any]]:
     if not data:
         return None
     jti = data.get("jti")
-    if jti:
-        repo = get_user_repo()
-        if repo.is_session_revoked(jti):
+    repo = get_user_repo()
+    if jti and repo.is_session_revoked(jti):
+        return None
+    sv = data.get("sv")
+    if sv is not None and "uid" in data:
+        user_db = repo.get_by_id(data["uid"])
+        if user_db and user_db.get("session_version", 1) != sv:
             return None
     return data
 
@@ -559,11 +563,13 @@ async def do_login(request: Request):
         }
 
     recent_attempts = [t for t in _login_attempts.get(client_ip, []) if now - t < LOGIN_RATE_LIMIT_WINDOW]
-    db_attempts = repo.get_recent_login_attempts(client_ip, LOGIN_RATE_LIMIT_WINDOW)
-    effective_attempts = max(len(recent_attempts), db_attempts)
+    if len(recent_attempts) >= LOGIN_RATE_LIMIT_MAX:
+        logger.warning("login_rate_limited_memory", ip=client_ip, count=len(recent_attempts))
+        return RedirectResponse(url="/login?error=Muitas+tentativas.+Aguarde+1+minuto.", status_code=303)
 
-    if effective_attempts >= LOGIN_RATE_LIMIT_MAX:
-        logger.warning("login_rate_limited", ip=client_ip, count=effective_attempts)
+    db_attempts = repo.get_recent_login_attempts(client_ip, LOGIN_RATE_LIMIT_WINDOW)
+    if db_attempts >= LOGIN_RATE_LIMIT_MAX:
+        logger.warning("login_rate_limited_sqlite", ip=client_ip, count=db_attempts)
         return RedirectResponse(url="/login?error=Muitas+tentativas.+Aguarde+1+minuto.", status_code=303)
 
     body = (await request.body()).decode("utf-8", errors="ignore")
@@ -596,7 +602,13 @@ async def do_login(request: Request):
         repo.clear_login_attempts(client_ip)
         repo.log_audit("login_success", actor_id=user["id"], actor_username=username, ip=client_ip)
         logger.info("login_success", ip=client_ip, username=username, role=user["role"])
-        token = create_session_token(user["id"], user["username"], user["role"], settings.secret_key)
+        token = create_session_token(
+            user["id"],
+            user["username"],
+            user["role"],
+            settings.secret_key,
+            session_version=user.get("session_version", 1)
+        )
 
         # 2FA obrigatório para administradores: se não tiver TOTP configurado, redireciona para setup no settings
         redirect_target = (
@@ -640,18 +652,29 @@ async def login_2fa_page(request: Request, error: Optional[str] = None):
 async def do_login_2fa(request: Request):
     client_ip = _get_client_ip(request)
     repo = get_user_repo()
+    now = time.time()
 
-    if repo.get_recent_login_attempts(client_ip, LOGIN_RATE_LIMIT_WINDOW) >= LOGIN_RATE_LIMIT_MAX:
-        logger.warning("login_2fa_rate_limited", ip=client_ip)
+    recent_attempts = [t for t in _login_attempts.get(client_ip, []) if now - t < LOGIN_RATE_LIMIT_WINDOW]
+    if len(recent_attempts) >= LOGIN_RATE_LIMIT_MAX:
+        logger.warning("login_2fa_rate_limited_memory", ip=client_ip, count=len(recent_attempts))
+        return RedirectResponse(url="/login/2fa?error=Muitas+tentativas.+Aguarde+1+minuto.", status_code=303)
+
+    db_attempts = repo.get_recent_login_attempts(client_ip, LOGIN_RATE_LIMIT_WINDOW)
+    if db_attempts >= LOGIN_RATE_LIMIT_MAX:
+        logger.warning("login_2fa_rate_limited_sqlite", ip=client_ip, count=db_attempts)
         return RedirectResponse(url="/login/2fa?error=Muitas+tentativas.+Aguarde+1+minuto.", status_code=303)
 
     pending_token = request.cookies.get("barsi_2fa_pending")
     if not pending_token:
+        recent_attempts.append(now)
+        _login_attempts[client_ip] = recent_attempts
         repo.record_login_attempt(client_ip)
         repo.log_audit("login_2fa_no_token", ip=client_ip, reason="missing_2fa_pending_cookie")
         return RedirectResponse(url="/login?error=Sessão+2FA+não+iniciada.+Faça+login+primeiro.", status_code=303)
     data = decode_2fa_pending_token(pending_token, settings.secret_key)
     if not data:
+        recent_attempts.append(now)
+        _login_attempts[client_ip] = recent_attempts
         repo.record_login_attempt(client_ip)
         repo.log_audit("login_2fa_expired_token", ip=client_ip, reason="invalid_or_expired_2fa_token")
         return RedirectResponse(url="/login?error=Sessão+2FA+expirada.+Faça+login+novamente.", status_code=303)
@@ -663,6 +686,8 @@ async def do_login_2fa(request: Request):
     user_id = data["uid"]
     ok, method_used = repo.verify_totp_or_backup_code(user_id, totp_code) if totp_code else (False, "")
     if not ok:
+        recent_attempts.append(now)
+        _login_attempts[client_ip] = recent_attempts
         repo.record_login_attempt(client_ip)
         repo.log_audit("login_2fa_failed", actor_id=user_id, actor_username=data.get("user"), ip=client_ip, reason="invalid_totp_or_backup")
         logger.warning("login_2fa_invalid_code", user_id=user_id, username=data.get("user"))
@@ -675,10 +700,17 @@ async def do_login_2fa(request: Request):
     if method_used == "backup_code":
         repo.log_audit("backup_code_used", actor_id=user_id, actor_username=user["username"], ip=client_ip, reason="login_2fa_recovery")
 
+    _login_attempts.pop(client_ip, None)
     repo.clear_login_attempts(client_ip)
     repo.log_audit("login_2fa_success", actor_id=user_id, actor_username=user["username"], ip=client_ip)
     logger.info("login_2fa_success", user_id=user_id, username=user["username"], role=user["role"])
-    token = create_session_token(user["id"], user["username"], user["role"], settings.secret_key)
+    token = create_session_token(
+        user["id"],
+        user["username"],
+        user["role"],
+        settings.secret_key,
+        session_version=user.get("session_version", 1)
+    )
     res = RedirectResponse(url="/", status_code=303)
     set_barsi_cookie(response=res, key="barsi_session", value=token, request=request, httponly=True, max_age=86400 * 7, samesite="lax")
     csrf_token = generate_csrf_token(token, settings.secret_key)
@@ -781,8 +813,19 @@ async def google_callback(request: Request, code: Optional[str] = None, state: O
         res.delete_cookie(key="barsi_oauth_state")
         return res
 
-    token = create_session_token(user["id"], user["username"], user["role"], settings.secret_key)
-    res = RedirectResponse(url="/", status_code=303)
+    redirect_target = (
+        "/settings?warn=Ative+o+2FA+para+garantir+a+seguranca+da+sua+conta#2fa"
+        if (user.get("role") == "admin" and not user.get("totp_enabled"))
+        else "/"
+    )
+    token = create_session_token(
+        user["id"],
+        user["username"],
+        user["role"],
+        settings.secret_key,
+        session_version=user.get("session_version", 1)
+    )
+    res = RedirectResponse(url=redirect_target, status_code=303)
     set_barsi_cookie(response=res, key="barsi_session", value=token, request=request, httponly=True, max_age=86400 * 7, samesite="lax")
     csrf_token = generate_csrf_token(token, settings.secret_key)
     set_barsi_cookie(response=res, key="barsi_csrf", value=csrf_token, request=request, httponly=False, max_age=86400 * 7, samesite="lax", path="/")
@@ -1610,6 +1653,7 @@ async def apply_drip_api(req: DripApplyRequest, request: Request):
     service = DripService(repo)
     orders_dicts = [o.model_dump() for o in req.ordens]
     res = service.apply_drip_orders(orders_dicts)
+    invalidate_canonical_positions_cache(user_id=repo.user_id)
     return JSONResponse(content=res)
 
 # ----------------- ROTAS DE FECHAMENTO MENSAL & RELATÓRIO PDF (ROADMAP V3.0) -----------------
@@ -1760,9 +1804,10 @@ async def disable_2fa(req: TotpConfirmRequest, request: Request):
     if not user:
         raise HTTPException(status_code=401, detail="Não autorizado")
     repo = get_user_repo()
-    if not repo.verify_totp(user["uid"], req.code):
-        raise HTTPException(status_code=400, detail="Código 2FA (TOTP) inválido ou expirado.")
-    repo.disable_totp(user["uid"])
+    try:
+        repo.disable_totp(user["uid"], totp_code=req.code)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     repo.log_audit(
         action="2fa_disabled",
         actor_id=user["uid"],
@@ -2384,6 +2429,7 @@ async def trigger_extratos_web(request: Request, target_month: Optional[str] = N
             logger.warning("persist_transacoes_failed", error=str(e))
 
     reconciled_count = repo.reconcile_ofx_to_positions(resumos, target_month=target_month)
+    invalidate_canonical_positions_cache(user_id=repo.user_id)
 
     sheets = AdapterFactory.create_sheets_adapter(settings)
     if hasattr(sheets, "sync_budget_manager"):
@@ -2440,6 +2486,7 @@ async def upload_extrato(file: UploadFile = File(...), target_month: Optional[st
             logger.warning("persist_transacoes_failed", error=str(e))
 
     reconciled_count = repo.reconcile_ofx_to_positions(resumos, target_month=target_month)
+    invalidate_canonical_positions_cache(user_id=repo.user_id)
 
     sheets = AdapterFactory.create_sheets_adapter(settings)
     if hasattr(sheets, "sync_budget_manager"):

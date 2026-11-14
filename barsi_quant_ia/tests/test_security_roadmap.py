@@ -401,3 +401,72 @@ def test_admin_login_redirects_to_2fa_setup(clean_db):
     assert "/settings" in res.headers["location"]
     assert "2fa" in res.headers["location"].lower()
 
+
+def test_disable_totp_requires_proof_by_default(clean_db):
+    """disable_totp requer totp_code válido ou bypass_verification=True por padrão de segurança."""
+    _, repo, _ = clean_db
+    repo.create_user("teste_totp_proof", "senha123", role="admin")
+    user = repo.get_by_username("teste_totp_proof")
+    secret, _ = repo.setup_totp(user["id"])
+    from barsi.infra.security import generate_totp_code
+    valid_code = generate_totp_code(secret)
+    repo.confirm_and_enable_totp(user["id"], valid_code)
+
+    # Sem código e sem bypass -> deve levantar ValueError
+    with pytest.raises(ValueError, match="totp_code válido"):
+        repo.disable_totp(user["id"])
+
+    # Código errado -> deve levantar ValueError
+    with pytest.raises(ValueError):
+        repo.disable_totp(user["id"], totp_code="000000")
+
+    # Código correto -> desativa
+    assert repo.disable_totp(user["id"], totp_code=valid_code) is True
+    assert repo.is_totp_enabled(user["id"]) is False
+
+
+def test_session_version_revocation_on_password_change(clean_db):
+    """Troca de senha invalida tokens de sessão antigos via session_version."""
+    _, repo, _ = clean_db
+    repo.create_user("roberta", "senhaAntiga123", role="investidor")
+    user = repo.get_by_username("roberta")
+
+    # Cria token antigo com sv=1
+    token_old = create_session_token(
+        user["id"], user["username"], user["role"], settings.secret_key, session_version=user.get("session_version", 1)
+    )
+
+    client = TestClient(app)
+    client.cookies.set("barsi_session", token_old)
+
+    # Endpoint change-password altera a senha e eleva session_version
+    res = client.post(
+        "/api/user/change-password",
+        json={"current_password": "senhaAntiga123", "new_password": "novaSenhaSuperSegura456"}
+    )
+    assert res.status_code == 200
+
+    # Token antigo usado por outro cliente deve ser rejeitado agora
+    client_stolen = TestClient(app)
+    client_stolen.cookies.set("barsi_session", token_old)
+    res_carteira = client_stolen.get("/api/home/summary")
+    assert res_carteira.status_code == 401
+
+
+def test_login_memory_rate_limit_short_circuit(clean_db):
+    """Múltiplas tentativas em memória ativam bloqueio rápido antes de abrir SQLite."""
+    from barsi.api.http import _login_attempts
+    client = TestClient(app)
+    now = time.time()
+    # Simula 5 tentativas já em memória para IP testclient
+    _login_attempts["testclient"] = [now - 10] * 5
+
+    res = client.post(
+        "/login",
+        data={"username": "anyone", "password": "wrong"},
+        follow_redirects=False
+    )
+    assert res.status_code == 303
+    assert "error=Muitas+tentativas" in res.headers["location"]
+    _login_attempts.clear()
+

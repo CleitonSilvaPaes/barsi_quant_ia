@@ -86,8 +86,8 @@ def test_user_repository_totp_lifecycle(tmp_path):
     assert repo.verify_totp(user_id, valid_code) is True
     assert repo.verify_totp(user_id, "000000") is False
 
-    # Desativação
-    repo.disable_totp(user_id)
+    # Desativação com prova de posse (código válido)
+    repo.disable_totp(user_id, totp_code=valid_code)
     assert repo.is_totp_enabled(user_id) is False
 
 def test_budget_repository_dividends_received(tmp_path):

@@ -115,9 +115,10 @@ def create_session_token(
     role: str,
     secret_key: str,
     expires_in_sec: int = 86400 * 7,
-    jti: Optional[str] = None
+    jti: Optional[str] = None,
+    session_version: Optional[int] = None
 ) -> str:
-    """Cria um token assinado criptograficamente com HMAC-SHA256 contendo ID, usuário, perfil, jti e expiração."""
+    """Cria um token assinado criptograficamente com HMAC-SHA256 contendo ID, usuário, perfil, jti, versão e expiração."""
     if not jti:
         jti = secrets.token_hex(16)
     payload = {
@@ -127,6 +128,8 @@ def create_session_token(
         "jti": jti,
         "exp": int(time.time() + expires_in_sec)
     }
+    if session_version is not None:
+        payload["sv"] = session_version
     payload_json = json.dumps(payload, separators=(',', ':')).encode("utf-8")
     payload_b64 = base64.urlsafe_b64encode(payload_json).decode("utf-8").rstrip("=")
     

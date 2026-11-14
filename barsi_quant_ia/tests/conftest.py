@@ -30,7 +30,15 @@ def _patched_request(self, method, url, *args, **kwargs):
 
     if not skip_auto and not has_explicit_csrf:
         cookies = kwargs.get("cookies") or {}
-        session_token = cookies.get("barsi_session") or self.cookies.get("barsi_session")
+        session_token = cookies.get("barsi_session") if isinstance(cookies, dict) else None
+        if not session_token:
+            try:
+                session_token = self.cookies.get("barsi_session")
+            except Exception:
+                for c in reversed(list(self.cookies.jar)):
+                    if c.name == "barsi_session":
+                        session_token = c.value
+                        break
         if session_token:
             csrf_token = generate_csrf_token(session_token, settings.secret_key)
             if isinstance(headers, dict):
@@ -52,8 +60,10 @@ def isolate_database(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "sqlite_db_path", test_db)
     monkeypatch.setenv("BARSI_SQLITE_PATH", test_db)
     monkeypatch.setattr(http_module, "_user_repo_cache", None)
+    http_module._login_attempts.clear()
 
     yield test_db
 
     monkeypatch.setattr(http_module, "_user_repo_cache", None)
+    http_module._login_attempts.clear()
 

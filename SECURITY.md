@@ -89,3 +89,20 @@ Resposta esperada em até 72h.
 - `extratos/*.ofx` fica fora do Git
 - `credentials.json` fica fora do Git
 - Backup no R2 exige `BARSI_R2_ENABLED=true` + credenciais explícitas
+
+---
+
+## 5. Modelo de Autenticação, 2FA e Revogação de Sessões
+
+### A. Política de 2FA para Administrador (Nudge vs. Enforcement)
+- **Uso Pessoal em Edge Hardware (Tailscale / TV Box)**: O 2FA opera em regime de **soft nudge** (redirecionamento orientativo para `/settings#2fa` no login e banner visual persistente). Não há hard lockout de navegação para evitar interrupções catastróficas em caso de perda temporária de autenticador.
+- **Ambiente Multi-Usuário / Exposição Pública**: Caso novos administradores sejam adicionados ou a aplicação seja exposta sem VPN, recomenda-se ativar middleware de bloqueio estrito em rotas de mutação financeira.
+
+### B. Defesa em Profundidade na Desativação do 2FA
+- A desativação de 2FA via Web (`/api/auth/2fa/disable`) exige **prova de posse** via código TOTP ou código de recuperação de emergência (backup code).
+- O método `UserRepo.disable_totp` possui `bypass_verification=False` como padrão seguro; apenas rotinas administrativas de linha de comando com acesso root/SSH (`barsi user-disable-2fa`) podem informar explicitamente `bypass_verification=True`.
+
+### C. Revogação Instantânea de Sessões Antigas (`session_version` + JTI)
+- Trocas de senha (`/api/user/change-password`, `user-pass-reset`) ou desativação de segundo fator incrementam o campo `session_version` no banco de dados.
+- Tokens emitidos em sessões concorrentes ou dispositivos secundários com versões antigas de sessão são rejeitados de imediato por `get_current_user`, garantindo encerramento forçado de acessos antigos (session invalidation).
+- O logout explícito (`/logout`) revoga o identificador exclusivo `jti` na tabela `session_revocation`.

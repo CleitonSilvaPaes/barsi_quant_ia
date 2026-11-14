@@ -227,7 +227,7 @@ def test_google_oauth_flow(tmp_path, monkeypatch):
             follow_redirects=False
         )
         assert resp_callback.status_code == 303
-        assert resp_callback.headers["location"] == "/"
+        assert resp_callback.headers["location"] in ("/", "/settings?warn=Ative+o+2FA+para+garantir+a+seguranca+da+sua+conta#2fa")
         assert resp_callback.cookies.get("barsi_session") is not None
 
         # Confirma que a conta Google foi vinculada no banco

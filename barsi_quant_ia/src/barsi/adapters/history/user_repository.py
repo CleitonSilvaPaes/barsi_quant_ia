@@ -51,7 +51,8 @@ class UserRepository:
                 totp_enabled INTEGER NOT NULL DEFAULT 0,
                 email TEXT DEFAULT NULL,
                 google_id TEXT DEFAULT NULL,
-                backup_codes_hash TEXT DEFAULT NULL
+                backup_codes_hash TEXT DEFAULT NULL,
+                session_version INTEGER NOT NULL DEFAULT 1
             );
             """)
             try:
@@ -66,6 +67,8 @@ class UserRepository:
                     conn.execute("ALTER TABLE usuarios ADD COLUMN google_id TEXT DEFAULT NULL")
                 if "backup_codes_hash" not in cols:
                     conn.execute("ALTER TABLE usuarios ADD COLUMN backup_codes_hash TEXT DEFAULT NULL")
+                if "session_version" not in cols:
+                    conn.execute("ALTER TABLE usuarios ADD COLUMN session_version INTEGER NOT NULL DEFAULT 1")
             except Exception:
                 pass
 
@@ -121,7 +124,7 @@ class UserRepository:
         with self._connection() as conn:
             cur = conn.cursor()
             cur.execute(
-                "SELECT id, username, password_hash, role, permissoes, totp_secret, totp_enabled, email, google_id, backup_codes_hash "
+                "SELECT id, username, password_hash, role, permissoes, totp_secret, totp_enabled, email, google_id, backup_codes_hash, session_version "
                 "FROM usuarios WHERE id = ?",
                 (user_id,)
             )
@@ -136,7 +139,7 @@ class UserRepository:
         with self._connection() as conn:
             cur = conn.cursor()
             cur.execute(
-                "SELECT id, username, password_hash, role, permissoes, totp_secret, totp_enabled, email, google_id, backup_codes_hash "
+                "SELECT id, username, password_hash, role, permissoes, totp_secret, totp_enabled, email, google_id, backup_codes_hash, session_version "
                 "FROM usuarios WHERE LOWER(email) = LOWER(?)",
                 (email.strip(),)
             )
@@ -151,7 +154,7 @@ class UserRepository:
         with self._connection() as conn:
             cur = conn.cursor()
             cur.execute(
-                "SELECT id, username, password_hash, role, permissoes, totp_secret, totp_enabled, email, google_id, backup_codes_hash "
+                "SELECT id, username, password_hash, role, permissoes, totp_secret, totp_enabled, email, google_id, backup_codes_hash, session_version "
                 "FROM usuarios WHERE google_id = ?",
                 (google_id.strip(),)
             )
@@ -167,7 +170,7 @@ class UserRepository:
         with self._connection() as conn:
             cur = conn.cursor()
             cur.execute(
-                "SELECT id, username, password_hash, role, permissoes, totp_secret, totp_enabled, email, google_id, backup_codes_hash "
+                "SELECT id, username, password_hash, role, permissoes, totp_secret, totp_enabled, email, google_id, backup_codes_hash, session_version "
                 "FROM usuarios WHERE LOWER(username) = ? OR LOWER(email) = ?",
                 (clean_id, clean_id)
             )
@@ -215,14 +218,30 @@ class UserRepository:
         return None
 
     def update_password(self, user_id: int, new_password_plain: str) -> bool:
-        """Atualiza a senha de um usuário no banco de dados."""
+        """Atualiza a senha de um usuário no banco de dados e incrementa a versão da sessão."""
         if not new_password_plain or len(new_password_plain) < 6:
             return False
         pwd_hash = hash_password(new_password_plain)
         with self._connection() as conn:
-            cur = conn.execute("UPDATE usuarios SET password_hash = ? WHERE id = ?", (pwd_hash, user_id))
+            cur = conn.execute(
+                "UPDATE usuarios SET password_hash = ?, session_version = COALESCE(session_version, 1) + 1 WHERE id = ?",
+                (pwd_hash, user_id)
+            )
             conn.commit()
             return cur.rowcount > 0
+
+    def increment_session_version(self, user_id: int) -> int:
+        """Incrementa a versão de sessão do usuário, invalidando instantaneamente todos os tokens anteriores."""
+        with self._connection() as conn:
+            conn.execute(
+                "UPDATE usuarios SET session_version = COALESCE(session_version, 1) + 1 WHERE id = ?",
+                (user_id,)
+            )
+            conn.commit()
+            cur = conn.cursor()
+            cur.execute("SELECT session_version FROM usuarios WHERE id = ?", (user_id,))
+            row = cur.fetchone()
+            return row["session_version"] if row else 1
 
     def update_email(self, user_id: int, email: Optional[str]) -> bool:
         """Atualiza o e-mail do usuário para permitir vínculo com OAuth."""
@@ -288,15 +307,29 @@ class UserRepository:
             return True
         return False
 
-    def disable_totp(self, user_id: int, *, bypass_verification: bool = True) -> bool:
-        """Desativa o 2FA e limpa o segredo TOTP e códigos de recuperação."""
-        if not bypass_verification:
-            user = self.get_by_id(user_id)
-            if user and user.get("totp_enabled"):
-                raise ValueError("disable_totp requer bypass_verification=True para chamadas diretas.")
+    def disable_totp(
+        self,
+        user_id: int,
+        totp_code: Optional[str] = None,
+        *,
+        bypass_verification: bool = False,
+    ) -> bool:
+        """
+        Desativa 2FA e limpa segredos e códigos de recuperação.
+        Duas formas legítimas:
+        - Web: fornecer totp_code válido (proof-of-possession) ou código de backup
+        - CLI/root: passar bypass_verification=True (acesso local SSH/CLI é a prova)
+        """
+        user = self.get_by_id(user_id)
+        if user and user.get("totp_enabled"):
+            if not bypass_verification:
+                if not totp_code or not self.verify_totp_or_backup_code(user_id, totp_code)[0]:
+                    raise ValueError(
+                        "disable_totp requer totp_code válido OU bypass_verification=True (apenas CLI/root)"
+                    )
         with self._connection() as conn:
             conn.execute(
-                "UPDATE usuarios SET totp_secret = NULL, totp_enabled = 0, backup_codes_hash = NULL WHERE id = ?",
+                "UPDATE usuarios SET totp_secret = NULL, totp_enabled = 0, backup_codes_hash = NULL, session_version = COALESCE(session_version, 1) + 1 WHERE id = ?",
                 (user_id,)
             )
             conn.commit()
