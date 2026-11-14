@@ -1,3 +1,4 @@
 # Configuração do act para execução local do GitHub Actions
--P ubuntu-latest=python:3.12-slim
+-P ubuntu-latest=barsi-ci:runner
+--pull=false
 --secret-file .secrets

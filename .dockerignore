@@ -1,0 +1,17 @@
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.coverage
+htmlcov
+coverage.xml
+.git/objects
+.git/lfs
+node_modules
+dist
+build
+*.egg-info
+memory/backups
+
