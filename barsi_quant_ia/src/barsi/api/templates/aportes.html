@@ -1,3 +1,14 @@
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+  <div>
+    <h2 style="font-size: 1.35rem; font-weight: 700; color: var(--text);">📊 Simulador de Aportes & Reinvestimento DRIP</h2>
+    <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.2rem;">Planejamento fracionário de ordens e aceleração da bola de neve de dividendos.</p>
+  </div>
+  <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+    <a href="/api/reports/monthly-closing" class="btn btn-outline" style="border-color: var(--accent); color: var(--accent);" download>📄 Fechamento Mensal (PDF)</a>
+    <a href="/api/reports/monthly-closing/preview" target="_blank" class="btn btn-outline">👁️ Visualizar Relatório</a>
+  </div>
+</div>
+
 <div class="grid-stats">
   <div class="stat-card">
     <h4>Orçamento Selecionado</h4>
@@ -141,6 +152,199 @@
     document.getElementById("disp-provento-adic").innerText = formatBRL(somaProvento);
   }
 
-  window.addEventListener("DOMContentLoaded", carregarSimulador);
+  // -------------------------------------------------------------
+  // MOTOR DRIP: REINVESTIMENTO AUTOMÁTICO DE DIVIDENDOS
+  // -------------------------------------------------------------
+  let ordensDripAtuais = [];
+
+  async function simularDrip(valorManual = null) {
+    const valInput = document.getElementById("drip-valor-input");
+    const val = valorManual !== null ? valorManual : (parseFloat(valInput.value) || 0);
+    const balance = document.getElementById("drip-balance-toggle").checked;
+    const container = document.getElementById("drip-orders-container");
+
+    container.innerHTML = `<div style="text-align:center; padding:1.5rem; color:var(--text-muted);">Calculando alocação ótima pelo Método Barsi...</div>`;
+
+    try {
+      const res = await fetch("/api/drip/simulate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          valor_disponivel: val > 0 ? val : null,
+          balance_sectors: balance
+        })
+      });
+
+      if (!res.ok) {
+        throw new Error("Erro na resposta da simulação DRIP");
+      }
+
+      const data = await res.json();
+      ordensDripAtuais = data.ordens || [];
+
+      document.getElementById("drip-stat-disponivel").innerText = formatBRL(data.valor_disponivel);
+      document.getElementById("drip-stat-alocado").innerText = formatBRL(data.valor_alocado);
+      document.getElementById("drip-stat-troco").innerText = formatBRL(data.troco_residual);
+      document.getElementById("drip-stat-provento").innerText = formatBRL(data.provento_anual_adicional) + "/ano";
+      document.getElementById("drip-stat-yield").innerText = (data.yield_medio_adicional_pct || 0).toFixed(1) + "% a.a.";
+
+      if (val <= 0 && data.valor_disponivel > 0) {
+        valInput.value = data.valor_disponivel;
+      }
+
+      if (ordensDripAtuais.length === 0) {
+        container.innerHTML = `
+          <div style="text-align:center; padding:1.5rem; color:var(--amber);">
+            Nenhuma ordem sugerida no momento. Verifique se há ativos com margem de segurança positiva na carteira.
+          </div>
+        `;
+        document.getElementById("btn-aplicar-drip").style.display = "none";
+        return;
+      }
+
+      let tblHtml = `
+        <div style="overflow-x:auto;">
+          <table style="width:100%; font-size:0.85rem;">
+            <thead>
+              <tr>
+                <th>Ticker</th>
+                <th>Empresa / Setor</th>
+                <th style="text-align:right;">Cotação</th>
+                <th style="text-align:right;">Preço Teto</th>
+                <th style="text-align:right;">Margem</th>
+                <th style="text-align:right;">DY Proj.</th>
+                <th style="text-align:right;">Qtd a Reinvestir</th>
+                <th style="text-align:right;">Total Alocado</th>
+                <th style="text-align:right;">+ Provento Anual</th>
+              </tr>
+            </thead>
+            <tbody>
+      `;
+
+      ordensDripAtuais.forEach(o => {
+        tblHtml += `
+          <tr>
+            <td><strong style="color:var(--accent);">${esc(o.ticker)}</strong></td>
+            <td>${esc(o.empresa)} <span style="font-size:0.75rem; color:var(--text-muted);">(${esc(o.setor)})</span></td>
+            <td style="text-align:right;">${formatBRL(o.preco_atual)}</td>
+            <td style="text-align:right; font-weight:600;">${formatBRL(o.preco_teto)}</td>
+            <td style="text-align:right; color:var(--green); font-weight:700;">+${o.margem_seguranca}%</td>
+            <td style="text-align:right; font-weight:600;">${o.dy_proj}%</td>
+            <td style="text-align:right; font-weight:700; color:var(--accent); font-size:0.95rem;">${o.qtd_sugerida} cotas</td>
+            <td style="text-align:right; font-weight:600;">${formatBRL(o.valor_gasto)}</td>
+            <td style="text-align:right; color:var(--green); font-weight:700;">+${formatBRL(o.provento_anual_inc)}</td>
+          </tr>
+        `;
+      });
+
+      tblHtml += `
+            </tbody>
+          </table>
+        </div>
+      `;
+
+      container.innerHTML = tblHtml;
+      document.getElementById("btn-aplicar-drip").style.display = "inline-flex";
+    } catch (err) {
+      container.innerHTML = `<div style="text-align:center; padding:1.5rem; color:var(--red);">Erro ao simular DRIP: ${err.message}</div>`;
+      document.getElementById("btn-aplicar-drip").style.display = "none";
+    }
+  }
+
+  async function aplicarDripNaCarteira() {
+    if (!ordensDripAtuais || ordensDripAtuais.length === 0) return;
+    if (!confirm("Confirmar a aplicação das ordens de reinvestimento na carteira? Isso atualizará a coluna de aportes no banco SQLite.")) return;
+
+    try {
+      const payload = {
+        ordens: ordensDripAtuais.map(o => ({
+          ticker: o.ticker,
+          qtd_sugerida: o.qtd_sugerida,
+          valor_gasto: o.valor_gasto
+        }))
+      };
+
+      const res = await fetch("/api/drip/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      const resData = await res.json();
+      if (!res.ok) {
+        throw new Error(resData.detail || "Falha ao aplicar ordens");
+      }
+
+      showToast(resData.message || "Ordens DRIP aplicadas com sucesso!");
+      document.getElementById("btn-aplicar-drip").style.display = "none";
+      await carregarSimulador();
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  }
+
+  window.addEventListener("DOMContentLoaded", () => {
+    carregarSimulador();
+    simularDrip();
+  });
 </script>
+
+<!-- PAINEL DRIP BARSI -->
+<div class="card" style="margin-top: 2rem; border-left: 4px solid #38bdf8;">
+  <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem; flex-wrap: wrap; gap: 1rem;">
+    <div>
+      <h3 style="color: var(--accent); font-size: 1.15rem; display: flex; align-items: center; gap: 0.5rem;">
+        ❄️ Bola de Neve: Reinvestimento Automático de Dividendos (DRIP Barsi)
+      </h3>
+      <p style="color: var(--text-muted); font-size: 0.82rem; margin-top: 0.25rem;">
+        Reinveste automaticamente proventos recebidos priorizando margem de segurança e equilíbrio setorial B.E.S.T.
+      </p>
+    </div>
+    <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+      <div style="display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; color: var(--text-muted);">
+        <input type="checkbox" id="drip-balance-toggle" checked />
+        <label for="drip-balance-toggle">Equilibrar Setores B.E.S.T.</label>
+      </div>
+      <div style="display: flex; gap: 0.4rem; align-items: center;">
+        <span style="font-size: 0.82rem; color: var(--text-muted);">R$</span>
+        <input type="number" id="drip-valor-input" placeholder="Total proventos" style="width: 120px; padding: 0.35rem 0.5rem; font-size: 0.85rem;" class="tbl-input" />
+        <button class="btn btn-outline" onclick="simularDrip()">⚡ Recalcular DRIP</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Indicadores Rápidos do DRIP -->
+  <div class="grid-stats" style="margin-bottom: 1rem; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));">
+    <div class="stat-card" style="padding: 0.8rem;">
+      <h4 style="font-size: 0.7rem;">Proventos Disponíveis</h4>
+      <div id="drip-stat-disponivel" style="font-size: 1.15rem; font-weight: 700; color: var(--accent);">R$ 0,00</div>
+    </div>
+    <div class="stat-card" style="padding: 0.8rem;">
+      <h4 style="font-size: 0.7rem;">Total Alocado</h4>
+      <div id="drip-stat-alocado" style="font-size: 1.15rem; font-weight: 700; color: var(--green);">R$ 0,00</div>
+    </div>
+    <div class="stat-card" style="padding: 0.8rem;">
+      <h4 style="font-size: 0.7rem;">Troco Residual</h4>
+      <div id="drip-stat-troco" style="font-size: 1.15rem; font-weight: 700; color: var(--text-muted);">R$ 0,00</div>
+    </div>
+    <div class="stat-card" style="padding: 0.8rem;">
+      <h4 style="font-size: 0.7rem;">+ Provento Anual Gerado</h4>
+      <div id="drip-stat-provento" style="font-size: 1.15rem; font-weight: 700; color: #a855f7;">R$ 0,00</div>
+    </div>
+    <div class="stat-card" style="padding: 0.8rem;">
+      <h4 style="font-size: 0.7rem;">Yield Incremental</h4>
+      <div id="drip-stat-yield" style="font-size: 1.15rem; font-weight: 700; color: #ea580c;">0.0% a.a.</div>
+    </div>
+  </div>
+
+  <div id="drip-orders-container" style="border: 1px solid var(--border); border-radius: 8px; background: rgba(0,0,0,0.15); min-height: 80px; padding: 0.5rem;">
+    <!-- Populado dinamicamente -->
+  </div>
+
+  <div style="display: flex; justify-content: flex-end; margin-top: 1rem;">
+    <button id="btn-aplicar-drip" onclick="aplicarDripNaCarteira()" class="btn btn-green" style="display: none; align-items: center; gap: 0.4rem;">
+      <span>✅</span> Aplicar Reinvestimento na Carteira
+    </button>
+  </div>
+</div>
 

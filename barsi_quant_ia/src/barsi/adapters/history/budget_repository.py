@@ -1397,17 +1397,30 @@ class BudgetRepository:
     # ------------------------------------------------------------------ #
     def record_dividend_received(
         self,
-        ticker: str,
-        data_pagamento: str,
-        valor_total: float,
+        ticker: Any,
+        data_pagamento: Optional[str] = None,
+        valor_total: Optional[float] = None,
         valor_por_cota: float = 0.0,
         quantidade: int = 0,
         tipo: str = "DIVIDENDO",
         fonte: str = "manual",
     ) -> int:
-        """Registra um dividendo real recebido no SQLite."""
-        ticker = ticker.strip().upper()
-        mes_ano = data_pagamento[:7] if len(data_pagamento) >= 7 else datetime.now().strftime("%Y-%m")
+        """Registra um dividendo real recebido no SQLite. Aceita argumentos posicionais ou instância de DividendReceived."""
+        if hasattr(ticker, "ticker") and hasattr(ticker, "valor_total"):
+            obj = ticker
+            ticker = getattr(obj, "ticker", "")
+            data_pagamento = getattr(obj, "data_pagamento", None) or getattr(obj, "mes_ano", "")
+            valor_total = float(getattr(obj, "valor_total", 0.0))
+            valor_por_cota = float(getattr(obj, "valor_por_cota", 0.0) or 0.0)
+            quantidade = int(getattr(obj, "quantidade", 0) or 0)
+            tipo = str(getattr(obj, "tipo", "DIVIDENDO"))
+            fonte = str(getattr(obj, "fonte", "manual"))
+
+        ticker = str(ticker).strip().upper()
+        dp = str(data_pagamento or "")
+        mes_ano = dp[:7] if len(dp) >= 7 else datetime.now().strftime("%Y-%m")
+        val = float(valor_total if valor_total is not None else 0.0)
+
         with self._conn() as c:
             cur = c.execute(
                 """
@@ -1416,7 +1429,7 @@ class BudgetRepository:
                     quantidade, tipo, fonte, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
             """,
-                (ticker, data_pagamento, mes_ano, valor_total, valor_por_cota, quantidade, tipo, fonte),
+                (ticker, dp, mes_ano, val, valor_por_cota, quantidade, tipo, fonte),
             )
             return cur.lastrowid
 

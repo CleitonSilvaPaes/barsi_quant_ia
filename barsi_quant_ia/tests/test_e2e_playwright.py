@@ -114,4 +114,9 @@ def test_playwright_e2e_flow(e2e_server, isolate_database):
         theme_attr = page.locator("html").get_attribute("data-theme")
         assert theme_attr in ("light", "dark")
 
+        # 8. Simulador de Aportes & Reinvestimento DRIP (Sprint 2)
+        page.goto(f"{base_url}/aportes")
+        assert "Reinvestimento Automático" in page.content()
+        assert page.locator('a:has-text("Fechamento Mensal (PDF)")').first.is_visible()
+
         browser.close()

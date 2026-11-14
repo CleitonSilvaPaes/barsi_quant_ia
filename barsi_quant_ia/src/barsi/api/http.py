@@ -34,6 +34,8 @@ from barsi.infra.security import (
 )
 from barsi.services.sync_service import SyncService
 from barsi.services.ofx_service import OFXParserService
+from barsi.services.drip_service import DripService
+from barsi.services.monthly_closing_service import MonthlyClosingService
 from barsi.domain.models import RunSummary, Position, SimuladorOrder
 from barsi.domain.rules import atualizar_posicao_quant
 from barsi.infra.logging import logger
@@ -238,6 +240,20 @@ class GoalUpdateRequest(BaseModel):
     ticker: Optional[str] = None
     prazo_meses: Optional[int] = None
     notas: Optional[str] = ""
+
+class DripSimulateRequest(BaseModel):
+    valor_disponivel: Optional[float] = None
+    mes_ano: Optional[str] = None
+    balance_sectors: bool = True
+    max_ativos: int = 4
+
+class DripApplyItem(BaseModel):
+    ticker: str
+    qtd_sugerida: int = Field(..., gt=0)
+    valor_gasto: Optional[float] = 0.0
+
+class DripApplyRequest(BaseModel):
+    ordens: List[DripApplyItem]
 
 def get_sync_service() -> SyncService:
     market = AdapterFactory.create_market_adapter(settings)
@@ -1312,6 +1328,63 @@ async def delete_goal_api(goal_id: int, request: Request):
     if not ok:
         raise HTTPException(status_code=404, detail="Meta não encontrada")
     return {"status": "ok"}
+
+# ----------------- ROTAS DRIP & REINVESTIMENTO AUTOMÁTICO (ROADMAP V3.0) -----------------
+@app.post("/api/drip/simulate")
+async def simulate_drip_api(req: DripSimulateRequest, request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Não autorizado")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    service = DripService(repo)
+    result = service.simulate_drip(
+        valor_disponivel=req.valor_disponivel,
+        mes_ano=req.mes_ano,
+        balance_sectors=req.balance_sectors,
+        max_ativos=req.max_ativos
+    )
+    return JSONResponse(content=result)
+
+@app.post("/api/drip/apply")
+async def apply_drip_api(req: DripApplyRequest, request: Request):
+    require_role_action(request, action_type="edit")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    service = DripService(repo)
+    orders_dicts = [o.model_dump() for o in req.ordens]
+    res = service.apply_drip_orders(orders_dicts)
+    return JSONResponse(content=res)
+
+# ----------------- ROTAS DE FECHAMENTO MENSAL & RELATÓRIO PDF (ROADMAP V3.0) -----------------
+@app.get("/api/reports/monthly-closing")
+async def download_monthly_closing_pdf(request: Request, mes_ano: Optional[str] = None):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Não autorizado")
+    target_month = mes_ano or datetime.now().strftime("%Y-%m")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    closing_service = MonthlyClosingService(repo)
+    try:
+        pdf_bytes = closing_service.generate_pdf_report(target_month)
+        filename = f"fechamento_barsi_{target_month.replace('-', '_')}.pdf"
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    except Exception as e:
+        logger.error("pdf_download_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/reports/monthly-closing/preview", response_class=HTMLResponse)
+async def preview_monthly_closing_html(request: Request, mes_ano: Optional[str] = None):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Não autorizado")
+    target_month = mes_ano or datetime.now().strftime("%Y-%m")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    closing_service = MonthlyClosingService(repo)
+    html = closing_service.generate_html_report(target_month)
+    return HTMLResponse(content=html)
 
 @app.get("/api/admin/users")
 async def list_admin_users(request: Request):
