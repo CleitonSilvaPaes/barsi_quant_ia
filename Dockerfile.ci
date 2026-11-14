@@ -1,0 +1,20 @@
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    nodejs \
+    git \
+    ca-certificates \
+    lsb-release \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pre-configuração do hostedtoolcache para actions/setup-python@v5
+RUN mkdir -p /opt/hostedtoolcache/Python/3.12.16/x64/bin /opt/hostedtoolcache/Python/3.11.11/x64/bin && \
+    ln -s /usr/local/bin/python /opt/hostedtoolcache/Python/3.12.16/x64/bin/python && \
+    ln -s /usr/local/bin/python3 /opt/hostedtoolcache/Python/3.12.16/x64/bin/python3 && \
+    ln -s /usr/local/bin/pip /opt/hostedtoolcache/Python/3.12.16/x64/bin/pip && \
+    ln -s /usr/local/bin/python /opt/hostedtoolcache/Python/3.11.11/x64/bin/python && \
+    ln -s /usr/local/bin/python3 /opt/hostedtoolcache/Python/3.11.11/x64/bin/python3 && \
+    ln -s /usr/local/bin/pip /opt/hostedtoolcache/Python/3.11.11/x64/bin/pip && \
+    touch /opt/hostedtoolcache/Python/3.12.16/x64.complete && \
+    touch /opt/hostedtoolcache/Python/3.11.11/x64.complete
+
