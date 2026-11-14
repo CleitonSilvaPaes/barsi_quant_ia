@@ -2,6 +2,7 @@
 import typer
 import asyncio
 import uvicorn
+from pathlib import Path
 from typing import Optional
 from barsi.config import settings
 from barsi.adapters.factory import AdapterFactory
@@ -1129,6 +1130,27 @@ def radar_screening_cli(
             typer.echo(f"[i] Nenhuma ação com margem > {margem_min:.0f}% no momento.")
 
     asyncio.run(_screen())
+
+@app.command("import-b3")
+def import_b3(
+    file_path: Path = typer.Argument(..., help="Caminho do arquivo Excel de custódia da Área do Investidor da B3 (.xlsx)"),
+):
+    """Importa e concilia a custódia oficial da Área do Investidor da B3 (.xlsx) para o SQLite canônico."""
+    from barsi.services.b3_custodia_service import B3CustodiaService
+    from barsi.adapters.history.budget_repository import BudgetRepository
+
+    if not file_path.exists():
+        typer.echo(f"[-] Arquivo não encontrado: {file_path}")
+        raise typer.Exit(code=1)
+
+    repo = BudgetRepository(settings.sqlite_db_path)
+    service = B3CustodiaService(repo)
+    typer.echo(f"[+] Lendo custódia da B3 em: {file_path}...")
+    res = service.sync_custodia_to_sqlite(file_path)
+    typer.echo(f"[✔] {res['message']}")
+    typer.echo(f"    Patrimônio apurado: R$ {res['patrimonio_total']:,.2f}")
+    for at in res.get("ativos", []):
+        typer.echo(f"    • {at['ticker']:<7} ({at['setor']:<14}): {at['qtd']:<5} cotas @ R$ {at['preco']:<6.2f} [{at['status']}]")
 
 if __name__ == "__main__":
     app()

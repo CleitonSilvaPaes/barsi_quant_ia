@@ -945,6 +945,26 @@ async def delete_carteira_position(ticker: str, request: Request):
         raise HTTPException(status_code=404, detail=f"Ativo {ticker} não encontrado na carteira.")
     return {"status": "ok", "message": f"Ativo {ticker} excluído com sucesso."}
 
+@app.post("/api/carteira/import-b3")
+async def import_b3_custodia_endpoint(
+    request: Request,
+    file: UploadFile = File(...)
+):
+    """Importa e concilia a planilha oficial de custódia da Área do Investidor da B3 (.xlsx)."""
+    require_role_action(request, action_type="edit")
+    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Formato inválido. Envie o arquivo Excel (.xlsx) exportado da B3.")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Arquivo vazio.")
+
+    from barsi.services.b3_custodia_service import B3CustodiaService
+    budget_repo = BudgetRepository(settings.sqlite_db_path)
+    service = B3CustodiaService(budget_repo)
+    result = service.sync_custodia_to_sqlite(content)
+    return JSONResponse(content=result)
+
 @app.get("/api/simulador")
 async def get_simulador(request: Request):
     user = get_current_user(request)
