@@ -106,3 +106,7 @@ Resposta esperada em até 72h.
 - Trocas de senha (`/api/user/change-password`, `user-pass-reset`) ou desativação de segundo fator incrementam o campo `session_version` no banco de dados.
 - Tokens emitidos em sessões concorrentes ou dispositivos secundários com versões antigas de sessão são rejeitados de imediato por `get_current_user`, garantindo encerramento forçado de acessos antigos (session invalidation).
 - O logout explícito (`/logout`) revoga o identificador exclusivo `jti` na tabela `session_revocation`.
+
+### D. Invalidação Imediata de Tokens em Exclusão de Usuário
+- Tokens de usuários excluídos do banco de dados são rejeitados de imediato em `get_current_user` (verificação explícita `if not user_db: return None`), impedindo qualquer persistência de acesso após desativação ou exclusão de conta.
+- Troca de senha (`/api/user/change-password`) e desativação de 2FA (`/api/auth/2fa/disable`) reemitem o token atualizado para o dispositivo que realizou a operação, mantendo a sessão atual ativa enquanto encerram imediatamente todas as demais sessões em outros dispositivos.

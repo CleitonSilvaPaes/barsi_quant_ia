@@ -175,7 +175,7 @@ async def add_security_headers(request: Request, call_next):
         "style-src 'self' 'unsafe-inline'; "
         "font-src 'self' data:; "
         "img-src 'self' data: https:; "
-        "connect-src 'self'; "
+        "connect-src 'self' https://api.qrserver.com; "
         "frame-ancestors 'none'; "
         "base-uri 'self'; "
         "form-action 'self';"
@@ -413,7 +413,10 @@ def get_current_user(request: Request) -> Optional[Dict[str, Any]]:
     sv = data.get("sv")
     if sv is not None and "uid" in data:
         user_db = repo.get_by_id(data["uid"])
-        if user_db and user_db.get("session_version", 1) != sv:
+        if not user_db:
+            logger.warning("token_for_deleted_user", uid=data["uid"], jti=jti)
+            return None
+        if user_db.get("session_version", 1) != sv:
             return None
     return data
 
@@ -521,6 +524,14 @@ _login_attempts: Dict[str, List[float]] = {}
 LOGIN_RATE_LIMIT_MAX = 5
 LOGIN_RATE_LIMIT_WINDOW = 60.0  # Janela de 60 segundos
 
+def _cleanup_login_attempts(now: float):
+    global _login_attempts
+    if len(_login_attempts) > 1000:
+        _login_attempts = {
+            ip: times for ip, times in _login_attempts.items()
+            if times and now - times[-1] < LOGIN_RATE_LIMIT_WINDOW
+        }
+
 def _get_client_ip(request: Request) -> str:
     """Extrai IP real considerando proxies reversos (Cloudflare Tunnel, Nginx, etc.).
     Só confia em headers de proxy se a conexão originar de loopback ou testclient.
@@ -550,17 +561,10 @@ async def login_page(request: Request, error: Optional[str] = None):
 
 @app.post("/login")
 async def do_login(request: Request):
-    global _login_attempts
     client_ip = _get_client_ip(request)
     now = time.time()
     repo = get_user_repo()
-
-    # Previne memory leak lento de IPs antigos
-    if len(_login_attempts) > 1000:
-        _login_attempts = {
-            ip: times for ip, times in _login_attempts.items()
-            if times and now - times[-1] < LOGIN_RATE_LIMIT_WINDOW
-        }
+    _cleanup_login_attempts(now)
 
     recent_attempts = [t for t in _login_attempts.get(client_ip, []) if now - t < LOGIN_RATE_LIMIT_WINDOW]
     if len(recent_attempts) >= LOGIN_RATE_LIMIT_MAX:
@@ -653,6 +657,7 @@ async def do_login_2fa(request: Request):
     client_ip = _get_client_ip(request)
     repo = get_user_repo()
     now = time.time()
+    _cleanup_login_attempts(now)
 
     recent_attempts = [t for t in _login_attempts.get(client_ip, []) if now - t < LOGIN_RATE_LIMIT_WINDOW]
     if len(recent_attempts) >= LOGIN_RATE_LIMIT_MAX:
@@ -1573,7 +1578,29 @@ async def change_user_password_self(req: ChangePasswordRequest, request: Request
         actor_username=user["user"],
         ip=client_ip
     )
-    return {"ok": True, "message": "Senha atualizada com sucesso!"}
+    user_updated = repo.get_by_id(user["uid"])
+    new_sv = user_updated.get("session_version", 1) if user_updated else 1
+    new_token = create_session_token(
+        user["uid"],
+        user["user"],
+        user.get("role", "leitor"),
+        settings.secret_key,
+        session_version=new_sv,
+    )
+    res = JSONResponse(content={
+        "ok": True,
+        "message": "Senha atualizada com sucesso! Outras sessões foram encerradas."
+    })
+    set_barsi_cookie(
+        response=res, key="barsi_session", value=new_token,
+        request=request, httponly=True, max_age=86400 * 7, samesite="lax"
+    )
+    new_csrf = generate_csrf_token(new_token, settings.secret_key)
+    set_barsi_cookie(
+        response=res, key="barsi_csrf", value=new_csrf,
+        request=request, httponly=False, max_age=86400 * 7, samesite="lax", path="/"
+    )
+    return res
 
 # ----------------- ROTAS DE METAS FINANCEIRAS (ROADMAP V3.0) -----------------
 @app.get("/api/metas")
@@ -1814,7 +1841,29 @@ async def disable_2fa(req: TotpConfirmRequest, request: Request):
         actor_username=user.get("user") or user.get("username"),
         reason="user_self_service"
     )
-    return {"ok": True, "message": "2FA (TOTP) desativado com sucesso."}
+    user_updated = repo.get_by_id(user["uid"])
+    new_sv = user_updated.get("session_version", 1) if user_updated else 1
+    new_token = create_session_token(
+        user_updated["id"],
+        user_updated["username"],
+        user_updated["role"],
+        settings.secret_key,
+        session_version=new_sv,
+    )
+    res = JSONResponse(content={
+        "ok": True,
+        "message": "2FA (TOTP) desativado com sucesso! Outras sessões foram encerradas."
+    })
+    set_barsi_cookie(
+        response=res, key="barsi_session", value=new_token,
+        request=request, httponly=True, max_age=86400 * 7, samesite="lax"
+    )
+    new_csrf = generate_csrf_token(new_token, settings.secret_key)
+    set_barsi_cookie(
+        response=res, key="barsi_csrf", value=new_csrf,
+        request=request, httponly=False, max_age=86400 * 7, samesite="lax", path="/"
+    )
+    return res
 
 # ----------------- ROTAS DE DIVIDENDOS REAIS (P0) -----------------
 @app.get("/api/dividends")

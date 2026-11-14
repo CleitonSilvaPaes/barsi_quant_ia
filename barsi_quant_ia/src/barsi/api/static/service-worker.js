@@ -46,8 +46,8 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   const url = new URL(req.url);
 
-  // Não cachear chamadas da API POST/PUT/DELETE ou websockets
-  if (req.method !== 'GET' || url.pathname.startsWith('/api/run') || url.pathname.startsWith('/auth/')) {
+  // Não cachear chamadas da API POST/PUT/DELETE, origens externas ou rotas sensíveis
+  if (req.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/run') || url.pathname.startsWith('/auth/')) {
     return;
   }
 

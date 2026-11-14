@@ -426,7 +426,7 @@ def test_disable_totp_requires_proof_by_default(clean_db):
 
 
 def test_session_version_revocation_on_password_change(clean_db):
-    """Troca de senha invalida tokens de sessão antigos via session_version."""
+    """Troca de senha preserva a sessão atual e invalida tokens de sessão antigos via session_version."""
     _, repo, _ = clean_db
     repo.create_user("roberta", "senhaAntiga123", role="investidor")
     user = repo.get_by_username("roberta")
@@ -446,11 +446,71 @@ def test_session_version_revocation_on_password_change(clean_db):
     )
     assert res.status_code == 200
 
+    # Sessão atual continua logada e operacional (UX padrão GitHub/Devise)
+    res_after = client.get("/api/home/summary")
+    assert res_after.status_code == 200
+
     # Token antigo usado por outro cliente deve ser rejeitado agora
     client_stolen = TestClient(app)
     client_stolen.cookies.set("barsi_session", token_old)
     res_carteira = client_stolen.get("/api/home/summary")
     assert res_carteira.status_code == 401
+
+
+def test_token_invalidated_after_user_deletion(clean_db):
+    """Deletar usuário invalida imediatamente todos os seus tokens ativos (Bug #1 Hotfix)."""
+    _, repo, _ = clean_db
+    repo.create_user("victim", "senha123", role="investidor")
+    user = repo.get_by_username("victim")
+
+    token = create_session_token(
+        user["id"], user["username"], user["role"],
+        settings.secret_key, session_version=user.get("session_version", 1)
+    )
+
+    client = TestClient(app)
+    client.cookies.set("barsi_session", token)
+    # Token funciona perfeitamente antes da exclusão
+    assert client.get("/api/home/summary").status_code == 200
+
+    # Admin deleta o usuário diretamente no repositório
+    with repo._connection() as conn:
+        conn.execute("DELETE FROM usuarios WHERE id = ?", (user["id"],))
+        conn.commit()
+
+    # Token deve ser rejeitado imediatamente com 401 (não cai no short-circuit)
+    assert client.get("/api/home/summary").status_code == 401
+
+
+def test_disable_2fa_preserves_current_session_and_revokes_old(clean_db):
+    """Desativação de 2FA preserva a sessão atual do usuário e revoga tokens antigos concorrentes."""
+    _, repo, _ = clean_db
+    repo.create_user("lucas_2fa", "senhaForte123!", role="investidor")
+    user = repo.get_by_username("lucas_2fa")
+    secret, _ = repo.setup_totp(user["id"])
+    from barsi.infra.security import generate_totp_code
+    valid_code = generate_totp_code(secret)
+    repo.confirm_and_enable_totp(user["id"], valid_code)
+
+    token_old = create_session_token(
+        user["id"], user["username"], user["role"], settings.secret_key, session_version=user.get("session_version", 1)
+    )
+
+    client = TestClient(app)
+    client.cookies.set("barsi_session", token_old)
+
+    # Desativa 2FA com código válido
+    res = client.post("/api/auth/2fa/disable", json={"code": valid_code})
+    assert res.status_code == 200
+
+    # Sessão atual permanece autenticada
+    res_home = client.get("/api/home/summary")
+    assert res_home.status_code == 200
+
+    # Sessão antiga em outro cliente é rejeitada
+    client_other = TestClient(app)
+    client_other.cookies.set("barsi_session", token_old)
+    assert client_other.get("/api/home/summary").status_code == 401
 
 
 def test_login_memory_rate_limit_short_circuit(clean_db):

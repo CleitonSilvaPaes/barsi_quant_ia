@@ -49,21 +49,41 @@ def _patched_request(self, method, url, *args, **kwargs):
 StarletteTestClient.request = _patched_request
 
 
+_client_instances = []
+_orig_client_init = StarletteTestClient.__init__
+
+def _patched_client_init(self, *args, **kwargs):
+    _orig_client_init(self, *args, **kwargs)
+    _client_instances.append(self)
+
+StarletteTestClient.__init__ = _patched_client_init
+
+
 @pytest.fixture(autouse=True)
 def isolate_database(tmp_path, monkeypatch):
     """Garante que NENHUM teste toque no banco de produção.
 
     Cria um banco temporário isolado por teste e redireciona sqlite_db_path
-    para tmp_path, resetando caches em memória.
+    para tmp_path, resetando caches em memória e limpando cookies de clientes de teste.
     """
     test_db = str(tmp_path / "test_isolated.db")
     monkeypatch.setattr(settings, "sqlite_db_path", test_db)
     monkeypatch.setenv("BARSI_SQLITE_PATH", test_db)
     monkeypatch.setattr(http_module, "_user_repo_cache", None)
     http_module._login_attempts.clear()
+    for c in _client_instances:
+        try:
+            c.cookies.clear()
+        except Exception:
+            pass
 
     yield test_db
 
     monkeypatch.setattr(http_module, "_user_repo_cache", None)
     http_module._login_attempts.clear()
+    for c in _client_instances:
+        try:
+            c.cookies.clear()
+        except Exception:
+            pass
 
