@@ -175,7 +175,7 @@ async def add_security_headers(request: Request, call_next):
         "style-src 'self' 'unsafe-inline'; "
         "font-src 'self' data:; "
         "img-src 'self' data: https:; "
-        "connect-src 'self' https://api.qrserver.com; "
+        "connect-src 'self'; "
         "frame-ancestors 'none'; "
         "base-uri 'self'; "
         "form-action 'self';"
@@ -1579,13 +1579,14 @@ async def change_user_password_self(req: ChangePasswordRequest, request: Request
         ip=client_ip
     )
     user_updated = repo.get_by_id(user["uid"])
-    new_sv = user_updated.get("session_version", 1) if user_updated else 1
+    if not user_updated:
+        raise HTTPException(status_code=401, detail="Usuário não encontrado ou sessão expirada")
     new_token = create_session_token(
-        user["uid"],
-        user["user"],
-        user.get("role", "leitor"),
+        user_updated["id"],
+        user_updated["username"],
+        user_updated["role"],
         settings.secret_key,
-        session_version=new_sv,
+        session_version=user_updated.get("session_version", 1),
     )
     res = JSONResponse(content={
         "ok": True,
@@ -1842,13 +1843,14 @@ async def disable_2fa(req: TotpConfirmRequest, request: Request):
         reason="user_self_service"
     )
     user_updated = repo.get_by_id(user["uid"])
-    new_sv = user_updated.get("session_version", 1) if user_updated else 1
+    if not user_updated:
+        raise HTTPException(status_code=401, detail="Usuário não encontrado ou sessão expirada")
     new_token = create_session_token(
         user_updated["id"],
         user_updated["username"],
         user_updated["role"],
         settings.secret_key,
-        session_version=new_sv,
+        session_version=user_updated.get("session_version", 1),
     )
     res = JSONResponse(content={
         "ok": True,

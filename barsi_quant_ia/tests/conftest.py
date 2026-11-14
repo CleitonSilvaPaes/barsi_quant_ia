@@ -3,6 +3,7 @@
 Garante isolamento absoluto de banco de dados: NENHUM teste toca no banco
 de dados SQLite de produção (memory/barsi_memory.db).
 """
+import weakref
 import pytest
 from starlette.testclient import TestClient as StarletteTestClient
 from barsi.config import settings
@@ -49,12 +50,12 @@ def _patched_request(self, method, url, *args, **kwargs):
 StarletteTestClient.request = _patched_request
 
 
-_client_instances = []
+_client_instances = weakref.WeakSet()
 _orig_client_init = StarletteTestClient.__init__
 
 def _patched_client_init(self, *args, **kwargs):
     _orig_client_init(self, *args, **kwargs)
-    _client_instances.append(self)
+    _client_instances.add(self)
 
 StarletteTestClient.__init__ = _patched_client_init
 

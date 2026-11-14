@@ -242,6 +242,10 @@ def test_security_headers_and_cache_control(clean_db):
     assert res_root.headers.get("X-Content-Type-Options") == "nosniff"
     assert res_root.headers.get("Cross-Origin-Opener-Policy") == "same-origin"
     assert res_root.headers.get("Cross-Origin-Resource-Policy") == "same-origin"
+    csp = res_root.headers.get("Content-Security-Policy", "")
+    assert "connect-src 'self';" in csp
+    assert "api.qrserver.com" not in csp
+    assert "img-src 'self' data: https:;" in csp
 
     # Rota estática
     res_static = client.get("/static/manifest.json")
@@ -529,4 +533,35 @@ def test_login_memory_rate_limit_short_circuit(clean_db):
     assert res.status_code == 303
     assert "error=Muitas+tentativas" in res.headers["location"]
     _login_attempts.clear()
+
+
+def test_sensitive_ops_reject_deleted_user_race_condition(clean_db):
+    """Operações de mudança de senha e desativação de 2FA rejeitam com 401 se usuário sumir (sem 500)."""
+    _, repo, _ = clean_db
+    repo.create_user("ghost_user", "senha123456", role="investidor")
+    user = repo.get_by_username("ghost_user")
+    token = create_session_token(
+        user["id"], user["username"], user["role"],
+        settings.secret_key, session_version=user.get("session_version", 1)
+    )
+
+    client = TestClient(app)
+    client.cookies.set("barsi_session", token)
+
+    # Exclui usuário do banco antes da chamada sensível
+    with repo._connection() as conn:
+        conn.execute("DELETE FROM usuarios WHERE id = ?", (user["id"],))
+        conn.commit()
+
+    # Tentativa de alterar senha deve retornar 401
+    res_pass = client.post("/api/user/change-password", json={
+        "current_password": "senha123456",
+        "new_password": "nova_senha_longa_123"
+    })
+    assert res_pass.status_code == 401
+
+    # Tentativa de desativar 2FA deve retornar 401
+    res_2fa = client.post("/api/auth/2fa/disable", json={"code": "123456"})
+    assert res_2fa.status_code == 401
+
 

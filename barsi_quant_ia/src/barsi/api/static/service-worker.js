@@ -46,7 +46,9 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   const url = new URL(req.url);
 
-  // Não cachear chamadas da API POST/PUT/DELETE, origens externas ou rotas sensíveis
+  // Não cachear chamadas da API POST/PUT/DELETE, origens externas ou rotas sensíveis.
+  // IMPORTANTE: url.origin !== self.location.origin permite que imagens de terceiros (ex: QR code de api.qrserver.com)
+  // sejam carregadas pelo navegador diretamente via tag <img>, sem que o SW intercepte como fetch (o que violaria connect-src).
   if (req.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/run') || url.pathname.startsWith('/auth/')) {
     return;
   }
