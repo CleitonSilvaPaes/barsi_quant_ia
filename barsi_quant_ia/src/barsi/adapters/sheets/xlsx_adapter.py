@@ -184,8 +184,18 @@ class XLSXAdapter(SheetsPort):
             sheet_names = wb.sheetnames
             if "Screener_BEST_Custodia" in sheet_names:
                 ws = wb["Screener_BEST_Custodia"]
+                # Mapeia dinamicamente cada TICKER para a linha real na coluna A
+                # para evitar escrita em linha deslocada
+                ticker_to_row = {}
+                for row_idx in range(10, ws.max_row + 1):
+                    val = ws.cell(row=row_idx, column=1).value
+                    if val and str(val).strip():
+                        ticker_to_row[str(val).strip().upper()] = row_idx
+
                 for p in positions:
-                    r = p.row_index
+                    r = ticker_to_row.get(p.ticker) or p.row_index
+                    if not r:
+                        continue
                     qtd_tot = p.qtd_antes + p.qtd_aporte
                     if not ws[f"A{r}"].value:
                         ws[f"A{r}"] = p.ticker

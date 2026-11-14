@@ -297,9 +297,20 @@ class GSpreadAdapter(SheetsPort):
             # Cenário 1: Planilha Pro B.E.S.T.
             if "Screener_BEST_Custodia" in worksheet_titles:
                 ws = sh.worksheet("Screener_BEST_Custodia")
+                # Mapeia dinamicamente cada TICKER para sua linha real na planilha (A10:A30)
+                # para evitar deslocamento cruzado de cotas entre ativos
+                sheet_rows = ws.get("A10:A30")
+                ticker_to_row = {
+                    str(r[0]).strip().upper(): row_idx
+                    for row_idx, r in enumerate(sheet_rows, start=10)
+                    if r and len(r) > 0 and r[0]
+                }
+
                 updates = []
                 for p in positions:
-                    row = p.row_index
+                    row = ticker_to_row.get(p.ticker) or p.row_index
+                    if not row:
+                        continue
                     # Col D: Custódia Atual (Qtd Antes)
                     updates.append({"range": f"D{row}", "values": [[p.qtd_antes]]})
                     # Col E: Aporte Programado (Qtd)
