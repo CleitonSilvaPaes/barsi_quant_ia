@@ -226,10 +226,16 @@ def test_theme_toggle_assets_and_markup():
 
     # Tokens de tema e prevenção de FOUC
     assert 'data-theme' in base_html
-    assert '[data-theme="light"]' in base_html
+    assert 'theme.css' in base_html
     assert 'barsi_theme' in base_html
     assert 'btn-theme-toggle' in base_html
     assert 'toggleTheme()' in base_html
+
+    # Arquivo CSS de tema modular
+    theme_css_file = os.path.join(os.path.dirname(__file__), "..", "src", "barsi", "api", "static", "css", "theme.css")
+    with open(theme_css_file, "r", encoding="utf-8") as f:
+        theme_css = f.read()
+    assert '[data-theme="light"]' in theme_css
 
     # Script JavaScript comum
     static_js_file = os.path.join(os.path.dirname(__file__), "..", "src", "barsi", "api", "static", "js", "common.js")
