@@ -9,6 +9,7 @@ from starlette.testclient import TestClient as StarletteTestClient
 from barsi.config import settings
 from barsi.infra.security import generate_csrf_token
 import barsi.api.http as http_module
+import barsi.api.common as common_module
 
 # Auto-injeta cabeçalho X-CSRF-Token em requisições de testes autenticadas via cookies,
 # permitindo testar rejeição explícita passando X-Skip-Auto-CSRF ou tokens inválidos.
@@ -71,7 +72,9 @@ def isolate_database(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "sqlite_db_path", test_db)
     monkeypatch.setenv("BARSI_SQLITE_PATH", test_db)
     monkeypatch.setattr(http_module, "_user_repo_cache", None)
+    monkeypatch.setattr(common_module, "_user_repo_cache", None)
     http_module._login_attempts.clear()
+    common_module._login_attempts.clear()
     for c in _client_instances:
         try:
             c.cookies.clear()
@@ -81,7 +84,9 @@ def isolate_database(tmp_path, monkeypatch):
     yield test_db
 
     monkeypatch.setattr(http_module, "_user_repo_cache", None)
+    monkeypatch.setattr(common_module, "_user_repo_cache", None)
     http_module._login_attempts.clear()
+    common_module._login_attempts.clear()
     for c in _client_instances:
         try:
             c.cookies.clear()
