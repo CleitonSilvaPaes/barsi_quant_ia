@@ -223,6 +223,22 @@ class ArtifactCreateRequest(BaseModel):
     filters: Optional[Dict[str, Any]] = None
     visible_in: Optional[List[str]] = Field(default_factory=lambda: ["analytics"])
 
+class GoalCreateRequest(BaseModel):
+    tipo: str
+    titulo: str
+    valor_alvo: float = Field(..., gt=0)
+    ticker: Optional[str] = None
+    prazo_meses: Optional[int] = None
+    notas: Optional[str] = ""
+
+class GoalUpdateRequest(BaseModel):
+    tipo: str
+    titulo: str
+    valor_alvo: float = Field(..., gt=0)
+    ticker: Optional[str] = None
+    prazo_meses: Optional[int] = None
+    notas: Optional[str] = ""
+
 def get_sync_service() -> SyncService:
     market = AdapterFactory.create_market_adapter(settings)
     news = AdapterFactory.create_news_adapter(settings)
@@ -313,7 +329,7 @@ def render_page(template_name: str, request: Request, page_title: str, active_na
         content_html = f"<div class='card'>Página {template_name} em desenvolvimento.</div>"
 
     role_badge = f"{user['role'].upper()}"
-    navs = ["home", "carteira", "aportes", "budget", "extratos", "insights", "analytics", "settings", "admin", "help"]
+    navs = ["home", "carteira", "metas", "aportes", "budget", "extratos", "insights", "analytics", "settings", "admin", "help"]
 
     is_admin = (user.get("role") == "admin")
     admin_nav_html = f'<a href="/admin" class="nav-item {"active" if active_nav == "admin" else ""}"><span class="icon">🔐</span> Admin & Usuários</a>' if is_admin else ""
@@ -607,6 +623,10 @@ async def page_home(request: Request, error: Optional[str] = None):
 @app.get("/carteira", response_class=HTMLResponse)
 async def page_carteira(request: Request):
     return render_page("carteira", request, "Carteira B.E.S.T. & Custódia Consolidada", "carteira")
+
+@app.get("/metas", response_class=HTMLResponse)
+async def page_metas(request: Request):
+    return render_page("metas", request, "Dashboard de Metas & Objetivos Financeiros", "metas")
 
 @app.get("/aportes", response_class=HTMLResponse)
 async def page_aportes(request: Request):
@@ -1237,6 +1257,61 @@ async def export_artifact_excel(request: Request, artifact_id: int):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
+
+# ----------------- ROTAS DE METAS FINANCEIRAS (ROADMAP V3.0) -----------------
+@app.get("/api/metas")
+async def get_goals_api(request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Não autorizado")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    return repo.get_goals_with_progress()
+
+@app.post("/api/metas")
+async def create_goal_api(req: GoalCreateRequest, request: Request):
+    require_role_action(request, action_type="edit")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    try:
+        new_id = repo.create_goal(
+            tipo=req.tipo,
+            titulo=req.titulo,
+            valor_alvo=req.valor_alvo,
+            ticker=req.ticker,
+            prazo_meses=req.prazo_meses,
+            notas=req.notas
+        )
+        return {"status": "ok", "id": new_id}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.put("/api/metas/{goal_id}")
+async def update_goal_api(goal_id: int, req: GoalUpdateRequest, request: Request):
+    require_role_action(request, action_type="edit")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    try:
+        ok = repo.update_goal(
+            goal_id=goal_id,
+            tipo=req.tipo,
+            titulo=req.titulo,
+            valor_alvo=req.valor_alvo,
+            ticker=req.ticker,
+            prazo_meses=req.prazo_meses,
+            notas=req.notas
+        )
+        if not ok:
+            raise HTTPException(status_code=404, detail="Meta não encontrada")
+        return {"status": "ok"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.delete("/api/metas/{goal_id}")
+async def delete_goal_api(goal_id: int, request: Request):
+    require_role_action(request, action_type="edit")
+    repo = BudgetRepository(settings.sqlite_db_path)
+    ok = repo.delete_goal(goal_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Meta não encontrada")
+    return {"status": "ok"}
 
 @app.get("/api/admin/users")
 async def list_admin_users(request: Request):

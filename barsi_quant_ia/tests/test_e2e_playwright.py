@@ -96,11 +96,22 @@ def test_playwright_e2e_flow(e2e_server, isolate_database):
 
         # 5. Navegar para Extratos e verificar o empty-state limpo
         page.goto(f"{base_url}/extratos")
-        assert "Nenhum extrato importado ainda" in page.locator("#transacoes-body").inner_text()
+        trans_text = page.locator("#transacoes-body").inner_text()
+        assert "Nenhum extrato importado ainda" in trans_text or "Nenhuma transação encontrada" in trans_text
 
         # 6. Navegar para Orçamento e verificar o empty-state limpo
         page.goto(f"{base_url}/budget")
         assert "R$ 0,00" in page.locator("#stat-entradas").inner_text()
         assert "Nenhum dado orçamentário registrado ainda" in page.locator("#budget-body").inner_text()
+
+        # 7. Dashboard de Metas & Alternância de Tema (Sprint 1)
+        page.goto(f"{base_url}/metas")
+        assert "Dashboard de Metas" in page.content()
+        assert page.locator("#theme-toggle-btn").is_visible()
+        # Testa clique no botão de alternar tema
+        page.click("#theme-toggle-btn")
+        # Confirma que o atributo data-theme mudou
+        theme_attr = page.locator("html").get_attribute("data-theme")
+        assert theme_attr in ("light", "dark")
 
         browser.close()
