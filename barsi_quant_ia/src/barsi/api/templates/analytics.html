@@ -110,6 +110,78 @@
 </div>
 
 <!-- ============================================================== -->
+<!-- SEÇÃO: BACKTESTING DE BOLA DE NEVE (SIMULADOR PREVIDENCIÁRIO)   -->
+<!-- ============================================================== -->
+<div style="margin-top: 2.5rem; margin-bottom: 1.5rem;">
+  <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem;">
+    <div>
+      <h2 style="margin: 0; font-size: 1.25rem; color: #fff;">🔮 Backtesting de Bola de Neve (Simulador Previdenciário Barsi)</h2>
+      <span style="font-size: 0.8rem; color: var(--text-muted);">Simulação matemática do poder dos juros compostos com reinvestimento de dividendos de 5 a 35 anos</span>
+    </div>
+    <div>
+      <button class="btn btn-primary" onclick="executarSimulacaoBolaDeNeve()">⚡ Recalcular Projeção</button>
+    </div>
+  </div>
+
+  <div class="card" style="margin: 0; padding: 1.25rem; border-top: 3px solid var(--accent);">
+    <!-- Controles da Simulação -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.25rem;">
+      <div>
+        <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">Aporte Mensal (R$)</label>
+        <input type="number" id="sb-aporte" class="tbl-input" value="1500" step="100" min="100" onchange="executarSimulacaoBolaDeNeve()" />
+      </div>
+      <div>
+        <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">Prazo da Simulação: <strong id="sb-anos-label" style="color:var(--accent);">20 anos</strong></label>
+        <input type="range" id="sb-anos" min="5" max="35" value="20" style="width: 100%; accent-color: var(--accent);" oninput="document.getElementById('sb-anos-label').innerText = this.value + ' anos'" onchange="executarSimulacaoBolaDeNeve()" />
+      </div>
+      <div>
+        <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">Dividend Yield Inicial (% a.a.)</label>
+        <input type="number" id="sb-yield" class="tbl-input" value="7.5" step="0.1" min="1" max="25" onchange="executarSimulacaoBolaDeNeve()" />
+      </div>
+      <div>
+        <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">Cresc. Real Proventos (% a.a.)</label>
+        <input type="number" id="sb-cresc" class="tbl-input" value="3.0" step="0.5" min="0" max="15" onchange="executarSimulacaoBolaDeNeve()" />
+      </div>
+      <div style="display: flex; align-items: flex-end; padding-bottom: 0.4rem;">
+        <label style="font-size: 0.85rem; color: #fff; display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+          <input type="checkbox" id="sb-reinvestir" checked onchange="executarSimulacaoBolaDeNeve()" style="transform: scale(1.2); accent-color: var(--accent);" />
+          Reinvestir 100% dos Dividendos (DRIP)
+        </label>
+      </div>
+    </div>
+
+    <!-- Cards de Resumo e Métricas Chave -->
+    <div class="grid-stats" style="margin-bottom: 1.25rem;">
+      <div class="stat-card" style="border-left: 3px solid #38bdf8;">
+        <h4>Ponto de Inflexão (Crossing Point)</h4>
+        <div class="val" id="sb-crossing-val" style="color: #38bdf8;">—</div>
+        <div class="sub" id="sb-crossing-sub">Quando os proventos superam seu aporte</div>
+      </div>
+      <div class="stat-card" style="border-left: 3px solid var(--green);">
+        <h4>Renda Passiva Mensal Final</h4>
+        <div class="val" id="sb-renda-val" style="color: var(--green);">R$ 0,00</div>
+        <div class="sub" id="sb-renda-sub">~ 0 salários mínimos / mês</div>
+      </div>
+      <div class="stat-card" style="border-left: 3px solid var(--accent);">
+        <h4>Patrimônio Futuro Acumulado</h4>
+        <div class="val" id="sb-patrimonio-val" style="color: var(--accent);">R$ 0,00</div>
+        <div class="sub" id="sb-patrimonio-sub">Total acumulado ao final do prazo</div>
+      </div>
+      <div class="stat-card" style="border-left: 3px solid var(--amber);">
+        <h4>Efeito Bola de Neve (Multiplicador)</h4>
+        <div class="val" id="sb-mult-val" style="color: var(--amber);">+0%</div>
+        <div class="sub" id="sb-mult-sub">Patrimônio extra gerado pelos juros compostos</div>
+      </div>
+    </div>
+
+    <!-- Gráfico Comparativo Chart.js -->
+    <div class="chart-container" style="height: 340px;">
+      <canvas id="chart-snowball"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================== -->
 <!-- SEÇÃO DE ARTEFATOS & RELATÓRIOS DINÂMICOS PERSONALIZADOS       -->
 <!-- ============================================================== -->
 <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2rem; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.5rem;">
@@ -207,6 +279,7 @@
   let chartEquity = null;
   let chartSetores = null;
   let chartDividendos = null;
+  let chartSnowball = null;
   let customChartInstances = {};
   let artifactSourcesCache = null;
 
@@ -699,8 +772,167 @@
     }
   }
 
+  async function executarSimulacaoBolaDeNeve() {
+    try {
+      const aporte = parseFloat(document.getElementById("sb-aporte").value) || 1000;
+      const anos = parseInt(document.getElementById("sb-anos").value) || 20;
+      const dy = (parseFloat(document.getElementById("sb-yield").value) || 7.5) / 100;
+      const growth = (parseFloat(document.getElementById("sb-cresc").value) || 3.0) / 100;
+      const reinvest = document.getElementById("sb-reinvestir").checked;
+
+      // Extrai capital inicial atual se disponível
+      let capitalInicial = 0;
+      try {
+        const patText = document.getElementById("an-patrimonio").innerText;
+        const numClean = patText.replace(/[^0-9,-]+/g,"").replace(",",".");
+        const parsed = parseFloat(numClean);
+        if (!isNaN(parsed) && parsed > 0) capitalInicial = parsed;
+      } catch(e) {}
+
+      const payload = {
+        valor_inicial: capitalInicial,
+        aporte_mensal: aporte,
+        anos: anos,
+        dy_base: (parseFloat(document.getElementById("sb-yield").value) || 7.5),
+        crescimento_anual_proventos: (parseFloat(document.getElementById("sb-cresc").value) || 3.0),
+        taxa_reinvestimento: reinvest ? 1.0 : 0.0
+      };
+
+      const res = await fetch("/api/snowball/simulate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error("Falha ao simular bola de neve");
+      const data = await res.json();
+      const s = data.resumo || {};
+
+      // Atualiza métricas resumo
+      const crossingEl = document.getElementById("sb-crossing-val");
+      const crossingSub = document.getElementById("sb-crossing-sub");
+      if (s.ano_crossover) {
+        crossingEl.innerText = `Ano ${s.ano_crossover}`;
+        crossingSub.innerText = `Em ${s.ano_crossover} anos a renda passiva supera o aporte de ${formatBRL(aporte)}/mês!`;
+      } else {
+        crossingEl.innerText = `> ${anos} anos`;
+        crossingSub.innerText = `Proventos mensais ainda abaixo do aporte no período.`;
+      }
+
+      document.getElementById("sb-renda-val").innerText = formatBRL(s.renda_mensal_final || 0);
+      document.getElementById("sb-renda-sub").innerText = `Equivalente a ~ ${s.equivalente_salarios_minimos || 0} salários mínimos / mês`;
+
+      document.getElementById("sb-patrimonio-val").innerText = formatBRL(s.patrimonio_final || 0);
+      document.getElementById("sb-patrimonio-sub").innerText = `Sem reinvestir proventos: ${formatBRL(s.patrimonio_sem_reinvestimento || 0)}`;
+
+      const multPercent = s.multiplicador_patrimonial ? Math.round((s.multiplicador_patrimonial - 1) * 100) : 0;
+      document.getElementById("sb-mult-val").innerText = `+${multPercent}%`;
+      document.getElementById("sb-mult-sub").innerText = `Total aportado: ${formatBRL(s.total_aportado_bolso || 0)}`;
+
+      // Renderiza Gráfico Chart.js
+      renderSnowballChart(data.curva || []);
+    } catch (err) {
+      console.warn("Erro ao simular bola de neve:", err);
+    }
+  }
+
+  function renderSnowballChart(curva) {
+    const ctx = document.getElementById("chart-snowball");
+    if (!ctx) return;
+
+    const labels = curva.map(t => t.ano === 0 ? "Início" : `Ano ${t.ano}`);
+    const dataComDrip = curva.map(t => t.patrimonio);
+    const dataSemDrip = curva.map(t => t.sem_reinvestimento);
+    const dataProventos = curva.map(t => t.provento_anual);
+
+    if (chartSnowball) {
+      chartSnowball.destroy();
+    }
+
+    chartSnowball = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: "Patrimônio com DRIP (Barsi)",
+            data: dataComDrip,
+            borderColor: "#10b981",
+            backgroundColor: "rgba(16, 185, 129, 0.12)",
+            fill: true,
+            tension: 0.3,
+            borderWidth: 3,
+            yAxisID: "y"
+          },
+          {
+            label: "Patrimônio sem Reinvestimento",
+            data: dataSemDrip,
+            borderColor: "#94a3b8",
+            borderDash: [5, 5],
+            fill: false,
+            tension: 0.2,
+            borderWidth: 2,
+            yAxisID: "y"
+          },
+          {
+            label: "Proventos Anuais Gerados",
+            data: dataProventos,
+            type: "bar",
+            backgroundColor: "rgba(245, 158, 11, 0.45)",
+            borderColor: "#f59e0b",
+            borderWidth: 1,
+            yAxisID: "y1"
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        scales: {
+          x: { grid: { color: "rgba(255, 255, 255, 0.05)" } },
+          y: {
+            type: "linear",
+            display: true,
+            position: "left",
+            grid: { color: "rgba(255, 255, 255, 0.05)" },
+            ticks: {
+              callback: function(v) {
+                if (v >= 1000000) return "R$ " + (v / 1000000).toFixed(1) + "M";
+                if (v >= 1000) return "R$ " + (v / 1000).toFixed(0) + "k";
+                return "R$ " + v;
+              }
+            }
+          },
+          y1: {
+            type: "linear",
+            display: true,
+            position: "right",
+            grid: { drawOnChartArea: false },
+            ticks: {
+              callback: function(v) {
+                if (v >= 1000) return "R$ " + (v / 1000).toFixed(0) + "k/ano";
+                return "R$ " + v;
+              }
+            }
+          }
+        },
+        plugins: {
+          legend: { position: "top", labels: { boxWidth: 12, color: "#cbd5e1" } },
+          tooltip: {
+            callbacks: {
+              label: function(context) {
+                return `${context.dataset.label}: ${formatBRL(context.parsed.y)}`;
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     carregarAnalytics();
     carregarArtefatos();
+    setTimeout(executarSimulacaoBolaDeNeve, 600);
   });
 </script>

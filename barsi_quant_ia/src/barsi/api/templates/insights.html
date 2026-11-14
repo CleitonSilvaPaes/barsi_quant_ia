@@ -21,6 +21,27 @@
   </div>
 </div>
 
+<!-- Alertas de Mudança de Tese (Early Warning NLP) -->
+<div id="thesis-alerts-section" style="margin-bottom: 1.5rem; display: none;">
+  <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 8px; padding: 1.25rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
+      <div style="display: flex; align-items: center; gap: 0.6rem;">
+        <span style="font-size: 1.4rem;">🚨</span>
+        <div>
+          <h3 style="margin: 0; font-size: 1.05rem; color: #ef4444;">Alertas de Mudança de Tese (Early Warning)</h3>
+          <span style="font-size: 0.8rem; color: var(--text-muted);">Riscos de tese identificados via NLP em notícias dos ativos monitorados</span>
+        </div>
+      </div>
+      <button class="btn btn-outline" style="border-color: #ef4444; color: #ef4444; font-size: 0.8rem;" id="btn-scan-alerts" onclick="escanearAlertasTese()">
+        🔍 Escanear Notícias Agora
+      </button>
+    </div>
+    <div id="thesis-alerts-list" style="display: flex; flex-direction: column; gap: 0.75rem;">
+      <!-- Itens de alerta carregados via API -->
+    </div>
+  </div>
+</div>
+
 <div class="actions-bar">
   <div style="font-size: 0.9rem; color: var(--text-muted); display:flex; align-items:center; gap:0.5rem; flex-wrap: wrap;">
     <span>Filtrar por decisão:</span>

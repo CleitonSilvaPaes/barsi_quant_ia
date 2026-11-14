@@ -236,6 +236,21 @@ INIT_BUDGET_SCHEMA_SQL = """
         created_at    TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- 19. Alertas de Mudança de Tese Barsi (Early Warning NLP)
+    CREATE TABLE IF NOT EXISTS thesis_alerts (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticker       TEXT NOT NULL,
+        risk_type    TEXT NOT NULL,
+        severity     TEXT NOT NULL,
+        headline     TEXT NOT NULL,
+        snippet      TEXT NOT NULL,
+        source       TEXT DEFAULT 'google_rss',
+        active       INTEGER DEFAULT 1,
+        created_at   TEXT DEFAULT (datetime('now')),
+        dismissed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_thesis_alerts_ticker ON thesis_alerts(ticker, active);
 """
 
 DEFAULT_GOAL_SEEDS: List[Dict[str, Any]] = [

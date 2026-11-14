@@ -2094,3 +2094,56 @@ class BudgetRepository:
             })
 
         return results
+
+    # ---------------------------------------------------------
+    # ALERTAS DE MUDANÇA DE TESE (EARLY WARNING NLP ROADMAP V3.0)
+    # ---------------------------------------------------------
+    def record_thesis_alert(
+        self,
+        ticker: str,
+        risk_type: str,
+        severity: str,
+        headline: str,
+        snippet: str,
+        source: str = "google_rss"
+    ) -> int:
+        """Registra um alerta crítico de quebra ou mudança de tese Barsi."""
+        ticker = ticker.strip().upper()
+        with self._conn() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO thesis_alerts (ticker, risk_type, severity, headline, snippet, source, active, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, 1, datetime('now'))
+                """,
+                (ticker, risk_type, severity, headline.strip(), snippet.strip(), source)
+            )
+            return cur.lastrowid
+
+    def list_thesis_alerts(self, ticker: Optional[str] = None, active_only: bool = True) -> List[Dict[str, Any]]:
+        """Lista alertas de mudança de tese com filtros opcionais."""
+        query = "SELECT * FROM thesis_alerts WHERE 1=1"
+        params: List[Any] = []
+        if ticker:
+            query += " AND ticker = ?"
+            params.append(ticker.strip().upper())
+        if active_only:
+            query += " AND active = 1"
+        query += " ORDER BY id DESC"
+
+        with self._conn() as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [dict(r) for r in rows]
+
+    def dismiss_thesis_alert(self, alert_id: int) -> bool:
+        """Marca um alerta como reconhecido/arquivado pelo investidor."""
+        with self._conn() as conn:
+            cur = conn.execute(
+                """
+                UPDATE thesis_alerts
+                SET active = 0, dismissed_at = datetime('now')
+                WHERE id = ?
+                """,
+                (alert_id,)
+            )
+            return cur.rowcount > 0
+
