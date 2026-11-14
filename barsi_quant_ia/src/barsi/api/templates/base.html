@@ -6,6 +6,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="csrf-token" content="{{CSRF_TOKEN}}">
   <title>{{TITLE}} — Barsi Quant IA</title>
+
+  <!-- Metadados PWA (Progressive Web App) -->
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#0b0f19">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Barsi Quant">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+  <link rel="icon" type="image/svg+xml" href="/static/icons/icon-192.svg">
+
   <script>
     (function() {
       try {
@@ -681,6 +691,9 @@
         <h1 class="page-title">{{PAGE_HEADING}}</h1>
       </div>
       <div class="topbar-right">
+        <button id="pwa-install-btn" class="btn-theme-toggle" style="display: none; width: auto; padding: 0 0.65rem; font-size: 0.82rem; gap: 0.35rem; font-weight: 500;" onclick="instalarPWA()" title="Instalar aplicativo no dispositivo">
+          <span>📱</span> <span>Instalar App</span>
+        </button>
         <button id="theme-toggle-btn" class="btn-theme-toggle" onclick="toggleTheme()" title="Alternar Modo Claro / Escuro" aria-label="Alternar Tema">
           <span id="theme-icon">🌙</span>
         </button>

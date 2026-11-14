@@ -93,8 +93,9 @@ def validate_target_month(target_month: Optional[str]) -> Optional[str]:
 class BudgetRepository:
     """Leitura e escrita de orçamento no SQLite. Sem I/O de rede, sem dependência do Google Sheets."""
 
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: Optional[str] = None, user_id: int = 1):
         self.db_path = resolve_db_path(db_path)
+        self.user_id = int(user_id or 1)
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._init_tables()
 
@@ -113,14 +114,37 @@ class BudgetRepository:
         with self._conn() as conn:
             conn.executescript(INIT_BUDGET_SCHEMA_SQL)
             try:
-                cols = [r["name"] for r in conn.execute("PRAGMA table_info(portfolio_snapshots)").fetchall()]
-                if "setores_json" not in cols:
+                # Migrações incrementais seguras e multi-tenancy
+                cols_snap = [r["name"] for r in conn.execute("PRAGMA table_info(portfolio_snapshots)").fetchall()]
+                if "setores_json" not in cols_snap:
                     conn.execute("ALTER TABLE portfolio_snapshots ADD COLUMN setores_json TEXT DEFAULT '{}'")
+                if "user_id" not in cols_snap:
+                    conn.execute("ALTER TABLE portfolio_snapshots ADD COLUMN user_id INTEGER DEFAULT 1")
+
                 cols_pos = [r["name"] for r in conn.execute("PRAGMA table_info(positions)").fetchall()]
                 if "teto_manual" not in cols_pos:
                     conn.execute("ALTER TABLE positions ADD COLUMN teto_manual INTEGER DEFAULT 0")
                 if "custo_medio" not in cols_pos:
                     conn.execute("ALTER TABLE positions ADD COLUMN custo_medio REAL DEFAULT 0.0")
+                if "user_id" not in cols_pos:
+                    conn.execute("ALTER TABLE positions ADD COLUMN user_id INTEGER DEFAULT 1")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_positions_user_id ON positions(user_id)")
+
+                cols_goals = [r["name"] for r in conn.execute("PRAGMA table_info(financial_goals)").fetchall()]
+                if "user_id" not in cols_goals:
+                    conn.execute("ALTER TABLE financial_goals ADD COLUMN user_id INTEGER DEFAULT 1")
+
+                cols_tx = [r["name"] for r in conn.execute("PRAGMA table_info(transacoes)").fetchall()]
+                if "user_id" not in cols_tx:
+                    conn.execute("ALTER TABLE transacoes ADD COLUMN user_id INTEGER DEFAULT 1")
+
+                cols_rec = [r["name"] for r in conn.execute("PRAGMA table_info(recurring_expenses)").fetchall()]
+                if "user_id" not in cols_rec:
+                    conn.execute("ALTER TABLE recurring_expenses ADD COLUMN user_id INTEGER DEFAULT 1")
+
+                cols_divs = [r["name"] for r in conn.execute("PRAGMA table_info(dividends_received)").fetchall()]
+                if "user_id" not in cols_divs:
+                    conn.execute("ALTER TABLE dividends_received ADD COLUMN user_id INTEGER DEFAULT 1")
             except Exception:
                 pass
         self.seed_default_categories()
@@ -510,37 +534,27 @@ class BudgetRepository:
             )
 
     # ------------------------------------------------------------------ #
-    # Posições da Carteira (desacoplamento total do Google Sheets)
+    # Posições da Carteira (desacoplamento total do Google Sheets & Multi-tenancy)
     # ------------------------------------------------------------------ #
     def persist_positions(self, positions: List[Position]) -> int:
-        """Persiste ou atualiza posições da carteira no SQLite."""
+        """Persiste ou atualiza posições da carteira no SQLite com isolamento multi-tenancy."""
         count = 0
         with self._conn() as c:
             for p in positions:
+                c.execute(
+                    "DELETE FROM positions WHERE UPPER(ticker) = UPPER(?) AND (user_id = ? OR (user_id IS NULL AND ? = 1))",
+                    (p.ticker.strip(), self.user_id, self.user_id)
+                )
                 cur = c.execute(
                     """
                     INSERT INTO positions (
                         ticker, empresa, setor, qtd_antes, qtd_aporte,
                         preco_atual, div_proj, preco_teto, margem_seguranca,
-                        feedback_usuario, insight_atual, teto_manual, custo_medio, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-                    ON CONFLICT(ticker) DO UPDATE SET
-                        empresa = excluded.empresa,
-                        setor = excluded.setor,
-                        qtd_antes = excluded.qtd_antes,
-                        qtd_aporte = excluded.qtd_aporte,
-                        preco_atual = excluded.preco_atual,
-                        div_proj = excluded.div_proj,
-                        preco_teto = excluded.preco_teto,
-                        margem_seguranca = excluded.margem_seguranca,
-                        feedback_usuario = excluded.feedback_usuario,
-                        insight_atual = excluded.insight_atual,
-                        teto_manual = excluded.teto_manual,
-                        custo_medio = excluded.custo_medio,
-                        updated_at = datetime('now')
+                        feedback_usuario, insight_atual, teto_manual, custo_medio, user_id, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                 """,
                     (
-                        p.ticker,
+                        p.ticker.strip().upper(),
                         p.empresa,
                         p.setor,
                         p.qtd_antes,
@@ -553,6 +567,7 @@ class BudgetRepository:
                         p.insight_atual,
                         1 if getattr(p, "teto_manual", False) else 0,
                         float(getattr(p, "custo_medio", 0.0) or 0.0),
+                        self.user_id,
                     ),
                 )
                 count += cur.rowcount
@@ -563,16 +578,22 @@ class BudgetRepository:
         return self.persist_positions(positions)
 
     def delete_position(self, ticker: str) -> bool:
-        """Exclui uma posição da carteira de forma definitiva no SQLite."""
+        """Exclui uma posição da carteira de forma definitiva no SQLite para o usuário atual."""
         with self._conn() as c:
-            cur = c.execute("DELETE FROM positions WHERE UPPER(ticker) = UPPER(?)", (ticker.strip(),))
+            cur = c.execute(
+                "DELETE FROM positions WHERE UPPER(ticker) = UPPER(?) AND (user_id = ? OR (user_id IS NULL AND ? = 1))",
+                (ticker.strip(), self.user_id, self.user_id)
+            )
             c.execute("DELETE FROM sheets_positions_cache WHERE UPPER(ticker) = UPPER(?)", (ticker.strip(),))
             return cur.rowcount > 0
 
     def load_positions(self) -> List[Position]:
-        """Carrega posições salvas no SQLite para restauração sem Google Sheets."""
+        """Carrega posições salvas no SQLite para restauração sem Google Sheets do usuário atual."""
         with self._conn() as c:
-            rows = c.execute("SELECT * FROM positions ORDER BY margem_seguranca DESC").fetchall()
+            rows = c.execute(
+                "SELECT * FROM positions WHERE (user_id = ? OR (user_id IS NULL AND ? = 1)) ORDER BY margem_seguranca DESC",
+                (self.user_id, self.user_id)
+            ).fetchall()
             positions = []
             for idx, r in enumerate(rows, start=10):
                 teto_man = bool(r["teto_manual"]) if "teto_manual" in r.keys() else False
@@ -1933,9 +1954,12 @@ class BudgetRepository:
                     )
 
     def list_goals(self) -> List[Dict[str, Any]]:
-        """Lista todas as metas financeiras cadastradas."""
+        """Lista todas as metas financeiras cadastradas para o usuário atual."""
         with self._conn() as conn:
-            rows = conn.execute("SELECT * FROM financial_goals ORDER BY id ASC").fetchall()
+            rows = conn.execute(
+                "SELECT * FROM financial_goals WHERE (user_id = ? OR (user_id IS NULL AND ? = 1)) ORDER BY id ASC",
+                (self.user_id, self.user_id)
+            ).fetchall()
             return [dict(r) for r in rows]
 
     def create_goal(
@@ -1947,7 +1971,7 @@ class BudgetRepository:
         prazo_meses: Optional[int] = None,
         notas: Optional[str] = None
     ) -> int:
-        """Cria uma nova meta financeira."""
+        """Cria uma nova meta financeira vinculada ao usuário atual."""
         if tipo not in ("renda_passiva", "patrimonio", "acoes_ticker", "aporte_mensal", "custom"):
             raise ValueError(f"Tipo de meta inválido: {tipo}")
         if valor_alvo <= 0:
@@ -1958,10 +1982,10 @@ class BudgetRepository:
         with self._conn() as conn:
             cur = conn.execute(
                 """
-                INSERT INTO financial_goals (tipo, titulo, ticker, valor_alvo, prazo_meses, notas)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO financial_goals (tipo, titulo, ticker, valor_alvo, prazo_meses, notas, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (tipo, titulo.strip(), ticker_clean, float(valor_alvo), prazo_meses, notas)
+                (tipo, titulo.strip(), ticker_clean, float(valor_alvo), prazo_meses, notas, self.user_id)
             )
             return cur.lastrowid
 
@@ -1975,7 +1999,7 @@ class BudgetRepository:
         prazo_meses: Optional[int] = None,
         notas: Optional[str] = None
     ) -> bool:
-        """Atualiza uma meta existente."""
+        """Atualiza uma meta existente do usuário atual."""
         if tipo not in ("renda_passiva", "patrimonio", "acoes_ticker", "aporte_mensal", "custom"):
             raise ValueError(f"Tipo de meta inválido: {tipo}")
         if valor_alvo <= 0:
@@ -1988,16 +2012,19 @@ class BudgetRepository:
                 """
                 UPDATE financial_goals
                 SET tipo = ?, titulo = ?, ticker = ?, valor_alvo = ?, prazo_meses = ?, notas = ?, updated_at = datetime('now')
-                WHERE id = ?
+                WHERE id = ? AND (user_id = ? OR (user_id IS NULL AND ? = 1))
                 """,
-                (tipo, titulo.strip(), ticker_clean, float(valor_alvo), prazo_meses, notas, goal_id)
+                (tipo, titulo.strip(), ticker_clean, float(valor_alvo), prazo_meses, notas, goal_id, self.user_id, self.user_id)
             )
             return cur.rowcount > 0
 
     def delete_goal(self, goal_id: int) -> bool:
-        """Exclui uma meta existente."""
+        """Exclui uma meta existente do usuário atual."""
         with self._conn() as conn:
-            cur = conn.execute("DELETE FROM financial_goals WHERE id = ?", (goal_id,))
+            cur = conn.execute(
+                "DELETE FROM financial_goals WHERE id = ? AND (user_id = ? OR (user_id IS NULL AND ? = 1))",
+                (goal_id, self.user_id, self.user_id)
+            )
             return cur.rowcount > 0
 
     def get_goals_with_progress(self) -> List[Dict[str, Any]]:

@@ -3,6 +3,7 @@
 *.env
 *.json
 !repomix.config.json
+!barsi_quant_ia/src/barsi/api/static/manifest.json
 credentials.json
 barsi-quant-ia-*.json
 

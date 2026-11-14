@@ -64,10 +64,33 @@ CSRF_EXEMPT_PATHS = {
     "/auth/google/login",
     "/auth/google/callback",
     "/api/telegram/webhook",
+    "/manifest.json",
+    "/service-worker.js",
     "/docs",
     "/openapi.json",
     "/redoc",
 }
+
+# ----------------- ROTAS PWA (PROGRESSIVE WEB APP) -----------------
+@app.get("/manifest.json")
+async def get_manifest():
+    """Entrega o manifesto do Progressive Web App (PWA)."""
+    manifest_path = os.path.join(STATIC_DIR, "manifest.json")
+    if not os.path.exists(manifest_path):
+        raise HTTPException(status_code=404, detail="Manifest não encontrado")
+    return FileResponse(manifest_path, media_type="application/manifest+json")
+
+@app.get("/service-worker.js")
+async def get_service_worker():
+    """Entrega o Service Worker do PWA com escopo raiz."""
+    sw_path = os.path.join(STATIC_DIR, "service-worker.js")
+    if not os.path.exists(sw_path):
+        raise HTTPException(status_code=404, detail="Service worker não encontrado")
+    return FileResponse(
+        sw_path,
+        media_type="application/javascript",
+        headers={"Service-Worker-Allowed": "/"}
+    )
 
 @app.middleware("http")
 async def csrf_protection_middleware(request: Request, call_next):
@@ -284,10 +307,21 @@ def get_sync_service() -> SyncService:
         max_concurrency=settings.max_concurrency
     )
 
-async def get_canonical_positions() -> List[Position]:
-    """Obtém as posições canônicas do SQLite (fonte da verdade).
+def get_user_budget_repo(request: Optional[Request] = None, user_id: Optional[int] = None) -> BudgetRepository:
+    """Instancia o BudgetRepository isolado para o usuário da requisição atual (Multi-tenancy)."""
+    if user_id is not None:
+        uid = int(user_id)
+    elif request is not None:
+        user = get_current_user(request)
+        uid = int(user.get("uid", 1)) if user else 1
+    else:
+        uid = 1
+    return BudgetRepository(settings.sqlite_db_path, user_id=uid)
+
+async def get_canonical_positions(user_id: int = 1) -> List[Position]:
+    """Obtém as posições canônicas do SQLite (fonte da verdade) para o usuário especificado.
     Em ambiente de teste automatizado (pytest), caso o SQLite esteja vazio, permite mock seed."""
-    budget_repo = BudgetRepository(settings.sqlite_db_path)
+    budget_repo = BudgetRepository(settings.sqlite_db_path, user_id=user_id)
     positions = budget_repo.load_positions()
     if not positions and (os.getenv("PYTEST_CURRENT_TEST") or settings.env in ("test", "testing")):
         try:
@@ -1284,19 +1318,32 @@ async def export_artifact_excel(request: Request, artifact_id: int):
         headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
 
+# ----------------- ROTAS DE PERFIL E MULTI-TENANCY (ROADMAP V3.0) -----------------
+@app.get("/api/user/profile")
+async def get_user_profile_api(request: Request):
+    """Retorna dados do perfil do usuário autenticado para multi-tenancy."""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Não autenticado")
+    return {
+        "user_id": user.get("uid", 1),
+        "username": user.get("user", "admin"),
+        "role": user.get("role", "leitor")
+    }
+
 # ----------------- ROTAS DE METAS FINANCEIRAS (ROADMAP V3.0) -----------------
 @app.get("/api/metas")
 async def get_goals_api(request: Request):
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Não autorizado")
-    repo = BudgetRepository(settings.sqlite_db_path)
+    repo = get_user_budget_repo(request)
     return repo.get_goals_with_progress()
 
 @app.post("/api/metas")
 async def create_goal_api(req: GoalCreateRequest, request: Request):
     require_role_action(request, action_type="edit")
-    repo = BudgetRepository(settings.sqlite_db_path)
+    repo = get_user_budget_repo(request)
     try:
         new_id = repo.create_goal(
             tipo=req.tipo,
@@ -1313,7 +1360,7 @@ async def create_goal_api(req: GoalCreateRequest, request: Request):
 @app.put("/api/metas/{goal_id}")
 async def update_goal_api(goal_id: int, req: GoalUpdateRequest, request: Request):
     require_role_action(request, action_type="edit")
-    repo = BudgetRepository(settings.sqlite_db_path)
+    repo = get_user_budget_repo(request)
     try:
         ok = repo.update_goal(
             goal_id=goal_id,
@@ -1333,7 +1380,7 @@ async def update_goal_api(goal_id: int, req: GoalUpdateRequest, request: Request
 @app.delete("/api/metas/{goal_id}")
 async def delete_goal_api(goal_id: int, request: Request):
     require_role_action(request, action_type="edit")
-    repo = BudgetRepository(settings.sqlite_db_path)
+    repo = get_user_budget_repo(request)
     ok = repo.delete_goal(goal_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Meta não encontrada")

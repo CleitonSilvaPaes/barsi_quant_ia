@@ -202,9 +202,60 @@ function updateThemeIcon(theme) {
   }
 }
 
+/**
+ * Suporte a Progressive Web App (PWA) e Registro do Service Worker (Sprint 4)
+ */
+let deferredPwaPrompt = null;
+
+function registrarServiceWorker() {
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/service-worker.js', { scope: '/' })
+        .then(reg => {
+          console.log('✓ Barsi PWA Service Worker registrado com sucesso no escopo:', reg.scope);
+        })
+        .catch(err => {
+          console.warn('Falha ao registrar Service Worker:', err);
+        });
+    });
+  }
+}
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPwaPrompt = e;
+  const btn = document.getElementById('pwa-install-btn');
+  if (btn) {
+    btn.style.display = 'inline-flex';
+  }
+});
+
+async function instalarPWA() {
+  if (!deferredPwaPrompt) {
+    showToast("Para instalar o app, utilize a opção 'Adicionar à tela inicial' no menu do seu navegador.");
+    return;
+  }
+  deferredPwaPrompt.prompt();
+  const choice = await deferredPwaPrompt.userChoice;
+  if (choice.outcome === 'accepted') {
+    showToast("✓ Aplicativo Barsi Quant IA instalado com sucesso!", "success");
+    const btn = document.getElementById('pwa-install-btn');
+    if (btn) btn.style.display = 'none';
+  }
+  deferredPwaPrompt = null;
+}
+
+window.addEventListener('appinstalled', () => {
+  console.log('Barsi Quant IA instalado como PWA.');
+  const btn = document.getElementById('pwa-install-btn');
+  if (btn) btn.style.display = 'none';
+  deferredPwaPrompt = null;
+});
+
 document.addEventListener('DOMContentLoaded', () => {
   const current = document.documentElement.getAttribute('data-theme') || 'dark';
   updateThemeIcon(current);
+  registrarServiceWorker();
 });
 
 
