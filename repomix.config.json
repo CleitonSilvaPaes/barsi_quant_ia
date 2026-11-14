@@ -4,9 +4,10 @@
     "style": "xml",
     "parsableStyle": true,
     "headerText": "Barsi Quant IA - Contexto Compactado para Economia de Tokens",
-    "removeComments": false,
+    "removeComments": true,
     "removeEmptyLines": true,
-    "showLineNumbers": true
+    "showLineNumbers": false,
+    "compress": true
   },
   "ignore": {
     "useGitignore": true,
@@ -30,7 +31,14 @@
       "*.jpeg",
       "*.zip",
       "*.ofx",
-      "*.db"
+      "*.db",
+      "*.db-journal",
+      "*.db-wal",
+      "*.db-shm",
+      "*.xlsx",
+      "repomix-output.xml",
+      "**/tests/**",
+      "**/api/static/js/chart.umd.min.js"
     ]
   }
 }

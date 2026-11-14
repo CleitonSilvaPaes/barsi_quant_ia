@@ -8,7 +8,7 @@ import time
 import struct
 import secrets
 import urllib.parse
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple, List
 
 def generate_totp_secret() -> str:
     """Gera um segredo Base32 criptograficamente seguro de 160 bits (20 bytes) para 2FA TOTP."""
@@ -79,12 +79,46 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     except Exception:
         return False
 
-def create_session_token(user_id: int, username: str, role: str, secret_key: str, expires_in_sec: int = 86400 * 7) -> str:
-    """Cria um token assinado criptograficamente com HMAC-SHA256 contendo ID, usuário, perfil e expiração."""
+def generate_backup_codes(count: int = 8) -> Tuple[List[str], List[str]]:
+    """Gera códigos de recuperação únicos no formato xxxx-xxxx-xxxx e seus respectivos hashes seguros."""
+    plain_codes: List[str] = []
+    hashed_codes: List[str] = []
+    for _ in range(count):
+        raw = secrets.token_hex(6)
+        code = f"{raw[0:4]}-{raw[4:8]}-{raw[8:12]}".lower()
+        plain_codes.append(code)
+        hashed_codes.append(hash_password(code))
+    return plain_codes, hashed_codes
+
+
+def verify_backup_code(plain_code: str, hashed_codes: List[str]) -> Tuple[bool, List[str]]:
+    """Valida se um código de backup corresponde a algum dos hashes salvos e o consome."""
+    if not plain_code or not hashed_codes:
+        return False, hashed_codes
+    clean = plain_code.strip().lower()
+    for h in hashed_codes:
+        if verify_password(clean, h):
+            remaining = [x for x in hashed_codes if x != h]
+            return True, remaining
+    return False, hashed_codes
+
+
+def create_session_token(
+    user_id: int,
+    username: str,
+    role: str,
+    secret_key: str,
+    expires_in_sec: int = 86400 * 7,
+    jti: Optional[str] = None
+) -> str:
+    """Cria um token assinado criptograficamente com HMAC-SHA256 contendo ID, usuário, perfil, jti e expiração."""
+    if not jti:
+        jti = secrets.token_hex(16)
     payload = {
         "uid": user_id,
         "user": username,
         "role": role,
+        "jti": jti,
         "exp": int(time.time() + expires_in_sec)
     }
     payload_json = json.dumps(payload, separators=(',', ':')).encode("utf-8")

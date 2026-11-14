@@ -251,6 +251,37 @@ INIT_BUDGET_SCHEMA_SQL = """
         dismissed_at TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_thesis_alerts_ticker ON thesis_alerts(ticker, active);
+
+    -- 20. Auditoria de Ações Administrativas e de Segurança (Audit Log)
+    CREATE TABLE IF NOT EXISTS audit_log (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        actor_id       INTEGER,
+        actor_username TEXT,
+        action         TEXT NOT NULL,
+        target         TEXT,
+        reason         TEXT,
+        ip             TEXT,
+        hostname       TEXT,
+        created_at     TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action, created_at);
+
+    -- 21. Tabela de Revogação de Sessões (Logout e Invalidação de JTI)
+    CREATE TABLE IF NOT EXISTS session_revocation (
+        jti         TEXT PRIMARY KEY,
+        user_id     INTEGER,
+        revoked_at  REAL NOT NULL,
+        expires_at  REAL NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_session_revocation_exp ON session_revocation(expires_at);
+
+    -- 22. Rate Limiting Persistido de Tentativas de Login
+    CREATE TABLE IF NOT EXISTS login_attempts (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        ip            TEXT NOT NULL,
+        attempted_at  REAL NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_login_attempts_ip ON login_attempts(ip, attempted_at);
 """
 
 DEFAULT_GOAL_SEEDS: List[Dict[str, Any]] = [

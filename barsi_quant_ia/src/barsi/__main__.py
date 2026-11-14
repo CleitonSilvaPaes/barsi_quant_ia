@@ -517,7 +517,8 @@ def tvbox(
             typer.echo(f"   • {line}")
     typer.echo("="*55 + "\n")
 
-@app.command()
+@app.command("user-add")
+@app.command("user_add")
 def user_add(
     username: str = typer.Argument(..., help="Nome de usuário"),
     password: str = typer.Argument(..., help="Senha de acesso"),
@@ -531,11 +532,18 @@ def user_add(
         return
     ok = repo.create_user(username, password, role=role)
     if ok:
+        repo.log_audit(
+            action="cli_user_add",
+            target=username,
+            reason=f"role={role}",
+            actor_username="cli"
+        )
         typer.echo(f"[✔] Usuário '{username}' criado com sucesso no banco SQLite! Perfil: {role.upper()}")
     else:
         typer.echo(f"[!] Erro: Usuário '{username}' já existe no banco.")
 
-@app.command()
+@app.command("user-list")
+@app.command("user_list")
 def user_list():
     """Lista todos os usuários e perfis cadastrados no banco de dados SQLite."""
     from barsi.adapters.history.user_repository import UserRepository
@@ -548,7 +556,109 @@ def user_list():
     if not rows:
         typer.echo("Nenhum usuário cadastrado.")
     for r in rows:
-        typer.echo(f" • ID: {r['id']} | Usuário: {r['username']:<12} | Perfil: {r['role'].upper():<10} | Permissões: {r['permissoes']}")
+        totp_status = "2FA: ON" if r.get("totp_enabled") else "2FA: off"
+        typer.echo(f" • ID: {r['id']} | Usuário: {r['username']:<12} | Perfil: {r['role'].upper():<10} | {totp_status:<9} | Permissões: {r['permissoes']}")
+    typer.echo("=======================================================\n")
+
+@app.command("user-pass-reset")
+def user_pass_reset(
+    username: str = typer.Argument(..., help="Nome de usuário alvo"),
+    password: Optional[str] = typer.Option(None, "--password", help="Nova senha (se omitida, solicita via prompt seguro)"),
+    force: bool = typer.Option(False, "--force", help="Pula confirmação interativa")
+):
+    """Reseta a senha de um usuário via terminal (Emergency Recovery). Preserva 2FA se ativo."""
+    import getpass
+    from barsi.adapters.history.user_repository import UserRepository
+    repo = UserRepository(settings.sqlite_db_path)
+    user = repo.get_by_username(username)
+    if not user:
+        typer.echo(f"[!] Usuário '{username}' não encontrado no banco SQLite.")
+        raise typer.Exit(code=1)
+
+    new_pass = password
+    if not new_pass:
+        new_pass = getpass.getpass(f"Digite a nova senha para '{username}': ")
+        confirm_pass = getpass.getpass("Confirme a nova senha: ")
+        if new_pass != confirm_pass:
+            typer.echo("[!] Erro: As senhas não conferem.")
+            raise typer.Exit(code=1)
+
+    if len(new_pass) < 6:
+        typer.echo("[!] Erro: A senha deve ter no mínimo 6 caracteres.")
+        raise typer.Exit(code=1)
+
+    if not force:
+        typer.confirm(f"Confirma a redefinição da senha para o usuário '{username}'?", abort=True)
+
+    ok = repo.update_password(user["id"], new_pass)
+    if ok:
+        repo.log_audit(
+            action="cli_pass_reset",
+            target=username,
+            reason="recuperacao_emergencial_senha",
+            actor_username="cli"
+        )
+        typer.echo(f"[✔] Senha de '{username}' atualizada com sucesso no banco SQLite! (2FA mantido)")
+    else:
+        typer.echo(f"[!] Falha ao atualizar a senha de '{username}'.")
+        raise typer.Exit(code=1)
+
+@app.command("user-disable-2fa")
+def user_disable_2fa(
+    username: str = typer.Argument(..., help="Nome de usuário alvo"),
+    reason: str = typer.Option("recuperacao_emergencial_2fa", "--reason", help="Motivo da desativação para o audit log"),
+    force: bool = typer.Option(False, "--force", help="Pula confirmação interativa")
+):
+    """Desativa 2FA de emergência para um usuário (requer acesso SSH/root)."""
+    from barsi.adapters.history.user_repository import UserRepository
+    repo = UserRepository(settings.sqlite_db_path)
+    user = repo.get_by_username(username)
+    if not user:
+        typer.echo(f"[!] Usuário '{username}' não encontrado no banco SQLite.")
+        raise typer.Exit(code=1)
+
+    if not user.get("totp_enabled"):
+        typer.echo(f"[i] Usuário '{username}' já não possui 2FA ativo.")
+        return
+
+    if not force:
+        typer.echo(f"[!] ATENÇÃO: Você está desativando o 2FA do usuário '{username}' ({user['role'].upper()}).")
+        typer.echo(f"    Motivo registrado: {reason}")
+        typer.confirm("Deseja prosseguir?", abort=True)
+
+    ok = repo.disable_totp(user["id"])
+    if ok:
+        repo.log_audit(
+            action="cli_disable_2fa",
+            target=username,
+            reason=reason,
+            actor_username="cli"
+        )
+        typer.echo(f"[✔] 2FA e códigos de backup desativados para '{username}'. O usuário poderá reconfigurar no próximo acesso.")
+    else:
+        typer.echo(f"[!] Falha ao desativar 2FA de '{username}'.")
+        raise typer.Exit(code=1)
+
+@app.command("user-audit-logs")
+def user_audit_logs(
+    limit: int = typer.Option(20, "--limit", help="Quantidade de registros a exibir")
+):
+    """Exibe o histórico recente de ações administrativas e auditoria de segurança (audit_log)."""
+    from barsi.adapters.history.user_repository import UserRepository
+    repo = UserRepository(settings.sqlite_db_path)
+    logs = repo.list_audit_logs(limit=limit)
+
+    typer.echo("\n=======================================================")
+    typer.echo("          HISTÓRICO DE AUDITORIA (AUDIT LOG)          ")
+    typer.echo("=======================================================")
+    if not logs:
+        typer.echo("Nenhum registro de auditoria encontrado.")
+    for l in logs:
+        typer.echo(
+            f" • [{l['created_at']}] {l['action']:<18} | Alvo: {str(l.get('target')):<12} "
+            f"| Ator: {str(l.get('actor_username')):<8} | Host: {str(l.get('hostname') or '')} "
+            f"| Motivo: {str(l.get('reason') or '-')}"
+        )
     typer.echo("=======================================================\n")
 
 budget_app = typer.Typer(name="budget", help="Gestão e reconciliação de orçamento e despesas recorrentes (Zero Magic Numbers)")

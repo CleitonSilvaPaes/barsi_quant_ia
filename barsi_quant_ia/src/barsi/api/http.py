@@ -11,7 +11,7 @@ import sqlite3
 import secrets
 import httpx
 import pandas as pd
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from contextlib import asynccontextmanager
 import psutil
 from pydantic import BaseModel, Field
@@ -19,6 +19,7 @@ from fastapi import FastAPI, Depends, HTTPException, Security, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, FileResponse, StreamingResponse
 from fastapi.security import HTTPBearer
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 
 from barsi.config import settings
 from barsi.adapters.factory import AdapterFactory
@@ -52,6 +53,7 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title="Barsi Quant IA - Web Suite", version="2.0.0", lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 security = HTTPBearer(auto_error=False)
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
@@ -165,6 +167,8 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=(), payment=()"
+    response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
@@ -178,6 +182,8 @@ async def add_security_headers(request: Request, call_next):
     )
     if is_request_secure(request):
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    if request.url.path.startswith("/static"):
+        response.headers["Cache-Control"] = "public, max-age=86400, stale-while-revalidate=604800"
     return response
 
 START_TIME = time.time()
@@ -354,9 +360,24 @@ def get_user_budget_repo(request: Optional[Request] = None, user_id: Optional[in
         uid = 1
     return BudgetRepository(settings.sqlite_db_path, user_id=uid)
 
-async def get_canonical_positions(user_id: int = 1) -> List[Position]:
-    """Obtém as posições canônicas do SQLite (fonte da verdade) para o usuário especificado.
-    Em ambiente de teste automatizado (pytest), caso o SQLite esteja vazio, permite mock seed."""
+_canonical_positions_cache: Dict[int, Tuple[List[Position], float]] = {}
+
+def invalidate_canonical_positions_cache(user_id: Optional[int] = None):
+    """Invalida o cache de posições canônicas após alterações no banco."""
+    global _canonical_positions_cache
+    if user_id is not None:
+        _canonical_positions_cache.pop(user_id, None)
+    else:
+        _canonical_positions_cache.clear()
+
+async def get_canonical_positions(user_id: int = 1, use_cache: bool = True) -> List[Position]:
+    """Obtém as posições canônicas do SQLite (fonte da verdade) para o usuário especificado com cache LRU curto."""
+    now = time.time()
+    if use_cache and not os.getenv("PYTEST_CURRENT_TEST") and user_id in _canonical_positions_cache:
+        cached, ts = _canonical_positions_cache[user_id]
+        if now - ts < 5.0:
+            return [Position(**p.model_dump()) for p in cached]
+
     budget_repo = BudgetRepository(settings.sqlite_db_path, user_id=user_id)
     positions = budget_repo.load_positions()
     if not positions and (os.getenv("PYTEST_CURRENT_TEST") or settings.env in ("test", "testing")):
@@ -368,14 +389,25 @@ async def get_canonical_positions(user_id: int = 1) -> List[Position]:
                 logger.info("sqlite_test_seeded_from_sheets", count=len(positions))
         except Exception as e:
             logger.warning("sheets_test_seed_failed", error=str(e))
+
+    if positions:
+        _canonical_positions_cache[user_id] = (positions, now)
     return positions
 
 def get_current_user(request: Request) -> Optional[Dict[str, Any]]:
-    """Extrai e valida o token de sessão criptografado via HMAC-SHA256."""
+    """Extrai e valida o token de sessão criptografado via HMAC-SHA256, verificando revogação de JTI."""
     token = request.cookies.get("barsi_session")
     if not token:
         return None
-    return decode_session_token(token, settings.secret_key)
+    data = decode_session_token(token, settings.secret_key)
+    if not data:
+        return None
+    jti = data.get("jti")
+    if jti:
+        repo = get_user_repo()
+        if repo.is_session_revoked(jti):
+            return None
+    return data
 
 def require_role_action(request: Request, action_type: str = "edit") -> Dict[str, Any]:
     """RBAC centralizado. Valida permissões pelo papel do usuário sem regras dispersas."""
@@ -399,19 +431,42 @@ def require_role_action(request: Request, action_type: str = "edit") -> Dict[str
         )
     return user
 
+_last_telemetry_cache: Dict[str, Any] = {}
+_last_telemetry_time: float = 0.0
+
+def get_cached_system_telemetry(ttl: float = 10.0) -> Dict[str, Any]:
+    """Retorna métricas do sistema com cache TTL para evitar syscalls de psutil a cada renderização."""
+    global _last_telemetry_cache, _last_telemetry_time
+    now = time.time()
+    if _last_telemetry_cache and (now - _last_telemetry_time < ttl):
+        return _last_telemetry_cache
+    mem = psutil.virtual_memory()
+    proc = psutil.Process()
+    uptime_sec = int(now - START_TIME)
+    uptime_str = f"{uptime_sec // 3600}h {(uptime_sec % 3600) // 60}m"
+    free_mb = round(mem.available / (1024 * 1024), 1)
+    total_mb = round(mem.total / (1024 * 1024), 1)
+    rss_mb = round(proc.memory_info().rss / (1024 * 1024), 1)
+    _last_telemetry_cache = {
+        "uptime_str": uptime_str,
+        "free_mb": free_mb,
+        "total_mb": total_mb,
+        "rss_mb": rss_mb
+    }
+    _last_telemetry_time = now
+    return _last_telemetry_cache
+
 def render_page(template_name: str, request: Request, page_title: str, active_nav: str) -> Response:
     """Renderiza páginas compartilhando o layout mestre base.html com sidebar e telemetria."""
     user = get_current_user(request)
     if not user:
         return RedirectResponse(url="/login")
 
-    mem = psutil.virtual_memory()
-    proc = psutil.Process()
-    uptime_sec = int(time.time() - START_TIME)
-    uptime_str = f"{uptime_sec // 3600}h {(uptime_sec % 3600) // 60}m"
-    free_mb = round(mem.available / (1024 * 1024), 1)
-    total_mb = round(mem.total / (1024 * 1024), 1)
-    rss_mb = round(proc.memory_info().rss / (1024 * 1024), 1)
+    telem = get_cached_system_telemetry(ttl=10.0)
+    uptime_str = telem["uptime_str"]
+    free_mb = telem["free_mb"]
+    total_mb = telem["total_mb"]
+    rss_mb = telem["rss_mb"]
 
     base_path = os.path.join(TEMPLATES_DIR, "base.html")
     with open(base_path, "r", encoding="utf-8") as f:
@@ -490,6 +545,7 @@ async def do_login(request: Request):
     global _login_attempts
     client_ip = _get_client_ip(request)
     now = time.time()
+    repo = get_user_repo()
 
     # Previne memory leak lento de IPs antigos
     if len(_login_attempts) > 1000:
@@ -499,9 +555,11 @@ async def do_login(request: Request):
         }
 
     recent_attempts = [t for t in _login_attempts.get(client_ip, []) if now - t < LOGIN_RATE_LIMIT_WINDOW]
+    db_attempts = repo.get_recent_login_attempts(client_ip, LOGIN_RATE_LIMIT_WINDOW)
+    effective_attempts = max(len(recent_attempts), db_attempts)
 
-    if len(recent_attempts) >= LOGIN_RATE_LIMIT_MAX:
-        logger.warning("login_rate_limited", ip=client_ip)
+    if effective_attempts >= LOGIN_RATE_LIMIT_MAX:
+        logger.warning("login_rate_limited", ip=client_ip, count=effective_attempts)
         return RedirectResponse(url="/login?error=Muitas+tentativas.+Aguarde+1+minuto.", status_code=303)
 
     body = (await request.body()).decode("utf-8", errors="ignore")
@@ -510,16 +568,20 @@ async def do_login(request: Request):
     password = params.get("password", [""])[0].strip()
     totp_code = params.get("totp_code", [""])[0].strip()
 
-    repo = get_user_repo()
     user = repo.authenticate(username, password)
     if user:
         if user.get("totp_enabled"):
             if totp_code:
-                if not repo.verify_totp(user["id"], totp_code):
+                ok, method_used = repo.verify_totp_or_backup_code(user["id"], totp_code)
+                if not ok:
                     recent_attempts.append(now)
                     _login_attempts[client_ip] = recent_attempts
+                    repo.record_login_attempt(client_ip)
+                    repo.log_audit("login_totp_failed", actor_id=user["id"], actor_username=username, ip=client_ip, reason="invalid_totp_or_backup")
                     logger.warning("login_totp_failed", ip=client_ip, username=username, attempts=len(recent_attempts))
-                    return RedirectResponse(url="/login?error=Código+2FA+(TOTP)+inválido", status_code=303)
+                    return RedirectResponse(url="/login?error=Código+2FA+(TOTP)+ou+de+recuperação+inválido", status_code=303)
+                if method_used == "backup_code":
+                    repo.log_audit("backup_code_used", actor_id=user["id"], actor_username=username, ip=client_ip, reason="login_recovery")
             else:
                 pending_token = create_2fa_pending_token(user["id"], user["username"], settings.secret_key)
                 res = RedirectResponse(url="/login/2fa", status_code=303)
@@ -527,6 +589,8 @@ async def do_login(request: Request):
                 return res
 
         _login_attempts.pop(client_ip, None)
+        repo.clear_login_attempts(client_ip)
+        repo.log_audit("login_success", actor_id=user["id"], actor_username=username, ip=client_ip)
         logger.info("login_success", ip=client_ip, username=username, role=user["role"])
         token = create_session_token(user["id"], user["username"], user["role"], settings.secret_key)
         res = RedirectResponse(url="/", status_code=303)
@@ -537,6 +601,8 @@ async def do_login(request: Request):
 
     recent_attempts.append(now)
     _login_attempts[client_ip] = recent_attempts
+    repo.record_login_attempt(client_ip)
+    repo.log_audit("login_failed", actor_username=username, ip=client_ip, reason="invalid_credentials")
     logger.warning("login_failed", ip=client_ip, username=username, attempts=len(recent_attempts))
     return RedirectResponse(url="/login?error=Usuário+ou+senha+incorretos", status_code=303)
 
@@ -568,20 +634,29 @@ async def do_login_2fa(request: Request):
     if not data:
         return RedirectResponse(url="/login?error=Sessão+2FA+expirada.+Faça+login+novamente.", status_code=303)
 
+    client_ip = _get_client_ip(request)
     body = (await request.body()).decode("utf-8", errors="ignore")
     params = urllib.parse.parse_qs(body)
     totp_code = params.get("totp_code", [""])[0].strip()
 
     repo = get_user_repo()
     user_id = data["uid"]
-    if not totp_code or not repo.verify_totp(user_id, totp_code):
+    ok, method_used = repo.verify_totp_or_backup_code(user_id, totp_code) if totp_code else (False, "")
+    if not ok:
+        repo.record_login_attempt(client_ip)
+        repo.log_audit("login_2fa_failed", actor_id=user_id, actor_username=data.get("user"), ip=client_ip, reason="invalid_totp_or_backup")
         logger.warning("login_2fa_invalid_code", user_id=user_id, username=data.get("user"))
-        return RedirectResponse(url="/login/2fa?error=Código+2FA+inválido.+Tente+novamente.", status_code=303)
+        return RedirectResponse(url="/login/2fa?error=Código+2FA+ou+de+recuperação+inválido.+Tente+novamente.", status_code=303)
 
     user = repo.get_by_id(user_id)
     if not user:
         return RedirectResponse(url="/login?error=Usuário+não+encontrado", status_code=303)
 
+    if method_used == "backup_code":
+        repo.log_audit("backup_code_used", actor_id=user_id, actor_username=user["username"], ip=client_ip, reason="login_2fa_recovery")
+
+    repo.clear_login_attempts(client_ip)
+    repo.log_audit("login_2fa_success", actor_id=user_id, actor_username=user["username"], ip=client_ip)
     logger.info("login_2fa_success", user_id=user_id, username=user["username"], role=user["role"])
     token = create_session_token(user["id"], user["username"], user["role"], settings.secret_key)
     res = RedirectResponse(url="/", status_code=303)
@@ -695,7 +770,19 @@ async def google_callback(request: Request, code: Optional[str] = None, state: O
     return res
 
 @app.get("/logout")
-async def do_logout():
+async def do_logout(request: Request):
+    token = request.cookies.get("barsi_session")
+    if token:
+        data = decode_session_token(token, settings.secret_key)
+        if data and data.get("jti"):
+            repo = get_user_repo()
+            repo.revoke_session(data["jti"], user_id=data.get("uid"), expires_at=data.get("exp"))
+            repo.log_audit(
+                action="auth_logout",
+                actor_id=data.get("uid"),
+                actor_username=data.get("user"),
+                reason="user_logout"
+            )
     res = RedirectResponse(url="/login", status_code=303)
     res.delete_cookie(key="barsi_session")
     res.delete_cookie(key="barsi_csrf")
@@ -958,6 +1045,7 @@ async def save_carteira_edits(req: SaveEditsRequest, request: Request):
 
     # SQLite como FONTE DA VERDADE ÚNICA (Persistência atômica local em <5ms)
     budget_repo.save_positions(positions)
+    invalidate_canonical_positions_cache(user_id=budget_repo.user_id)
 
     return {
         "status": "ok",
@@ -1587,7 +1675,7 @@ async def setup_2fa(request: Request):
 
 @app.post("/api/auth/2fa/enable")
 async def enable_2fa(req: TotpConfirmRequest, request: Request):
-    """Valida o código de 6 dígitos gerado no app e conclui a ativação do 2FA."""
+    """Valida o código de 6 dígitos gerado no app e conclui a ativação do 2FA, gerando códigos de recuperação."""
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Não autorizado")
@@ -1595,7 +1683,18 @@ async def enable_2fa(req: TotpConfirmRequest, request: Request):
     success = repo.confirm_and_enable_totp(user["uid"], req.code)
     if not success:
         raise HTTPException(status_code=400, detail="Código de 6 dígitos inválido ou expirado.")
-    return {"ok": True, "message": "2FA (TOTP) ativado com sucesso!"}
+    backup_codes = repo.generate_backup_codes(user["uid"])
+    repo.log_audit(
+        action="2fa_enabled",
+        actor_id=user["uid"],
+        actor_username=user.get("user") or user.get("username"),
+        reason="user_self_service"
+    )
+    return {
+        "ok": True,
+        "message": "2FA (TOTP) ativado com sucesso!",
+        "backup_codes": backup_codes
+    }
 
 @app.post("/api/auth/2fa/disable")
 async def disable_2fa(req: TotpConfirmRequest, request: Request):
@@ -1607,6 +1706,12 @@ async def disable_2fa(req: TotpConfirmRequest, request: Request):
     if not repo.verify_totp(user["uid"], req.code):
         raise HTTPException(status_code=400, detail="Código 2FA (TOTP) inválido ou expirado.")
     repo.disable_totp(user["uid"])
+    repo.log_audit(
+        action="2fa_disabled",
+        actor_id=user["uid"],
+        actor_username=user.get("user") or user.get("username"),
+        reason="user_self_service"
+    )
     return {"ok": True, "message": "2FA (TOTP) desativado com sucesso."}
 
 # ----------------- ROTAS DE DIVIDENDOS REAIS (P0) -----------------
@@ -1984,6 +2089,13 @@ async def create_admin_user(req: NewUserRequest, request: Request):
     success = repo.create_user(req.username, req.password, req.role, email=req.email)
     if not success:
         raise HTTPException(status_code=400, detail="Nome de usuário já existe ou inválido")
+    repo.log_audit(
+        action="admin_create_user",
+        actor_id=user.get("uid"),
+        actor_username=user.get("user") or user.get("username"),
+        target=req.username,
+        reason=f"role={req.role}"
+    )
     return {"ok": True, "username": req.username, "role": req.role, "email": req.email}
 
 @app.post("/api/admin/users/{user_id}/password")
@@ -1991,6 +2103,11 @@ async def update_user_password_admin(user_id: int, req: UpdateUserPasswordReques
     user = require_role_action(request, action_type="admin")
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Acesso restrito a administradores")
+    if user.get("uid") == user_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Administradores não podem alterar a própria senha sem fornecer a senha atual."
+        )
     if not req.new_password or len(req.new_password) < 6:
         raise HTTPException(status_code=400, detail="A nova senha deve ter no mínimo 6 caracteres")
     repo = get_user_repo()
@@ -2000,7 +2117,14 @@ async def update_user_password_admin(user_id: int, req: UpdateUserPasswordReques
     success = repo.update_password(user_id, req.new_password)
     if not success:
         raise HTTPException(status_code=500, detail="Falha ao atualizar a senha do usuário")
-    logger.info("admin_password_updated", admin=user.get("username"), target=target.get("username"), user_id=user_id)
+    repo.log_audit(
+        action="admin_password_updated",
+        actor_id=user.get("uid"),
+        actor_username=user.get("user") or user.get("username"),
+        target=target.get("username"),
+        reason="admin_direct_reset"
+    )
+    logger.info("admin_password_updated", admin=user.get("username") or user.get("user"), target=target.get("username"), user_id=user_id)
     return {"ok": True, "message": f"Senha do usuário '{target.get('username')}' atualizada com sucesso!"}
 
 @app.post("/api/admin/users/{user_id}/email")
@@ -2016,8 +2140,23 @@ async def update_user_email_admin(user_id: int, req: UpdateUserEmailRequest, req
     success = repo.update_email(user_id, req.email)
     if not success:
         raise HTTPException(status_code=400, detail="E-mail inválido ou já em uso por outro usuário.")
-    logger.info("admin_email_updated", admin=user.get("username"), target=target.get("username"), email=req.email)
+    repo.log_audit(
+        action="admin_email_updated",
+        actor_id=user.get("uid"),
+        actor_username=user.get("user") or user.get("username"),
+        target=target.get("username"),
+        reason=f"new_email={req.email}"
+    )
+    logger.info("admin_email_updated", admin=user.get("username") or user.get("user"), target=target.get("username"), email=req.email)
     return {"ok": True, "message": "E-mail vinculado com sucesso!"}
+
+@app.get("/api/admin/audit-logs")
+async def list_audit_logs_endpoint(request: Request, limit: int = 50):
+    """Retorna os registros mais recentes de auditoria do sistema."""
+    user = require_role_action(request, action_type="admin")
+    repo = get_user_repo()
+    logs = repo.list_audit_logs(limit=limit)
+    return {"ok": True, "logs": logs}
 
 @app.get("/api/backup/download")
 async def download_backup_sqlite(request: Request):
@@ -2379,6 +2518,7 @@ async def health_sync_reconcile(request: Request, master: str = "sqlite"):
         if not positions:
             raise HTTPException(status_code=400, detail="Sheets está vazio para ser usado como master")
         repo.save_positions(positions)
+        invalidate_canonical_positions_cache(user_id=repo.user_id)
         return {
             "ok": True,
             "positions_count": len(positions),
