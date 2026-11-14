@@ -223,7 +223,47 @@ INIT_BUDGET_SCHEMA_SQL = """
         created_at    TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- 18. Metas Financeiras Barsi (Dashboard de Metas & Objetivos)
+    CREATE TABLE IF NOT EXISTS financial_goals (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        tipo          TEXT NOT NULL CHECK (tipo IN ('renda_passiva', 'patrimonio', 'acoes_ticker', 'aporte_mensal', 'custom')),
+        titulo        TEXT NOT NULL,
+        ticker        TEXT,
+        valor_alvo    REAL NOT NULL CHECK (valor_alvo > 0),
+        prazo_meses   INTEGER,
+        notas         TEXT,
+        created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
 """
+
+DEFAULT_GOAL_SEEDS: List[Dict[str, Any]] = [
+    {
+        "tipo": "renda_passiva",
+        "titulo": "Primeiro Salário Mínimo em Dividendos",
+        "valor_alvo": 1500.0,
+        "ticker": None,
+        "prazo_meses": 24,
+        "notas": "Meta Barsi: Renda passiva mensal média cobrindo despesas essenciais."
+    },
+    {
+        "tipo": "patrimonio",
+        "titulo": "Patrimônio Acumulado de R$ 100.000",
+        "valor_alvo": 100000.0,
+        "ticker": None,
+        "prazo_meses": 36,
+        "notas": "Ponto de inflexão da bola de neve dos juros compostos."
+    },
+    {
+        "tipo": "acoes_ticker",
+        "titulo": "1.000 Ações de Banco do Brasil (BBAS3)",
+        "valor_alvo": 1000.0,
+        "ticker": "BBAS3",
+        "prazo_meses": 12,
+        "notas": "Foco no número de ações geradoras no setor bancário perene."
+    }
+]
 
 DEFAULT_KEYWORDS: List[Tuple[str, str, str, int]] = [
     # Despesas Variáveis

@@ -1,0 +1,386 @@
+<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+  <div>
+    <h2 style="font-size: 1.4rem; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 0.5rem;">
+      🎯 Dashboard de Metas & Objetivos Financeiros
+    </h2>
+    <p style="color: var(--text-muted); font-size: 0.88rem; margin-top: 0.25rem;">
+      Acompanhamento estratégico da bola de neve de dividendos segundo o Método Barsi.
+    </p>
+  </div>
+  <button onclick="abrirModalMeta()" class="btn btn-green" style="display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 1.1rem;">
+    <span>➕</span> Nova Meta Estratégica
+  </button>
+</div>
+
+<!-- Resumo dos Indicadores Globais -->
+<div class="grid-stats">
+  <div class="stat-card">
+    <h4>Metas Ativas</h4>
+    <div id="stat-total-metas" style="font-size: 1.6rem; font-weight: 700; color: var(--accent);">0</div>
+    <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Planejamento estratégico</div>
+  </div>
+  <div class="stat-card">
+    <h4>Metas Concluídas</h4>
+    <div id="stat-concluidas" style="font-size: 1.6rem; font-weight: 700; color: var(--green);">0</div>
+    <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Objetivos superados 🏆</div>
+  </div>
+  <div class="stat-card">
+    <h4>Em Progresso</h4>
+    <div id="stat-em-andamento" style="font-size: 1.6rem; font-weight: 700; color: var(--amber);">0</div>
+    <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Na rota de acumulação</div>
+  </div>
+  <div class="stat-card">
+    <h4>Progresso Médio Geral</h4>
+    <div id="stat-progresso-medio" style="font-size: 1.6rem; font-weight: 700; color: var(--text);">0%</div>
+    <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Convergência das metas</div>
+  </div>
+</div>
+
+<!-- Filtros de Tipo -->
+<div style="display: flex; gap: 0.5rem; margin-bottom: 1.25rem; flex-wrap: wrap;">
+  <button class="btn btn-outline active-filter" onclick="filtrarMetas('todos', this)">Todas as Metas</button>
+  <button class="btn btn-outline" onclick="filtrarMetas('renda_passiva', this)">💰 Renda Passiva</button>
+  <button class="btn btn-outline" onclick="filtrarMetas('patrimonio', this)">🏛️ Patrimônio</button>
+  <button class="btn btn-outline" onclick="filtrarMetas('acoes_ticker', this)">🏢 Ações por Ticker</button>
+  <button class="btn btn-outline" onclick="filtrarMetas('aporte_mensal', this)">📥 Aporte Mensal</button>
+</div>
+
+<!-- Grid de Cards de Metas -->
+<div id="goals-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 1.25rem; margin-bottom: 2rem;">
+  <!-- Renderizado dinamicamente via JS -->
+  <div style="grid-column: 1 / -1; text-align: center; padding: 3rem; color: var(--text-muted); background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px;">
+    ⏳ Carregando metas financeiras...
+  </div>
+</div>
+
+<!-- Princípio Barsi de Metas -->
+<div class="card" style="border-left: 4px solid var(--accent); background: var(--card-bg);">
+  <h3 style="font-size: 1rem; color: var(--text); margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+    💡 O Segredo das Metas na Filosofia de Luiz Barsi
+  </h3>
+  <p style="font-size: 0.88rem; color: var(--text-muted); line-height: 1.6;">
+    <em>"Não compre ações visando vendê-las quando subirem de preço. Compre ações para se tornar sócio de empresas perenes e acumular o maior número possível de papéis que pagam bons dividendos. Sua principal meta deve ser a renda passiva mensal gerada, pois é ela que garante a liberdade financeira."</em>
+  </p>
+</div>
+
+<!-- Modal Criar/Editar Meta -->
+<div id="modal-meta" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 250; align-items: center; justify-content: center; backdrop-filter: blur(4px);">
+  <div style="background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; width: 92%; max-width: 520px; padding: 1.5rem; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5);">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; border-bottom: 1px solid var(--border); padding-bottom: 0.75rem;">
+      <h3 id="modal-meta-titulo" style="color: var(--accent); font-size: 1.15rem; margin: 0;">➕ Nova Meta Financeira</h3>
+      <button onclick="fecharModalMeta()" class="btn btn-outline" style="padding: 0.2rem 0.5rem;">✕</button>
+    </div>
+
+    <form onsubmit="salvarMeta(event)" style="display: flex; flex-direction: column; gap: 1rem;">
+      <input type="hidden" id="meta-id" value="" />
+
+      <div>
+        <label style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Tipo de Meta</label>
+        <select id="meta-tipo" class="tbl-input" style="width: 100%; margin-top: 0.3rem;" onchange="ajustarCamposTipoMeta()" required>
+          <option value="renda_passiva">💰 Renda Passiva Mensal (Dividendos)</option>
+          <option value="patrimonio">🏛️ Patrimônio Total Acumulado</option>
+          <option value="acoes_ticker">🏢 Quantidade de Ações de um Ticker</option>
+          <option value="aporte_mensal">📥 Capacidade de Aporte Mensal</option>
+          <option value="custom">🎯 Meta Personalizada</option>
+        </select>
+      </div>
+
+      <div>
+        <label style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Título da Meta</label>
+        <input type="text" id="meta-titulo" class="tbl-input" placeholder="Ex: R$ 5.000/mês em Dividendos..." style="width: 100%; margin-top: 0.3rem;" required />
+      </div>
+
+      <div id="campo-ticker" style="display: none;">
+        <label style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Ticker (Ativo B3)</label>
+        <input type="text" id="meta-ticker" class="tbl-input" placeholder="Ex: BBAS3, TAEE11, SAPR4..." style="width: 100%; margin-top: 0.3rem; text-transform: uppercase;" />
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+        <div>
+          <label id="label-valor-alvo" style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Valor Alvo</label>
+          <input type="number" step="0.01" min="1" id="meta-valor-alvo" class="tbl-input" placeholder="1000.00" style="width: 100%; margin-top: 0.3rem; font-weight: 600;" required />
+        </div>
+        <div>
+          <label style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Prazo (Meses, opcional)</label>
+          <input type="number" min="1" id="meta-prazo" class="tbl-input" placeholder="Ex: 24" style="width: 100%; margin-top: 0.3rem;" />
+        </div>
+      </div>
+
+      <div>
+        <label style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Notas Estratégicas</label>
+        <textarea id="meta-notas" class="tbl-input" rows="2" placeholder="Motivação ou detalhes da estratégia..." style="width: 100%; margin-top: 0.3rem; resize: vertical;"></textarea>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem;">
+        <button type="button" onclick="fecharModalMeta()" class="btn btn-outline">Cancelar</button>
+        <button type="submit" class="btn btn-green">Salvar Meta</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<style>
+  .btn-outline.active-filter {
+    background: rgba(56, 189, 248, 0.2);
+    border-color: var(--accent);
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .goal-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    transition: transform 0.15s ease, border-color 0.15s ease;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  }
+
+  .goal-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--accent);
+  }
+
+  .progress-bar-bg {
+    background: var(--card-hover);
+    border-radius: 9999px;
+    height: 10px;
+    width: 100%;
+    overflow: hidden;
+    margin: 0.75rem 0 0.5rem 0;
+  }
+
+  .progress-bar-fill {
+    height: 100%;
+    border-radius: 9999px;
+    transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+</style>
+
+<script>
+  let metasGlobais = [];
+  let filtroAtual = 'todos';
+
+  async function carregarMetas() {
+    try {
+      const res = await fetch('/api/metas');
+      if (!res.ok) throw new Error('Falha ao carregar metas');
+      metasGlobais = await res.json();
+      atualizarResumo();
+      renderizarGridMetas();
+    } catch (e) {
+      document.getElementById('goals-grid').innerHTML = `
+        <div style="grid-column: 1 / -1; text-align: center; padding: 2rem; color: var(--red);">
+          ❌ Erro ao carregar metas: ${e.message}
+        </div>
+      `;
+    }
+  }
+
+  function atualizarResumo() {
+    const total = metasGlobais.length;
+    const concluidas = metasGlobais.filter(m => m.concluida).length;
+    const emAndamento = total - concluidas;
+    const progressoMedio = total > 0 
+      ? (metasGlobais.reduce((acc, m) => acc + m.progresso_pct, 0) / total).toFixed(1)
+      : 0;
+
+    document.getElementById('stat-total-metas').textContent = total;
+    document.getElementById('stat-concluidas').textContent = concluidas;
+    document.getElementById('stat-em-andamento').textContent = emAndamento;
+    document.getElementById('stat-progresso-medio').textContent = progressoMedio + '%';
+  }
+
+  function filtrarMetas(tipo, btn) {
+    filtroAtual = tipo;
+    document.querySelectorAll('.btn-outline').forEach(b => b.classList.remove('active-filter'));
+    if (btn) btn.classList.add('active-filter');
+    renderizarGridMetas();
+  }
+
+  function getIconeTipo(tipo) {
+    switch (tipo) {
+      case 'renda_passiva': return '💰';
+      case 'patrimonio': return '🏛️';
+      case 'acoes_ticker': return '🏢';
+      case 'aporte_mensal': return '📥';
+      default: return '🎯';
+    }
+  }
+
+  function formatarValor(val, unidade, tipo) {
+    if (tipo === 'acoes_ticker') {
+      return Math.round(val).toLocaleString('pt-BR') + ' ' + unidade;
+    }
+    return formatBRL(val) + (unidade.includes('/mês') ? '/mês' : '');
+  }
+
+  function renderizarGridMetas() {
+    const grid = document.getElementById('goals-grid');
+    const filtradas = filtroAtual === 'todos' 
+      ? metasGlobais 
+      : metasGlobais.filter(m => m.tipo === filtroAtual);
+
+    if (filtradas.length === 0) {
+      grid.innerHTML = `
+        <div style="grid-column: 1 / -1; text-align: center; padding: 3rem; color: var(--text-muted); background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px;">
+          Nenhuma meta encontrada para este filtro. Clique em "➕ Nova Meta Estratégica" para cadastrar!
+        </div>
+      `;
+      return;
+    }
+
+    grid.innerHTML = filtradas.map(m => {
+      const icone = getIconeTipo(m.tipo);
+      const corBarra = m.concluida ? 'var(--green)' : (m.progresso_pct > 60 ? 'var(--accent)' : 'var(--amber)');
+      const badgeStatus = m.concluida 
+        ? '<span class="badge-status" style="background: var(--green-bg); color: var(--green); border: 1px solid var(--green);">🎉 CONCLUÍDA</span>'
+        : `<span class="badge-status" style="background: rgba(56, 189, 248, 0.15); color: var(--accent); border: 1px solid var(--accent);">${m.progresso_pct}%</span>`;
+
+      return `
+        <div class="goal-card">
+          <div>
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.5rem;">
+              <div style="display: flex; align-items: center; gap: 0.4rem;">
+                <span style="font-size: 1.3rem;">${icone}</span>
+                <h4 style="font-size: 1.05rem; font-weight: 700; color: var(--text); margin: 0;">${esc(m.titulo)}</h4>
+              </div>
+              <div>${badgeStatus}</div>
+            </div>
+
+            ${m.ticker ? `<div style="margin-bottom: 0.5rem;"><span class="badge-status" style="font-size: 0.72rem; background: var(--card-hover); color: var(--text); border: 1px solid var(--border);">${esc(m.ticker)}</span></div>` : ''}
+
+            <!-- Valores Atual vs Alvo -->
+            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 0.75rem;">
+              <div>
+                <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;">Atual</div>
+                <div style="font-size: 1.15rem; font-weight: 700; color: var(--text);">${formatarValor(m.valor_atual, m.unidade, m.tipo)}</div>
+              </div>
+              <div style="text-align: right;">
+                <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;">Meta Alvo</div>
+                <div style="font-size: 1.15rem; font-weight: 700; color: var(--accent);">${formatarValor(m.valor_alvo, m.unidade, m.tipo)}</div>
+              </div>
+            </div>
+
+            <!-- Barra de Progresso -->
+            <div class="progress-bar-bg">
+              <div class="progress-bar-fill" style="width: ${m.progresso_pct}%; background: ${corBarra};"></div>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; font-size: 0.76rem; color: var(--text-muted);">
+              <span>${m.concluida ? 'Objetivo atingido!' : `Faltam: ${formatarValor(m.restante, m.unidade, m.tipo)}`}</span>
+              ${m.meses_restantes ? `<span>⏳ ~${m.meses_restantes} meses</span>` : ''}
+            </div>
+
+            ${m.notas ? `<p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.75rem; border-top: 1px dashed var(--border); padding-top: 0.5rem; line-height: 1.4;">📝 ${esc(m.notas)}</p>` : ''}
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 0.4rem; margin-top: 1rem; border-top: 1px solid var(--border); padding-top: 0.75rem;">
+            <button onclick="editarMeta(${m.id})" class="btn btn-outline" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;" title="Editar Meta">✏️ Editar</button>
+            <button onclick="excluirMeta(${m.id})" class="btn btn-outline" style="padding: 0.25rem 0.6rem; font-size: 0.8rem; color: var(--red); border-color: rgba(239, 68, 68, 0.3);" title="Excluir Meta">🗑️ Excluir</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function ajustarCamposTipoMeta() {
+    const tipo = document.getElementById('meta-tipo').value;
+    const campoTicker = document.getElementById('campo-ticker');
+    const labelValor = document.getElementById('label-valor-alvo');
+    const inputValor = document.getElementById('meta-valor-alvo');
+
+    if (tipo === 'acoes_ticker') {
+      campoTicker.style.display = 'block';
+      labelValor.textContent = 'Quantidade de Ações (Alvo)';
+      inputValor.placeholder = 'Ex: 1000';
+    } else {
+      campoTicker.style.display = 'none';
+      labelValor.textContent = 'Valor Alvo (R$)';
+      inputValor.placeholder = 'Ex: 5000.00';
+    }
+  }
+
+  function abrirModalMeta(meta = null) {
+    document.getElementById('meta-id').value = meta ? meta.id : '';
+    document.getElementById('meta-tipo').value = meta ? meta.tipo : 'renda_passiva';
+    document.getElementById('meta-titulo').value = meta ? meta.titulo : '';
+    document.getElementById('meta-ticker').value = meta && meta.ticker ? meta.ticker : '';
+    document.getElementById('meta-valor-alvo').value = meta ? meta.valor_alvo : '';
+    document.getElementById('meta-prazo').value = meta && meta.prazo_meses ? meta.prazo_meses : '';
+    document.getElementById('meta-notas').value = meta && meta.notas ? meta.notas : '';
+    document.getElementById('modal-meta-titulo').textContent = meta ? '✏️ Editar Meta' : '➕ Nova Meta Estratégica';
+
+    ajustarCamposTipoMeta();
+    const modal = document.getElementById('modal-meta');
+    modal.style.display = 'flex';
+  }
+
+  function fecharModalMeta() {
+    document.getElementById('modal-meta').style.display = 'none';
+  }
+
+  function editarMeta(id) {
+    const meta = metasGlobais.find(m => m.id === id);
+    if (meta) {
+      abrirModalMeta(meta);
+    }
+  }
+
+  async function salvarMeta(event) {
+    event.preventDefault();
+    const id = document.getElementById('meta-id').value;
+    const payload = {
+      tipo: document.getElementById('meta-tipo').value,
+      titulo: document.getElementById('meta-titulo').value.trim(),
+      ticker: document.getElementById('meta-ticker').value.trim().toUpperCase() || null,
+      valor_alvo: parseFloat(document.getElementById('meta-valor-alvo').value),
+      prazo_meses: parseInt(document.getElementById('meta-prazo').value, 10) || null,
+      notas: document.getElementById('meta-notas').value.trim() || null
+    };
+
+    try {
+      const url = id ? `/api/metas/${id}` : '/api/metas';
+      const method = id ? 'PUT' : 'POST';
+
+      const res = await fetch(url, {
+        method: method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Erro ao salvar meta');
+      }
+
+      fecharModalMeta();
+      showToast(id ? 'Meta atualizada com sucesso!' : 'Meta cadastrada com sucesso!');
+      await carregarMetas();
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
+  }
+
+  async function excluirMeta(id) {
+    if (!confirm('Tem certeza de que deseja excluir esta meta?')) return;
+    try {
+      const res = await fetch(`/api/metas/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Erro ao excluir meta');
+      }
+      showToast('Meta excluída com sucesso!');
+      await carregarMetas();
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    carregarMetas();
+  });
+</script>

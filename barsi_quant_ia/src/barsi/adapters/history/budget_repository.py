@@ -29,6 +29,7 @@ from barsi.adapters.history.schema import (
     VALID_ALERT_TYPES,
     VALID_CHART_TYPES,
     VALID_DATA_SOURCES,
+    DEFAULT_GOAL_SEEDS,
 )
 
 
@@ -125,6 +126,7 @@ class BudgetRepository:
         self.seed_default_categories()
         self.seed_default_keywords()
         self.seed_default_notification_prefs()
+        self.seed_default_goals()
 
     DEFAULT_EXPENSE_CATEGORIES = [
         ("Moradia", "fixa"),
@@ -1899,3 +1901,183 @@ class BudgetRepository:
             "datasets": datasets,
             "rows": raw_rows,
         }
+
+    # ---------------------------------------------------------
+    # GESTÃO DE METAS FINANCEIRAS (ROADMAP V3.0)
+    # ---------------------------------------------------------
+    def seed_default_goals(self) -> None:
+        """Inicializa metas padrão se a tabela estiver vazia."""
+        with self._conn() as conn:
+            count = conn.execute("SELECT COUNT(*) as c FROM financial_goals").fetchone()["c"]
+            if count == 0:
+                for g in DEFAULT_GOAL_SEEDS:
+                    conn.execute(
+                        """
+                        INSERT INTO financial_goals (tipo, titulo, ticker, valor_alvo, prazo_meses, notas)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (g["tipo"], g["titulo"], g.get("ticker"), g["valor_alvo"], g.get("prazo_meses"), g.get("notas"))
+                    )
+
+    def list_goals(self) -> List[Dict[str, Any]]:
+        """Lista todas as metas financeiras cadastradas."""
+        with self._conn() as conn:
+            rows = conn.execute("SELECT * FROM financial_goals ORDER BY id ASC").fetchall()
+            return [dict(r) for r in rows]
+
+    def create_goal(
+        self,
+        tipo: str,
+        titulo: str,
+        valor_alvo: float,
+        ticker: Optional[str] = None,
+        prazo_meses: Optional[int] = None,
+        notas: Optional[str] = None
+    ) -> int:
+        """Cria uma nova meta financeira."""
+        if tipo not in ("renda_passiva", "patrimonio", "acoes_ticker", "aporte_mensal", "custom"):
+            raise ValueError(f"Tipo de meta inválido: {tipo}")
+        if valor_alvo <= 0:
+            raise ValueError("O valor alvo deve ser maior que zero.")
+
+        ticker_clean = ticker.strip().upper() if ticker else None
+
+        with self._conn() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO financial_goals (tipo, titulo, ticker, valor_alvo, prazo_meses, notas)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (tipo, titulo.strip(), ticker_clean, float(valor_alvo), prazo_meses, notas)
+            )
+            return cur.lastrowid
+
+    def update_goal(
+        self,
+        goal_id: int,
+        tipo: str,
+        titulo: str,
+        valor_alvo: float,
+        ticker: Optional[str] = None,
+        prazo_meses: Optional[int] = None,
+        notas: Optional[str] = None
+    ) -> bool:
+        """Atualiza uma meta existente."""
+        if tipo not in ("renda_passiva", "patrimonio", "acoes_ticker", "aporte_mensal", "custom"):
+            raise ValueError(f"Tipo de meta inválido: {tipo}")
+        if valor_alvo <= 0:
+            raise ValueError("O valor alvo deve ser maior que zero.")
+
+        ticker_clean = ticker.strip().upper() if ticker else None
+
+        with self._conn() as conn:
+            cur = conn.execute(
+                """
+                UPDATE financial_goals
+                SET tipo = ?, titulo = ?, ticker = ?, valor_alvo = ?, prazo_meses = ?, notas = ?, updated_at = datetime('now')
+                WHERE id = ?
+                """,
+                (tipo, titulo.strip(), ticker_clean, float(valor_alvo), prazo_meses, notas, goal_id)
+            )
+            return cur.rowcount > 0
+
+    def delete_goal(self, goal_id: int) -> bool:
+        """Exclui uma meta existente."""
+        with self._conn() as conn:
+            cur = conn.execute("DELETE FROM financial_goals WHERE id = ?", (goal_id,))
+            return cur.rowcount > 0
+
+    def get_goals_with_progress(self) -> List[Dict[str, Any]]:
+        """Recupera as metas calculando o progresso atual em tempo real contra o SQLite."""
+        goals = self.list_goals()
+        positions = self.load_positions()
+
+        # Cache e agregações
+        total_patrimonio = sum(p.valor_total or ((p.qtd_antes + p.qtd_aporte) * p.preco_atual) for p in positions)
+        proj_anual_div = sum((p.div_proj or 0.0) * (p.qtd_antes + p.qtd_aporte) for p in positions)
+        proj_mensal_div = round(proj_anual_div / 12.0, 2)
+
+        # Histórico de dividendos reais recebidos nos últimos 12 meses
+        with self._conn() as conn:
+            div_row = conn.execute(
+                """
+                SELECT SUM(valor_total) as total_div
+                FROM dividends_received
+                WHERE data_pagamento >= date('now', '-365 days')
+                """
+            ).fetchone()
+            total_div_12m = float(div_row["total_div"] or 0.0)
+            real_mensal_div = round(total_div_12m / 12.0, 2)
+
+            # Aporte médio mensal realizado nos últimos 3 meses (transações de investimento)
+            inv_row = conn.execute(
+                """
+                SELECT SUM(t.valor) as total_inv
+                FROM transacoes t
+                JOIN expense_categories c ON t.categoria_id = c.id
+                WHERE c.kind = 'investimento' AND t.tipo = 'DEBIT' AND t.data >= date('now', '-90 days')
+                """
+            ).fetchone()
+            total_inv_90d = float(inv_row["total_inv"] or 0.0)
+            media_aporte_mensal = round(total_inv_90d / 3.0, 2) if total_inv_90d > 0 else 0.0
+
+        positions_by_ticker = {p.ticker.upper(): p for p in positions}
+
+        results: List[Dict[str, Any]] = []
+        for g in goals:
+            tipo = g["tipo"]
+            alvo = float(g["valor_alvo"])
+            atual = 0.0
+            unidade = "R$"
+
+            if tipo == "renda_passiva":
+                atual = max(proj_mensal_div, real_mensal_div)
+                unidade = "R$/mês"
+            elif tipo == "patrimonio":
+                atual = total_patrimonio
+                unidade = "R$"
+            elif tipo == "acoes_ticker":
+                unidade = "ações"
+                t = (g["ticker"] or "").upper()
+                pos = positions_by_ticker.get(t)
+                if pos:
+                    atual = float(pos.qtd_antes + pos.qtd_aporte)
+                else:
+                    atual = 0.0
+            elif tipo == "aporte_mensal":
+                atual = media_aporte_mensal
+                unidade = "R$/mês"
+            else:
+                atual = 0.0
+                unidade = "pts"
+
+            pct = round(min(100.0, (atual / alvo) * 100), 1) if alvo > 0 else 0.0
+            restante = max(0.0, round(alvo - atual, 2))
+            concluida = (atual >= alvo)
+
+            # Estimativa de tempo restante (em meses)
+            meses_restantes: Optional[int] = None
+            if not concluida and restante > 0:
+                if tipo == "patrimonio" and media_aporte_mensal > 0:
+                    meses_restantes = int(restante / media_aporte_mensal)
+                elif g.get("prazo_meses"):
+                    meses_restantes = g["prazo_meses"]
+
+            results.append({
+                "id": g["id"],
+                "tipo": tipo,
+                "titulo": g["titulo"],
+                "ticker": g["ticker"],
+                "valor_alvo": alvo,
+                "valor_atual": round(atual, 2),
+                "unidade": unidade,
+                "progresso_pct": pct,
+                "restante": restante,
+                "concluida": concluida,
+                "prazo_meses": g["prazo_meses"],
+                "meses_restantes": meses_restantes,
+                "notas": g["notas"],
+                "created_at": g["created_at"]
+            })
+
+        return results

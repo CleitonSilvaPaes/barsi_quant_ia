@@ -182,3 +182,29 @@ function renderDynamicArtifactChart(canvasId, art, data, chartInstances) {
   return instance;
 }
 
+/**
+ * Controle de Tema Claro / Escuro (Roadmap v3.0 Sprint 1)
+ */
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme') || 'dark';
+  const next = current === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  try {
+    localStorage.setItem('barsi_theme', next);
+  } catch (e) {}
+  updateThemeIcon(next);
+}
+
+function updateThemeIcon(theme) {
+  const icon = document.getElementById('theme-icon');
+  if (icon) {
+    icon.textContent = theme === 'light' ? '☀️' : '🌙';
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const current = document.documentElement.getAttribute('data-theme') || 'dark';
+  updateThemeIcon(current);
+});
+
+

@@ -6,6 +6,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="csrf-token" content="{{CSRF_TOKEN}}">
   <title>{{TITLE}} — Barsi Quant IA</title>
+  <script>
+    (function() {
+      try {
+        var savedTheme = localStorage.getItem('barsi_theme') || 'dark';
+        document.documentElement.setAttribute('data-theme', savedTheme);
+      } catch (e) {}
+    })();
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"
     integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4"
     crossorigin="anonymous"></script>
@@ -26,7 +34,27 @@
       --red-bg: rgba(239, 68, 68, 0.12);
       --amber: #f59e0b;
       --amber-bg: rgba(245, 158, 11, 0.12);
+      --topbar-bg: rgba(11, 15, 25, 0.85);
       --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    [data-theme="light"] {
+      --bg: #f8fafc;
+      --sidebar-bg: #ffffff;
+      --card-bg: #ffffff;
+      --card-hover: #f1f5f9;
+      --border: #e2e8f0;
+      --border-accent: #0284c7;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --accent: #0284c7;
+      --green: #16a34a;
+      --green-bg: rgba(22, 163, 74, 0.12);
+      --red: #dc2626;
+      --red-bg: rgba(220, 38, 38, 0.12);
+      --amber: #d97706;
+      --amber-bg: rgba(217, 119, 6, 0.12);
+      --topbar-bg: rgba(255, 255, 255, 0.88);
     }
 
     * {
@@ -74,7 +102,7 @@
     .brand-text h2 {
       font-size: 1.05rem;
       font-weight: 700;
-      color: #fff;
+      color: var(--text);
       letter-spacing: -0.3px;
     }
 
@@ -154,7 +182,7 @@
     /* TOPBAR */
     .topbar {
       height: 60px;
-      background: rgba(11, 15, 25, 0.8);
+      background: var(--topbar-bg);
       backdrop-filter: blur(8px);
       border-bottom: 1px solid var(--border);
       display: flex;
@@ -175,13 +203,34 @@
     .page-title {
       font-size: 1.15rem;
       font-weight: 600;
-      color: #fff;
+      color: var(--text);
     }
 
     .topbar-right {
       display: flex;
       align-items: center;
-      gap: 1rem;
+      gap: 0.75rem;
+    }
+
+    .btn-theme-toggle {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 1rem;
+      border-radius: 6px;
+      width: 36px;
+      height: 36px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn-theme-toggle:hover {
+      background: var(--card-hover);
+      border-color: var(--border-accent);
+      transform: scale(1.05);
     }
 
     .badge-status {
@@ -601,6 +650,7 @@
       <div class="nav-label">Operação & Portfólio</div>
       <a href="/" class="nav-item {{NAV_HOME}}"><span class="icon">⌂</span> Home / Cockpit</a>
       <a href="/carteira" class="nav-item {{NAV_CARTEIRA}}"><span class="icon">💼</span> Carteira B.E.S.T.</a>
+      <a href="/metas" class="nav-item {{NAV_METAS}}"><span class="icon">🎯</span> Metas & Objetivos</a>
       <a href="/aportes" class="nav-item {{NAV_APORTES}}"><span class="icon">📊</span> Aportes & Simulador</a>
       <a href="/budget" class="nav-item {{NAV_BUDGET}}"><span class="icon">💰</span> Orçamento Fluxo</a>
       <a href="/extratos" class="nav-item {{NAV_EXTRATOS}}"><span class="icon">📑</span> Extratos (OFX)</a>
@@ -631,6 +681,9 @@
         <h1 class="page-title">{{PAGE_HEADING}}</h1>
       </div>
       <div class="topbar-right">
+        <button id="theme-toggle-btn" class="btn-theme-toggle" onclick="toggleTheme()" title="Alternar Modo Claro / Escuro" aria-label="Alternar Tema">
+          <span id="theme-icon">🌙</span>
+        </button>
         <span class="badge-status">● ONLINE</span>
         <div class="telemetry-pill">{{FREE_MB}} MB livre | RSS {{RSS_MB}} MB</div>
         <div class="user-pill">
