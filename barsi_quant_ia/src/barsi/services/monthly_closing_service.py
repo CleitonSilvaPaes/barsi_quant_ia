@@ -484,3 +484,51 @@ class MonthlyClosingService:
         except Exception as e:
             logger.error("pdf_generation_failed", error=str(e))
             raise RuntimeError(f"Falha ao compilar PDF executivo: {e}")
+
+    async def send_closing_via_telegram(self, notifier: Any, mes_ano: Optional[str] = None) -> bool:
+        """Envia o Fechamento Mensal diretamente pelo Telegram.
+        Tenta enviar o documento PDF; se não houver ambiente gráfico/Chromium na TV Box,
+        envia o resumo executivo detalhado em formato de texto Markdown sem travar a TV Box."""
+        data = self.get_closing_data(mes_ano)
+        target = data["mes_ano"]
+        patrimonio = data.get("patrimonio_total", 0.0)
+        divs_mes = data.get("total_divs_mes", 0.0)
+        yoc = data.get("yoc_medio", 0.0)
+        poupanca = data.get("poupanca_gerada", 0.0)
+        radar = data.get("radar_items", [])
+        top_acao = radar[0]["ticker"] if radar else "Em formação"
+
+        caption = (
+            f"📊 *FECHAMENTO EXECUTIVO BARSI — {target}*\n\n"
+            f"💼 *Patrimônio Total:* R$ {patrimonio:,.2f}\n"
+            f"💰 *Proventos no Mês:* R$ {divs_mes:,.2f}\n"
+            f"📈 *Yield on Cost (YoC):* {yoc:.1f}%\n"
+            f"💵 *Capacidade de Aporte:* R$ {poupanca:,.2f}\n"
+            f"🎯 *Top Aporte:* {top_acao}\n\n"
+            f"🏛️ _Barsi Quant IA v3.0 • Autônomo na TV Box_"
+        )
+
+        # 1. Tenta compilar e enviar o PDF se houver suporte
+        try:
+            pdf_bytes = self.generate_pdf_report(target)
+            if hasattr(notifier, "send_document"):
+                sent = await notifier.send_document(
+                    filename=f"Fechamento_Barsi_{target}.pdf",
+                    content=pdf_bytes,
+                    caption=caption
+                )
+                if sent:
+                    return True
+        except Exception as pdf_err:
+            logger.info("pdf_fallback_to_text_closing", reason=str(pdf_err))
+
+        # 2. Fallback resiliente (Headless / TV Box 0MB RAM extra) via texto rico
+        if hasattr(notifier, "notify"):
+            return await notifier.notify(
+                title=f"Fechamento Mensal Barsi ({target})",
+                body=caption,
+                level="info"
+            )
+        elif hasattr(notifier, "send_message"):
+            return await notifier.send_message(caption)
+        return False

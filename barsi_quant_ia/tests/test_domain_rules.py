@@ -18,31 +18,35 @@ def test_calcular_preco_teto():
     assert calcular_preco_teto(0.0, 10.0) == 13.00
 
 def test_calcular_margem_seguranca():
-    # Teto 50.00, Preço 40.00 -> Margem = ((50 - 40) / 40) * 100 = 25%
-    assert calcular_margem_seguranca(50.0, 40.0) == 25.00
-    # Teto 40.00, Preço 50.00 -> Margem = ((40 - 50) / 50) * 100 = -20%
-    assert calcular_margem_seguranca(40.0, 50.0) == -20.00
-    # Preço zero não deve causar divisão por zero
-    assert calcular_margem_seguranca(50.0, 0.0) == 0.0
+    # Teto 50.00, Preço 40.00 -> Margem = ((50 - 40) / 50) * 100 = 20.00%
+    assert calcular_margem_seguranca(50.0, 40.0) == 20.00
+    # Teto 40.00, Preço 50.00 -> Margem = ((40 - 50) / 40) * 100 = -25.00%
+    assert calcular_margem_seguranca(40.0, 50.0) == -25.00
+    # Preço zero não deve causar erro
+    assert calcular_margem_seguranca(50.0, 0.0) == 100.0
+    # Teto zero
+    assert calcular_margem_seguranca(0.0, 10.0) == 0.0
 
 def test_determinar_acao_barsi():
-    # Margem positiva -> ACUMULAR
-    assert determinar_acao_barsi(15.0) == AcaoBarsi.ACUMULAR
-    assert determinar_acao_barsi(0.0) == AcaoBarsi.ACUMULAR
+    # Margem positiva com DY >= 6% -> ACUMULAR
+    assert determinar_acao_barsi(15.0, dy_real=7.0, div_proj=2.0) == AcaoBarsi.ACUMULAR
+    assert determinar_acao_barsi(0.0, dy_real=6.0, div_proj=1.5) == AcaoBarsi.ACUMULAR
     # Margem negativa -> AGUARDAR
-    assert determinar_acao_barsi(-5.0) == AcaoBarsi.AGUARDAR
+    assert determinar_acao_barsi(-5.0, dy_real=8.0, div_proj=2.0) == AcaoBarsi.AGUARDAR
+    # DY menor que 6% -> AGUARDAR mesmo com margem positiva
+    assert determinar_acao_barsi(15.0, dy_real=4.5, div_proj=1.0) == AcaoBarsi.AGUARDAR
 
 def test_atualizar_posicao_quant():
     pos = Position(ticker="BBAS3", row_index=7, preco_atual=25.0, div_proj=3.0)
-    # Teto esperado: 3.0 / 0.06 = 50.0. Preço novo: 30.0 -> Margem: ((50-30)/30)*100 = 66.67%
+    # Teto esperado: 3.0 / 0.06 = 50.0. Preço novo: 30.0 -> Margem: ((50-30)/50)*100 = 40.0%
     atualizada = atualizar_posicao_quant(pos, preco_novo=30.0)
     assert atualizada.preco_atual == 30.0
     assert atualizada.preco_teto == 50.0
-    assert atualizada.margem_seguranca == 66.67
+    assert atualizada.margem_seguranca == 40.0
     assert atualizada.status_barsi == AcaoBarsi.ACUMULAR
 
 def test_gerar_insight_deterministico():
-    pos = Position(ticker="TAEE11", row_index=8, preco_atual=35.0, preco_teto=45.0, margem_seguranca=28.57)
+    pos = Position(ticker="TAEE11", row_index=8, preco_atual=35.0, preco_teto=45.0, margem_seguranca=22.2, div_proj=2.7)
     res = gerar_insight_deterministico(pos)
     assert res.ticker == "TAEE11"
     assert res.acao_sugerida == AcaoBarsi.ACUMULAR
@@ -75,8 +79,8 @@ def test_atualizar_posicao_quant_teto_manual():
     atualizada = atualizar_posicao_quant(pos, preco_novo=9.00)
     # Deve preservar o teto manual de 11.50 e não recomputar para 10.80
     assert atualizada.preco_teto == 11.50
-    # Margem deve ser calculada sobre o teto manual: ((11.50 - 9.00) / 9.00) * 100 = 27.78%
-    assert atualizada.margem_seguranca == 27.78
+    # Margem deve ser calculada sobre o teto manual: ((11.50 - 9.00) / 11.50) * 100 = 21.74%
+    assert atualizada.margem_seguranca == 21.74
     assert atualizada.status_barsi == AcaoBarsi.ACUMULAR
 
 

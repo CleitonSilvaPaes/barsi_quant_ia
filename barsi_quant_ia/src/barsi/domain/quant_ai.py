@@ -275,13 +275,18 @@ class DividendSustainabilityScorer:
         cls._instance = None
 
     def score(self, posicao: Position, extras: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        div_proj = posicao.div_proj or 0.0
+        preco = posicao.preco_atual or 1.0
+        margem = posicao.margem_seguranca or 0.0
+
+        # Se o dividendo projetado estiver zerado, sustentabilidade é 0% BAIXA
+        if div_proj <= 0.0:
+            return {"score": 0.0, "label": "BAIXA", "badge": "🔴"}
+
         if not self._has_weights:
             return {"score": 0.5, "label": "NÃO TREINADO", "badge": "⚪"}
 
         extras = extras or {}
-        div_proj = posicao.div_proj or 0.0
-        preco = posicao.preco_atual or 1.0
-        margem = posicao.margem_seguranca or 0.0
 
         features = [
             min(div_proj * 4.0 / max(extras.get("lucro_estimado", 1.0), 0.01), 2.0) / 2.0,
@@ -309,11 +314,23 @@ def gerar_insight_quant_avancado(posicao: Position, noticias: str = "", feedback
     3. Contextual Reinforcement Learning (Q-Learning) para ação final.
     4. TinyMLP Neural Network para sustentabilidade de dividendos (DSS).
     """
-    # 1. Estatística
+    # 1. Estatística e Pré-cálculos rigorosos do Método Barsi
     stats = StatisticalBarsiEngine.calcular_metricas_estatisticas(posicao)
     score_quant = stats["score_barsi_quant"]
     z_score = stats["z_score"]
-    yield_proj = stats["yield_projetado_pct"]
+
+    preco = posicao.preco_atual
+    custo_medio = getattr(posicao, "custo_medio", 0.0) or preco
+    teto_manual = bool(getattr(posicao, "teto_manual", False))
+    div_proj = posicao.div_proj or 0.0
+
+    # Se o dividendo projetado for omitido/None em posições legacy mas há preço teto válido não manual:
+    if div_proj <= 0.0 and not teto_manual and posicao.preco_teto > 0:
+        div_proj = round(posicao.preco_teto * 0.06, 2)
+        posicao.div_proj = div_proj
+
+    dy_real = (div_proj / preco * 100.0) if preco > 0 else 0.0
+    yoc_real = (div_proj / custo_medio * 100.0) if custo_medio > 0 else dy_real
 
     # 2. Deep Learning NLP
     sent_score, sent_label = nlp_model.predict_sentiment(noticias)
@@ -324,22 +341,40 @@ def gerar_insight_quant_avancado(posicao: Position, noticias: str = "", feedback
     # 4. TinyMLP - Dividend Sustainability Score (DSS)
     dss = DividendSustainabilityScorer.get().score(posicao, extras={"perenidade": stats.get("perenidade_peso", 0.85)})
 
-    if best_action == "ACUMULAR_FORTE":
+    # Regras Estritas do Método Barsi (Sobrescrevem para prevenir armadilhas de valor):
+    # Regra 1 & 3: Teto manual ativo sem dividendo projetado ou DY < 6%
+    if teto_manual and div_proj <= 0.0:
+        acao = AcaoBarsi.AGUARDAR
+        detalhe_acao = "AGUARDAR (TETO DESATUALIZADO / DIVIDENDO ZERADO)"
+        aviso_teto = " ⚠️ Teto manual ativo com provento zerado (necessário revisar projeção)."
+    elif dy_real < 6.0:
+        acao = AcaoBarsi.AGUARDAR
+        detalhe_acao = "AGUARDAR (DY REAL < 6.0%)"
+        aviso_teto = ""
+    # Regra 2: Preço abaixo do preço médio com DY >= 6% -> Oportunidade
+    elif preco < custo_medio and dy_real >= 6.0 and posicao.margem_seguranca >= 0:
+        acao = AcaoBarsi.ACUMULAR
+        detalhe_acao = "OPORTUNIDADE DE PREÇO MÉDIO"
+        aviso_teto = ""
+    elif best_action == "ACUMULAR_FORTE" and posicao.margem_seguranca >= 0:
         acao = AcaoBarsi.ACUMULAR
         detalhe_acao = "ACUMULAR COM ALTA CONVICÇÃO"
-    elif best_action == "ACUMULAR_MODERADO":
+        aviso_teto = ""
+    elif best_action == "ACUMULAR_MODERADO" and posicao.margem_seguranca >= 0:
         acao = AcaoBarsi.ACUMULAR
         detalhe_acao = "ACUMULAR DE FORMA MODERADA"
+        aviso_teto = ""
     else:
         acao = AcaoBarsi.AGUARDAR
         detalhe_acao = "AGUARDAR OPORTUNIDADE MELHOR"
+        aviso_teto = ""
 
     # Redação com padrão matemático e estatístico rico
     insight_text = (
-        f"Score Quant B.E.S.T.: {score_quant}/100 (Z-Score {z_score:+.2f}, DY Proj. {yield_proj:.1f}%). "
+        f"Score Quant B.E.S.T.: {score_quant}/100 (Z-Score {z_score:+.2f}, DY Real {dy_real:.1f}%, YoC {yoc_real:.1f}%). "
         f"Sentimento NLP B3: {sent_label} ({sent_score:+.2f}). "
         f"Diretriz RL: {detalhe_acao} frente ao teto de R$ {posicao.preco_teto:.2f} (margem {posicao.margem_seguranca:.1f}%). "
-        f"Sustentabilidade do dividendo: {dss['badge']} {dss['label']} ({dss['score']:.0%})."
+        f"Sustentabilidade do dividendo: {dss['badge']} {dss['label']} ({dss['score']:.0%}).{aviso_teto}"
     )
 
     return InsightResult(
