@@ -13,7 +13,7 @@ from barsi.infra.security import (
     generate_totp_secret,
     verify_totp_code,
     get_totp_uri,
-    generate_backup_codes,
+    generate_backup_codes_pair,
     verify_backup_code,
 )
 
@@ -288,8 +288,12 @@ class UserRepository:
             return True
         return False
 
-    def disable_totp(self, user_id: int) -> bool:
+    def disable_totp(self, user_id: int, *, bypass_verification: bool = True) -> bool:
         """Desativa o 2FA e limpa o segredo TOTP e códigos de recuperação."""
+        if not bypass_verification:
+            user = self.get_by_id(user_id)
+            if user and user.get("totp_enabled"):
+                raise ValueError("disable_totp requer bypass_verification=True para chamadas diretas.")
         with self._connection() as conn:
             conn.execute(
                 "UPDATE usuarios SET totp_secret = NULL, totp_enabled = 0, backup_codes_hash = NULL WHERE id = ?",
@@ -311,7 +315,7 @@ class UserRepository:
 
     def generate_backup_codes(self, user_id: int, count: int = 8) -> List[str]:
         """Gera e salva hashes de códigos de backup únicos para o usuário."""
-        plain_codes, hashed_codes = generate_backup_codes(count=count)
+        plain_codes, hashed_codes = generate_backup_codes_pair(count=count)
         with self._connection() as conn:
             conn.execute(
                 "UPDATE usuarios SET backup_codes_hash = ? WHERE id = ?",
@@ -430,12 +434,19 @@ class UserRepository:
             return cur.rowcount
 
     def record_login_attempt(self, ip: str) -> None:
-        """Registra tentativa de login mal sucedida no SQLite com poda automática >24h."""
+        """Registra tentativa de login mal sucedida no SQLite (inserção rápida O(1))."""
         now = time.time()
         with self._connection() as conn:
             conn.execute("INSERT INTO login_attempts (ip, attempted_at) VALUES (?, ?)", (ip, now))
-            conn.execute("DELETE FROM login_attempts WHERE attempted_at < ?", (now - 86400,))
             conn.commit()
+
+    def clean_expired_login_attempts(self, max_age_sec: float = 86400.0) -> int:
+        """Remove tentativas de login anteriores ao período configurado (padrão 24h)."""
+        cutoff = time.time() - max_age_sec
+        with self._connection() as conn:
+            cur = conn.execute("DELETE FROM login_attempts WHERE attempted_at < ?", (cutoff,))
+            conn.commit()
+            return cur.rowcount
 
     def get_recent_login_attempts(self, ip: str, window_sec: float = 60.0) -> int:
         """Retorna número de tentativas para o IP na janela especificada."""

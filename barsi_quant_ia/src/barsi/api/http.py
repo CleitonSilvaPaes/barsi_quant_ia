@@ -278,6 +278,10 @@ class NewUserRequest(BaseModel):
 class UpdateUserPasswordRequest(BaseModel):
     new_password: str
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
 class UpdateUserEmailRequest(BaseModel):
     email: str
 
@@ -593,7 +597,14 @@ async def do_login(request: Request):
         repo.log_audit("login_success", actor_id=user["id"], actor_username=username, ip=client_ip)
         logger.info("login_success", ip=client_ip, username=username, role=user["role"])
         token = create_session_token(user["id"], user["username"], user["role"], settings.secret_key)
-        res = RedirectResponse(url="/", status_code=303)
+
+        # 2FA obrigatório para administradores: se não tiver TOTP configurado, redireciona para setup no settings
+        redirect_target = (
+            "/settings?warn=Ative+o+2FA+para+garantir+a+seguranca+da+sua+conta#2fa"
+            if (user.get("role") == "admin" and not user.get("totp_enabled"))
+            else "/"
+        )
+        res = RedirectResponse(url=redirect_target, status_code=303)
         set_barsi_cookie(response=res, key="barsi_session", value=token, request=request, httponly=True, max_age=86400 * 7, samesite="lax")
         csrf_token = generate_csrf_token(token, settings.secret_key)
         set_barsi_cookie(response=res, key="barsi_csrf", value=csrf_token, request=request, httponly=False, max_age=86400 * 7, samesite="lax", path="/")
@@ -627,19 +638,28 @@ async def login_2fa_page(request: Request, error: Optional[str] = None):
 
 @app.post("/login/2fa")
 async def do_login_2fa(request: Request):
+    client_ip = _get_client_ip(request)
+    repo = get_user_repo()
+
+    if repo.get_recent_login_attempts(client_ip, LOGIN_RATE_LIMIT_WINDOW) >= LOGIN_RATE_LIMIT_MAX:
+        logger.warning("login_2fa_rate_limited", ip=client_ip)
+        return RedirectResponse(url="/login/2fa?error=Muitas+tentativas.+Aguarde+1+minuto.", status_code=303)
+
     pending_token = request.cookies.get("barsi_2fa_pending")
     if not pending_token:
+        repo.record_login_attempt(client_ip)
+        repo.log_audit("login_2fa_no_token", ip=client_ip, reason="missing_2fa_pending_cookie")
         return RedirectResponse(url="/login?error=Sessão+2FA+não+iniciada.+Faça+login+primeiro.", status_code=303)
     data = decode_2fa_pending_token(pending_token, settings.secret_key)
     if not data:
+        repo.record_login_attempt(client_ip)
+        repo.log_audit("login_2fa_expired_token", ip=client_ip, reason="invalid_or_expired_2fa_token")
         return RedirectResponse(url="/login?error=Sessão+2FA+expirada.+Faça+login+novamente.", status_code=303)
 
-    client_ip = _get_client_ip(request)
     body = (await request.body()).decode("utf-8", errors="ignore")
     params = urllib.parse.parse_qs(body)
     totp_code = params.get("totp_code", [""])[0].strip()
 
-    repo = get_user_repo()
     user_id = data["uid"]
     ok, method_used = repo.verify_totp_or_backup_code(user_id, totp_code) if totp_code else (False, "")
     if not ok:
@@ -1061,12 +1081,13 @@ async def update_single_carteira_position(ticker: str, item: EditItem, request: 
 
 @app.delete("/api/carteira/{ticker}")
 async def delete_carteira_position(ticker: str, request: Request):
-    """Exclui uma posição da carteira pelo ticker."""
+    """Exclui uma posição da carteira pelo ticker e invalida o cache de posições."""
     require_role_action(request, action_type="edit")
     budget_repo = BudgetRepository(settings.sqlite_db_path)
     success = budget_repo.delete_position(ticker)
     if not success:
         raise HTTPException(status_code=404, detail=f"Ativo {ticker} não encontrado na carteira.")
+    invalidate_canonical_positions_cache(user_id=budget_repo.user_id)
     return {"status": "ok", "message": f"Ativo {ticker} excluído com sucesso."}
 
 @app.post("/api/carteira/import-b3")
@@ -1087,6 +1108,7 @@ async def import_b3_custodia_endpoint(
     budget_repo = BudgetRepository(settings.sqlite_db_path)
     service = B3CustodiaService(budget_repo)
     result = service.sync_custodia_to_sqlite(content)
+    invalidate_canonical_positions_cache(user_id=budget_repo.user_id)
     return JSONResponse(content=result)
 
 @app.get("/api/simulador")
@@ -1474,6 +1496,41 @@ async def get_user_profile_api(request: Request):
         "username": user.get("user", "admin"),
         "role": user.get("role", "leitor")
     }
+
+@app.post("/api/user/change-password")
+async def change_user_password_self(req: ChangePasswordRequest, request: Request):
+    """Altera a senha do usuário autenticado exigindo a confirmação da senha atual."""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Não autenticado")
+    if not req.new_password or len(req.new_password) < 6:
+        raise HTTPException(status_code=400, detail="A nova senha deve ter no mínimo 6 caracteres")
+
+    client_ip = _get_client_ip(request)
+    repo = get_user_repo()
+    auth_check = repo.authenticate(user["user"], req.current_password)
+    if not auth_check:
+        repo.record_login_attempt(client_ip)
+        repo.log_audit(
+            "user_change_password_failed",
+            actor_id=user["uid"],
+            actor_username=user["user"],
+            ip=client_ip,
+            reason="bad_current_password"
+        )
+        raise HTTPException(status_code=400, detail="Senha atual incorreta.")
+
+    success = repo.update_password(user["uid"], req.new_password)
+    if not success:
+        raise HTTPException(status_code=500, detail="Falha ao atualizar a senha")
+
+    repo.log_audit(
+        "user_change_password_success",
+        actor_id=user["uid"],
+        actor_username=user["user"],
+        ip=client_ip
+    )
+    return {"ok": True, "message": "Senha atualizada com sucesso!"}
 
 # ----------------- ROTAS DE METAS FINANCEIRAS (ROADMAP V3.0) -----------------
 @app.get("/api/metas")
@@ -2296,6 +2353,7 @@ async def trigger_run_web(request: Request):
     service = get_sync_service()
     summary = await service.execute_run()
     LAST_RUN_SUMMARY = summary
+    invalidate_canonical_positions_cache()
 
     # Registra snapshot patrimonial consolidado do dia ao finalizar execução
     try:

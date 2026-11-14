@@ -79,7 +79,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     except Exception:
         return False
 
-def generate_backup_codes(count: int = 8) -> Tuple[List[str], List[str]]:
+def generate_backup_codes_pair(count: int = 8) -> Tuple[List[str], List[str]]:
     """Gera códigos de recuperação únicos no formato xxxx-xxxx-xxxx e seus respectivos hashes seguros."""
     plain_codes: List[str] = []
     hashed_codes: List[str] = []
@@ -90,17 +90,23 @@ def generate_backup_codes(count: int = 8) -> Tuple[List[str], List[str]]:
         hashed_codes.append(hash_password(code))
     return plain_codes, hashed_codes
 
+# Alias para compatibilidade retroativa
+generate_backup_codes = generate_backup_codes_pair
+
 
 def verify_backup_code(plain_code: str, hashed_codes: List[str]) -> Tuple[bool, List[str]]:
-    """Valida se um código de backup corresponde a algum dos hashes salvos e o consome."""
+    """Valida se um código de backup corresponde a algum dos hashes salvos e o consome (timing-safe)."""
     if not plain_code or not hashed_codes:
         return False, hashed_codes
     clean = plain_code.strip().lower()
+    matched = False
+    remaining = []
     for h in hashed_codes:
         if verify_password(clean, h):
-            remaining = [x for x in hashed_codes if x != h]
-            return True, remaining
-    return False, hashed_codes
+            matched = True
+        else:
+            remaining.append(h)
+    return matched, (remaining if matched else hashed_codes)
 
 
 def create_session_token(

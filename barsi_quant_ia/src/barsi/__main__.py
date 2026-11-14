@@ -626,7 +626,7 @@ def user_disable_2fa(
         typer.echo(f"    Motivo registrado: {reason}")
         typer.confirm("Deseja prosseguir?", abort=True)
 
-    ok = repo.disable_totp(user["id"])
+    ok = repo.disable_totp(user["id"], bypass_verification=True)
     if ok:
         repo.log_audit(
             action="cli_disable_2fa",
@@ -638,6 +638,15 @@ def user_disable_2fa(
     else:
         typer.echo(f"[!] Falha ao desativar 2FA de '{username}'.")
         raise typer.Exit(code=1)
+
+@app.command("maintenance-cleanup")
+def maintenance_cleanup():
+    """Executa limpeza preventiva periódica de revogações e tentativas expiradas no banco SQLite."""
+    from barsi.adapters.history.user_repository import UserRepository
+    repo = UserRepository(settings.sqlite_db_path)
+    n1 = repo.clean_expired_session_revocations()
+    n2 = repo.clean_expired_login_attempts()
+    typer.echo(f"[✔] Manutenção concluída: {n1} revogações expiradas e {n2} tentativas antigas de login removidas.")
 
 @app.command("user-audit-logs")
 def user_audit_logs(

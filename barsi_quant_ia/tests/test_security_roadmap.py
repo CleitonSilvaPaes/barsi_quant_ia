@@ -264,3 +264,140 @@ def test_admin_audit_logs_endpoint(clean_db):
     data = res.json()
     assert data["ok"] is True
     assert any(l["action"] == "test_audit_event" for l in data["logs"])
+
+
+def test_admin_recovery_after_losing_phone_and_forgetting_password(clean_db):
+    """Cenário completo de emergência: perdeu celular + esqueceu senha -> CLI recupera ambos."""
+    db_file, repo, _ = clean_db
+    repo.create_user("vittima", "senhaAntiga123", role="admin")
+    user = repo.get_by_username("vittima")
+    secret, _ = repo.setup_totp(user["id"])
+    from barsi.infra.security import generate_totp_code
+    repo.confirm_and_enable_totp(user["id"], generate_totp_code(secret))
+    repo.generate_backup_codes(user["id"])
+
+    # Admin não consegue logar (senha incorreta)
+    client = TestClient(app)
+    r1 = client.post("/login", data={"username": "vittima", "password": "errada"}, follow_redirects=False)
+    assert r1.status_code == 303
+
+    # 1. CLI reseta senha
+    res_cli = runner.invoke(cli_app, ["user-pass-reset", "vittima", "--password", "novaSenhaSegura456", "--force"])
+    assert res_cli.exit_code == 0
+
+    # 2. Login com nova senha -> redireciona para /login/2fa (pois 2FA continua ativo)
+    r2 = client.post("/login", data={"username": "vittima", "password": "novaSenhaSegura456"}, follow_redirects=False)
+    assert r2.status_code == 303
+    assert r2.headers["location"] == "/login/2fa"
+
+    # 3. CLI desativa 2FA de emergência
+    res_cli2 = runner.invoke(cli_app, ["user-disable-2fa", "vittima", "--force"])
+    assert res_cli2.exit_code == 0
+
+    # 4. Login com nova senha agora entra direto
+    r3 = client.post("/login", data={"username": "vittima", "password": "novaSenhaSegura456"}, follow_redirects=False)
+    assert r3.status_code == 303
+    assert client.cookies.get("barsi_session") is not None
+
+    # 5. Ações registradas em audit_log
+    logs = repo.list_audit_logs()
+    assert any(l["action"] == "cli_pass_reset" and l["target"] == "vittima" for l in logs)
+    assert any(l["action"] == "cli_disable_2fa" and l["target"] == "vittima" for l in logs)
+
+
+def test_cache_invalidation_on_delete(clean_db):
+    """Excluir uma posição da carteira invalida o cache de posições imediatamente."""
+    db_file, repo, budget_repo = clean_db
+    from barsi.domain.models import Position
+    from barsi.api.http import get_canonical_positions
+
+    budget_repo.save_positions([
+        Position(ticker="BBAS3", row_index=10, preco_atual=10.0),
+        Position(ticker="SAPR4", row_index=11, preco_atual=5.0)
+    ])
+
+    client = TestClient(app)
+    admin_token = create_session_token(1, "admin", "admin", settings.secret_key)
+    client.cookies.set("barsi_session", admin_token)
+
+    # Exclui BBAS3 via endpoint
+    res_del = client.delete("/api/carteira/BBAS3")
+    assert res_del.status_code == 200
+
+    # Próxima consulta já não contém BBAS3
+    res_carteira = client.get("/api/carteira")
+    assert res_carteira.status_code == 200
+    tickers = [item["ticker"] for item in res_carteira.json()]
+    assert "BBAS3" not in tickers
+    assert "SAPR4" in tickers
+
+
+def test_maintenance_cleanup_cli(clean_db):
+    """Comando CLI maintenance-cleanup remove registros expirados de sessões e tentativas de login."""
+    db_file, repo, _ = clean_db
+    # Insere dados expirados
+    with repo._connection() as conn:
+        conn.execute(
+            "INSERT INTO session_revocation (jti, user_id, revoked_at, expires_at) VALUES (?, ?, ?, ?)",
+            ("expired-jti-001", 1, time.time() - 200, time.time() - 100)
+        )
+        conn.execute(
+            "INSERT INTO login_attempts (ip, attempted_at) VALUES (?, ?)",
+            ("1.2.3.4", time.time() - 90000)
+        )
+        conn.commit()
+
+    result = runner.invoke(cli_app, ["maintenance-cleanup"])
+    assert result.exit_code == 0
+    assert "Manutenção concluída" in result.output
+
+    with repo._connection() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM session_revocation WHERE jti = 'expired-jti-001'").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM login_attempts WHERE ip = '1.2.3.4'").fetchone()[0] == 0
+
+
+def test_user_change_password_endpoint(clean_db):
+    """Usuário autenticado altera sua própria senha comprovando a senha atual."""
+    db_file, repo, _ = clean_db
+    repo.create_user("helena", "senhaOriginal123", role="investidor")
+    user = repo.get_by_username("helena")
+
+    client = TestClient(app)
+    token = create_session_token(user["id"], user["username"], user["role"], settings.secret_key)
+    client.cookies.set("barsi_session", token)
+
+    # Senha atual incorreta -> 400
+    res_bad = client.post(
+        "/api/user/change-password",
+        json={"current_password": "senhaErrada", "new_password": "novaSenhaForte456"}
+    )
+    assert res_bad.status_code == 400
+    assert "Senha atual incorreta" in res_bad.json()["detail"]
+
+    # Senha atual correta -> 200
+    res_ok = client.post(
+        "/api/user/change-password",
+        json={"current_password": "senhaOriginal123", "new_password": "novaSenhaForte456"}
+    )
+    assert res_ok.status_code == 200
+    assert res_ok.json()["ok"] is True
+
+    # Verifica se a nova senha funciona
+    assert repo.authenticate("helena", "novaSenhaForte456") is not None
+
+
+def test_admin_login_redirects_to_2fa_setup(clean_db):
+    """Admin sem 2FA ativo é redirecionado para /settings#2fa para configuração mandatória."""
+    db_file, repo, _ = clean_db
+    repo.create_user("master_admin", "adminPassword123", role="admin")
+
+    client = TestClient(app)
+    res = client.post(
+        "/login",
+        data={"username": "master_admin", "password": "adminPassword123"},
+        follow_redirects=False
+    )
+    assert res.status_code == 303
+    assert "/settings" in res.headers["location"]
+    assert "2fa" in res.headers["location"].lower()
+
