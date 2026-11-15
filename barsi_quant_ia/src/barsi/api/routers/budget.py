@@ -107,7 +107,7 @@ async def set_transacao_feedback_endpoint(transacao_id: int, req: TransacaoFeedb
         ticker = (tx.get("ticker") or tx.get("ticker_relacionado") or "EXTRATO").strip().upper()
         active_alerts = repo.list_thesis_alerts(ticker=ticker, active_only=True)
         for a in active_alerts:
-            if a["risk_type"] == "ANOMALIA_EXTRATO" and fitid in a.get("snippet", ""):
+            if a["risk_type"] == "ANOMALIA_EXTRATO" and f"[{fitid}]" in a.get("snippet", ""):
                 repo.dismiss_thesis_alert(a["id"])
 
     return {
@@ -127,7 +127,15 @@ async def get_extrato_anomalies_endpoint(request: Request, limit: int = 50):
     repo = BudgetRepository(settings.sqlite_db_path)
     service = EarlyWarningService(repo)
     anomalies = await service.scan_ofx_anomalies(limit=limit)
-    return {"anomalies": anomalies, "count": len(anomalies)}
+    from barsi.domain.anomaly_detector import AnomalyDetector
+    detector = AnomalyDetector.get_instance()
+    return {
+        "anomalies": anomalies,
+        "count": len(anomalies),
+        "model_loaded": detector.is_loaded,
+        "model_path": detector.model_path if detector.is_loaded else None,
+        "threshold": detector.anomaly_threshold if detector.is_loaded else None,
+    }
 
 # ----------------- CRUD DE CATEGORIAS DE DESPESA -----------------
 

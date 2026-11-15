@@ -10,6 +10,7 @@ let categoriaAtual = "";
 let todasCategorias = [];
 let transacoesCarregadas = [];
 let listaAnomalias = [];
+let modeloAnomaliaCarregado = true;
 
 function getValidTargetMonth() {
   const input = document.getElementById("target-month-input");
@@ -454,12 +455,36 @@ async function carregarAnomalias() {
     }
     const data = await res.json();
     listaAnomalias = data.anomalies || [];
+    modeloAnomaliaCarregado = data.model_loaded !== false;
+
+    const tsEl = document.getElementById("anomalias-timestamp");
+    if (tsEl) {
+      tsEl.innerText = `atualizado às ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+    }
+
+    const avisoEl = document.getElementById("anomalias-aviso-modelo");
+    if (avisoEl) {
+      if (!modeloAnomaliaCarregado) {
+        avisoEl.style.display = "block";
+        avisoEl.innerHTML = "⚠️ <strong>Aviso Operacional:</strong> Modelo ML (.npz) ausente — operando em modo heurístico (apenas desvios &gt; R$ 10.000). Execute <code>python -m barsi ml-retrain-anomaly</code> no PC para calibrar o Isolation Forest completo.";
+      } else {
+        avisoEl.style.display = "none";
+      }
+    }
+
     if (badgeTotal) {
-      badgeTotal.innerText = `${listaAnomalias.length} detectada${listaAnomalias.length === 1 ? '' : 's'}`;
+      const sufixoFallback = !modeloAnomaliaCarregado ? " [heurística]" : "";
+      badgeTotal.innerText = `${listaAnomalias.length} detectada${listaAnomalias.length === 1 ? '' : 's'}${sufixoFallback}`;
       if (listaAnomalias.length === 0) {
-        badgeTotal.style.background = "rgba(16, 185, 129, 0.15)";
-        badgeTotal.style.color = "#34d399";
-        badgeTotal.style.borderColor = "rgba(16, 185, 129, 0.35)";
+        if (!modeloAnomaliaCarregado) {
+          badgeTotal.style.background = "rgba(245, 158, 11, 0.15)";
+          badgeTotal.style.color = "#fbbf24";
+          badgeTotal.style.borderColor = "rgba(245, 158, 11, 0.35)";
+        } else {
+          badgeTotal.style.background = "rgba(16, 185, 129, 0.15)";
+          badgeTotal.style.color = "#34d399";
+          badgeTotal.style.borderColor = "rgba(16, 185, 129, 0.35)";
+        }
       } else {
         badgeTotal.style.background = "rgba(239, 68, 68, 0.15)";
         badgeTotal.style.color = "#f87171";
@@ -497,9 +522,15 @@ function renderizarAnomalias() {
     if (tabela) tabela.style.display = "none";
     if (vazio) {
       vazio.style.display = "block";
-      vazio.innerText = listaAnomalias.length === 0
-        ? "✅ Nenhuma anomalia incomum detectada nas transações recentes. Todas as operações estão dentro do padrão esperado."
-        : `Nenhuma anomalia com severidade '${filtroSev}'. Total detectado: ${listaAnomalias.length}.`;
+      if (!modeloAnomaliaCarregado && listaAnomalias.length === 0) {
+        vazio.style.color = "#fbbf24";
+        vazio.innerHTML = "⚠️ Nenhuma transação com desvio crítico detectada pela heurística de valor alto (&gt; R$ 10.000).<br/><span style='font-size:0.8rem; color:var(--text-muted);'>Treine o modelo Isolation Forest no PC para análise estatística sensível em compras cotidianas e desvios de frequência.</span>";
+      } else {
+        vazio.style.color = "#10b981";
+        vazio.innerText = listaAnomalias.length === 0
+          ? "✅ Nenhuma anomalia incomum detectada nas transações recentes. Todas as operações estão dentro do padrão esperado."
+          : `Nenhuma anomalia com severidade '${filtroSev}'. Total detectado: ${listaAnomalias.length}.`;
+      }
     }
     return;
   }

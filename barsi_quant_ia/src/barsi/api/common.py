@@ -1,7 +1,7 @@
 """Módulo de utilitários, modelos Pydantic, dependências e estado compartilhado da API Barsi Quant IA."""
 import os
 import time
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Literal
 import psutil
 from pydantic import BaseModel, Field
 from fastapi import HTTPException, Request, Response
@@ -67,7 +67,7 @@ class UpdateTransacaoRequest(BaseModel):
     tipo: Optional[str] = None
 
 class TransacaoFeedbackRequest(BaseModel):
-    feedback: str = "OK_ANOMALIA"
+    feedback: Literal["OK_ANOMALIA", "NORMAL", "REVISAR"] = "OK_ANOMALIA"
 
 class DividendItem(BaseModel):
     ticker: str

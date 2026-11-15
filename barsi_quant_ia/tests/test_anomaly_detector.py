@@ -273,7 +273,64 @@ def test_api_get_extrato_anomalies(test_repo, trained_model_path, monkeypatch):
     assert "anomalies" in data
     assert "count" in data
     assert data["count"] >= 1
+    assert data["model_loaded"] is True
+    assert data["model_path"] == trained_model_path
+    assert data["threshold"] is not None
     assert any(a["fitid"] == "API_ANOM_1" for a in data["anomalies"])
+
+
+def test_feedback_ok_does_not_dismiss_wrong_alert_on_partial_fitid(test_repo, monkeypatch):
+    """Garante que 'id_1' não arquiva indevidamente alerta de 'id_123' (partial substring match bug)."""
+    # Insere duas transações cujos fitids compartilham prefixo comum ("id_1" vs "id_123")
+    test_repo.persist_transacoes([
+        {"id_transacao": "id_1", "valor": 15000.0, "tipo": "DEBIT", "data": "2026-06-01", "descricao": "COMPRA 1", "origem": "CONTA"},
+        {"id_transacao": "id_123", "valor": 50000.0, "tipo": "DEBIT", "data": "2026-06-01", "descricao": "COMPRA 123", "origem": "CONTA"},
+    ])
+
+    tx1 = test_repo.get_transacao_by_fitid("id_1")
+    assert tx1 is not None
+    tx1_id = tx1["id"]
+
+    # Cria dois alertas com snippets contendo [id_1] e [id_123]
+    test_repo.record_thesis_alert(
+        ticker="EXTRATO", risk_type="ANOMALIA_EXTRATO", severity="ALTA",
+        headline="A1", snippet="[id_1] Valor R$ 15.000", source="test",
+    )
+    test_repo.record_thesis_alert(
+        ticker="EXTRATO", risk_type="ANOMALIA_EXTRATO", severity="ALTA",
+        headline="A123", snippet="[id_123] Valor R$ 50.000", source="test",
+    )
+
+    monkeypatch.setattr(settings, "sqlite_db_path", test_repo.db_path)
+    monkeypatch.setattr("barsi.api.routers.budget.require_role_action", lambda req, action_type: {"username": "admin", "role": "admin"})
+
+    client = TestClient(app)
+    # Dá feedback OK na transação id_1
+    resp = client.post(f"/api/extratos/transacoes/{tx1_id}/feedback", json={"feedback": "OK_ANOMALIA"})
+    assert resp.status_code == 200
+
+    # Confirma que SOMENTE o alerta [id_1] foi arquivado; o de [id_123] deve permanecer ativo!
+    active_alerts = test_repo.list_thesis_alerts(ticker="EXTRATO", active_only=True)
+    assert len(active_alerts) == 1
+    assert "[id_123]" in active_alerts[0]["snippet"]
+    assert "[id_1]" not in active_alerts[0]["snippet"]
+
+
+def test_feedback_endpoint_validates_literal_feedback(test_repo, monkeypatch):
+    """Endpoint de feedback deve retornar HTTP 422 para valores inválidos fora de Literal."""
+    test_repo.persist_transacoes([
+        {"id_transacao": "FIT_55", "valor": 100.0, "tipo": "DEBIT", "data": "2026-06-01", "descricao": "TESTE", "origem": "CONTA"}
+    ])
+    tx55 = test_repo.get_transacao_by_fitid("FIT_55")
+    assert tx55 is not None
+    tx55_id = tx55["id"]
+
+    monkeypatch.setattr(settings, "sqlite_db_path", test_repo.db_path)
+    monkeypatch.setattr("barsi.api.routers.budget.require_role_action", lambda req, action_type: {"username": "admin", "role": "admin"})
+
+    client = TestClient(app)
+    resp = client.post(f"/api/extratos/transacoes/{tx55_id}/feedback", json={"feedback": "INJECAO_STRING_INVALIDA"})
+    assert resp.status_code == 422
 
 
 def test_extratos_page_renders_anomaly_radar(test_repo, monkeypatch):

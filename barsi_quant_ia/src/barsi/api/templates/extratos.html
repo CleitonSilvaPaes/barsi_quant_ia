@@ -30,6 +30,7 @@
         Carregando...
       </span>
       <span style="font-size: 0.75rem; color: var(--text-muted);">(ML Isolation Forest)</span>
+      <span id="anomalias-timestamp" style="font-size: 0.72rem; color: var(--text-muted); margin-left: 0.2rem;"></span>
     </div>
     
     <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
@@ -41,6 +42,8 @@
       <button class="btn btn-outline" onclick="carregarAnomalias()" style="font-size: 0.82rem; padding: 0.3rem 0.65rem;" title="Atualizar detecções do modelo">🔄 Atualizar Radar</button>
     </div>
   </div>
+
+  <div id="anomalias-aviso-modelo" style="display:none; padding: 0.65rem 1.25rem; background: rgba(245, 158, 11, 0.12); border-bottom: 1px solid rgba(245, 158, 11, 0.25); color: #fbbf24; font-size: 0.8rem;"></div>
 
   <div id="container-anomalias" style="overflow-x: auto;">
     <div id="anomalias-loading" style="padding: 1.75rem; text-align: center; color: var(--text-muted); font-size: 0.85rem;">
