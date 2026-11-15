@@ -105,6 +105,11 @@ class AnomalyDetector:
     def anomaly_threshold(self) -> float:
         return self._anomaly_threshold
 
+    @property
+    def n_trees(self) -> int:
+        """Número de estimadores (árvores de isolamento) carregados do modelo."""
+        return self._n_trees
+
     # ----------------- Carga do modelo -----------------
 
     def load_model(self) -> bool:

@@ -20,6 +20,7 @@ from barsi.adapters.history.budget_repository import BudgetRepository
 from barsi.domain.anomaly_detector import AnomalyDetector, _c_factor
 from barsi.services.early_warning_service import EarlyWarningService
 from barsi.training.anomaly_trainer import train_and_export_model, generate_synthetic_financial_baseline
+from barsi.infra.security import create_session_token
 from barsi.api.http import app
 
 
@@ -218,7 +219,7 @@ def test_retrain_invalidates_singleton(tmp_path):
 
     inst1 = AnomalyDetector.get_instance(model_path=model_v1)
     assert inst1.model_path == model_v1
-    assert inst1._n_trees == 10
+    assert inst1.n_trees == 10
 
     # Retreina v2 com mais árvores
     model_v2 = str(tmp_path / "model_v2.npz")
@@ -227,7 +228,7 @@ def test_retrain_invalidates_singleton(tmp_path):
     # Novo get_instance deve recarregar v2
     inst2 = AnomalyDetector.get_instance(model_path=model_v2)
     assert inst2.model_path == model_v2
-    assert inst2._n_trees == 25
+    assert inst2.n_trees == 25
 
 
 @pytest.mark.asyncio
@@ -273,3 +274,21 @@ def test_api_get_extrato_anomalies(test_repo, trained_model_path, monkeypatch):
     assert "count" in data
     assert data["count"] >= 1
     assert any(a["fitid"] == "API_ANOM_1" for a in data["anomalies"])
+
+
+def test_extratos_page_renders_anomaly_radar(test_repo, monkeypatch):
+    """Garante que a página HTML /extratos renderiza o container do Radar de Anomalias e controles."""
+    from barsi.adapters.history.user_repository import UserRepository
+    monkeypatch.setattr(settings, "sqlite_db_path", test_repo.db_path)
+    user_repo = UserRepository(test_repo.db_path)
+    user_id = user_repo.create_user("admin_radar", "secret123", role="admin")
+    token = create_session_token(user_id, "admin_radar", "admin", settings.secret_key)
+    client = TestClient(app)
+    resp = client.get("/extratos", cookies={"barsi_session": token})
+    assert resp.status_code == 200
+    assert "Radar de Anomalias Financeiras" in resp.text
+    assert 'id="card-anomalias"' in resp.text
+    assert 'id="badge-total-anomalias"' in resp.text
+    assert 'id="tabela-anomalias"' in resp.text
+    assert 'id="filtro-severidade-anomalias"' in resp.text
+    assert "/static/js/extratos.js" in resp.text

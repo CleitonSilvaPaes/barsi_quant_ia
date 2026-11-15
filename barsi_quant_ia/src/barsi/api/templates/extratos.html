@@ -20,6 +20,54 @@
 
 <div id="extrato-log" style="display:none; background:#090d16; border:1px solid var(--border); border-radius:6px; padding:0.75rem 1rem; font-family:monospace; font-size:0.8rem; color:#38bdf8; margin-bottom:1.5rem;"></div>
 
+<!-- Radar de Anomalias Financeiras (ML Isolation Forest) -->
+<div class="card" id="card-anomalias" style="padding:0; overflow:hidden; margin-bottom:1.5rem; border:1px solid rgba(239, 68, 68, 0.25); background: rgba(15, 23, 42, 0.45);">
+  <div style="padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+    <div style="display: flex; align-items: center; gap: 0.6rem;">
+      <span style="font-size: 1.15rem;">🚨</span>
+      <h3 style="font-size: 1rem; color: #fff; margin: 0;">Radar de Anomalias Financeiras</h3>
+      <span id="badge-total-anomalias" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); font-size: 0.75rem; padding: 0.15rem 0.55rem; border-radius: 9999px; font-weight: 600;">
+        Carregando...
+      </span>
+      <span style="font-size: 0.75rem; color: var(--text-muted);">(ML Isolation Forest)</span>
+    </div>
+    
+    <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+      <select id="filtro-severidade-anomalias" class="tbl-input" style="width: 175px; font-size: 0.82rem;" onchange="filtrarAnomalias()">
+        <option value="TODAS">Todas as Severidades</option>
+        <option value="ALTA">🚨 Apenas Severidade ALTA</option>
+        <option value="MEDIA">⚠️ Severidade MÉDIA+</option>
+      </select>
+      <button class="btn btn-outline" onclick="carregarAnomalias()" style="font-size: 0.82rem; padding: 0.3rem 0.65rem;" title="Atualizar detecções do modelo">🔄 Atualizar Radar</button>
+    </div>
+  </div>
+
+  <div id="container-anomalias" style="overflow-x: auto;">
+    <div id="anomalias-loading" style="padding: 1.75rem; text-align: center; color: var(--text-muted); font-size: 0.85rem;">
+      ⏳ Executando inferência do modelo de anomalias nas transações recentes...
+    </div>
+    <div id="anomalias-vazio" style="display: none; padding: 1.75rem; text-align: center; color: #10b981; font-size: 0.85rem;">
+      ✅ Nenhuma anomalia incomum detectada nas transações recentes. Todas as operações estão dentro do padrão esperado.
+    </div>
+    <table id="tabela-anomalias" style="display: none; width: 100%; border-collapse: collapse;">
+      <thead>
+        <tr>
+          <th>Data</th>
+          <th>Descrição</th>
+          <th>Origem</th>
+          <th style="text-align: right;">Valor</th>
+          <th style="text-align: center;">Severidade</th>
+          <th style="text-align: center;">Score ML</th>
+          <th>Diagnóstico do Modelo</th>
+          <th style="text-align: center; width: 150px;">Ação</th>
+        </tr>
+      </thead>
+      <tbody id="anomalias-body">
+      </tbody>
+    </table>
+  </div>
+</div>
+
 <div class="card" style="padding:0; overflow:hidden;">
   <div style="padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
     <h3 style="font-size: 1rem; color: #fff; margin: 0;">📋 Transações Bancárias Conciliadas</h3>

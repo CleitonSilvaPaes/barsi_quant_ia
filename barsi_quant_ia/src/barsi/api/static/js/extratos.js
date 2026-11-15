@@ -9,6 +9,7 @@ let buscaAtual = "";
 let categoriaAtual = "";
 let todasCategorias = [];
 let transacoesCarregadas = [];
+let listaAnomalias = [];
 
 function getValidTargetMonth() {
   const input = document.getElementById("target-month-input");
@@ -55,6 +56,7 @@ async function uploadExtrato(file) {
     showToast("Extrato importado com sucesso!");
     paginaAtual = 1;
     carregarExtratos();
+    carregarAnomalias();
   } catch (err) {
     log.innerText = `[${new Date().toLocaleTimeString()}] ❌ Erro ao enviar extrato: ` + err;
     showToast("Falha no upload do extrato: " + err.message, "error");
@@ -82,6 +84,7 @@ async function conciliarExtratos() {
     log.innerText = `[${new Date().toLocaleTimeString()}] ✅ Conciliação concluída! Meses atualizados: ${out.meses.join(', ')}. Ativos conciliados: ${out.reconciled_positions || 0}.`;
     showToast(out.message || "Extratos conciliados com sucesso!");
     carregarExtratos();
+    carregarAnomalias();
   } catch (err) {
     log.innerText = `[${new Date().toLocaleTimeString()}] ❌ Erro: ` + err;
     showToast("Erro na conciliação: " + err.message, "error");
@@ -430,7 +433,185 @@ async function excluirTransacao(id, descricao) {
   }
 }
 
+// ------------------- RADAR DE ANOMALIAS (ML ISOLATION FOREST) -------------------
+
+async function carregarAnomalias() {
+  const loading = document.getElementById("anomalias-loading");
+  const vazio = document.getElementById("anomalias-vazio");
+  const tabela = document.getElementById("tabela-anomalias");
+  const badgeTotal = document.getElementById("badge-total-anomalias");
+
+  if (loading) loading.style.display = "block";
+  if (vazio) vazio.style.display = "none";
+  if (tabela) tabela.style.display = "none";
+
+  try {
+    const res = await fetch("/api/extratos/anomalias?limit=50");
+    if (!res.ok) {
+      if (loading) loading.innerText = "Radar temporariamente indisponível (modelo ausente ou erro HTTP).";
+      if (badgeTotal) badgeTotal.innerText = "indisponível";
+      return;
+    }
+    const data = await res.json();
+    listaAnomalias = data.anomalies || [];
+    if (badgeTotal) {
+      badgeTotal.innerText = `${listaAnomalias.length} detectada${listaAnomalias.length === 1 ? '' : 's'}`;
+      if (listaAnomalias.length === 0) {
+        badgeTotal.style.background = "rgba(16, 185, 129, 0.15)";
+        badgeTotal.style.color = "#34d399";
+        badgeTotal.style.borderColor = "rgba(16, 185, 129, 0.35)";
+      } else {
+        badgeTotal.style.background = "rgba(239, 68, 68, 0.15)";
+        badgeTotal.style.color = "#f87171";
+        badgeTotal.style.borderColor = "rgba(239, 68, 68, 0.35)";
+      }
+    }
+    renderizarAnomalias();
+  } catch (err) {
+    console.warn("Erro ao buscar anomalias:", err);
+    if (loading) loading.innerText = "Erro ao conectar com o serviço de detecção de anomalias.";
+  }
+}
+
+function filtrarAnomalias() {
+  renderizarAnomalias();
+}
+
+function renderizarAnomalias() {
+  const loading = document.getElementById("anomalias-loading");
+  const vazio = document.getElementById("anomalias-vazio");
+  const tabela = document.getElementById("tabela-anomalias");
+  const tbody = document.getElementById("anomalias-body");
+  const filtroSev = document.getElementById("filtro-severidade-anomalias")?.value || "TODAS";
+
+  if (loading) loading.style.display = "none";
+
+  let filtradas = listaAnomalias;
+  if (filtroSev === "ALTA") {
+    filtradas = listaAnomalias.filter(a => a.severity === "ALTA");
+  } else if (filtroSev === "MEDIA") {
+    filtradas = listaAnomalias.filter(a => a.severity === "ALTA" || a.severity === "MEDIA");
+  }
+
+  if (filtradas.length === 0) {
+    if (tabela) tabela.style.display = "none";
+    if (vazio) {
+      vazio.style.display = "block";
+      vazio.innerText = listaAnomalias.length === 0
+        ? "✅ Nenhuma anomalia incomum detectada nas transações recentes. Todas as operações estão dentro do padrão esperado."
+        : `Nenhuma anomalia com severidade '${filtroSev}'. Total detectado: ${listaAnomalias.length}.`;
+    }
+    return;
+  }
+
+  if (vazio) vazio.style.display = "none";
+  if (tabela) tabela.style.display = "table";
+  if (!tbody) return;
+
+  tbody.innerHTML = "";
+  filtradas.forEach(a => {
+    const isDebit = a.tipo === "DEBIT" || (a.valor && a.valor < 0);
+    const valAbs = Math.abs(a.valor || 0);
+    const valColor = isDebit ? "var(--red)" : "var(--green)";
+    const sinal = isDebit ? "-" : "+";
+    const valFormatted = valAbs.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+    let badgeSevStyle = "background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.3);";
+    let badgeSevIcon = "ℹ️";
+    if (a.severity === "ALTA") {
+      badgeSevStyle = "background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.5);";
+      badgeSevIcon = "🚨";
+    } else if (a.severity === "MEDIA") {
+      badgeSevStyle = "background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.5);";
+      badgeSevIcon = "⚠️";
+    }
+
+    const txId = a.transacao_id;
+    const btnAction = txId
+      ? `<button class="btn btn-outline" onclick="marcarOkAnomalia(${txId}, this)" style="padding: 0.25rem 0.55rem; font-size: 0.78rem; color: #10b981; border-color: rgba(16, 185, 129, 0.4);" title="Confirmar que a transação é legítima e arquivar alertas">✅ É Legítima</button>`
+      : `<span style="font-size: 0.75rem; color: var(--text-muted);">-</span>`;
+
+    const scoreFmt = typeof a.score === "number" ? a.score.toFixed(3) : "-";
+    const thresFmt = typeof a.threshold === "number" ? a.threshold.toFixed(3) : "-";
+
+    tbody.innerHTML += `
+      <tr id="anomalia-row-${txId || esc(a.fitid)}">
+        <td style="white-space:nowrap;">${esc(a.data || '')}</td>
+        <td>
+          <strong>${esc(a.descricao || '')}</strong>
+          ${a.ticker && a.ticker !== 'EXTRATO' ? `<span class="badge-aguardar" style="font-size:0.7rem; margin-left:0.3rem;">${esc(a.ticker)}</span>` : ''}
+        </td>
+        <td><span style="font-size:0.75rem; color:var(--text-muted);">${esc(a.origem || 'CONTA')}</span></td>
+        <td style="text-align: right; color: ${valColor}; font-weight: 600; white-space:nowrap;">${sinal} ${valFormatted}</td>
+        <td style="text-align: center;">
+          <span style="display:inline-block; font-size: 0.72rem; padding: 0.15rem 0.45rem; border-radius: 4px; font-weight: 600; ${badgeSevStyle}">
+            ${badgeSevIcon} ${esc(a.severity || 'NORMAL')}
+          </span>
+        </td>
+        <td style="text-align: center; font-family: monospace; font-size: 0.78rem;">
+          <span style="color: #f87171;">${scoreFmt}</span>
+          <span style="font-size: 0.7rem; color: var(--text-muted);"> (limiar: ${thresFmt})</span>
+        </td>
+        <td style="font-size: 0.8rem; color: #cbd5e1;">
+          ${esc(a.reason || 'Desvio identificado pelo modelo')}
+          ${a.fallback ? '<span style="font-size:0.7rem; color:#f59e0b; margin-left:0.3rem;">[heurística]</span>' : ''}
+        </td>
+        <td style="text-align: center; white-space: nowrap;">
+          ${btnAction}
+        </td>
+      </tr>
+    `;
+  });
+}
+
+async function marcarOkAnomalia(txId, btnElement) {
+  if (!txId) {
+    showToast("Transação sem ID persistido.", "warning");
+    return;
+  }
+  if (btnElement) {
+    btnElement.disabled = true;
+    btnElement.innerText = "Gravando...";
+  }
+
+  try {
+    const res = await fetch(`/api/extratos/transacoes/${txId}/feedback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ feedback: "OK_ANOMALIA" })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showToast("Transação confirmada como legítima. Alertas arquivados!", "success");
+      listaAnomalias = listaAnomalias.filter(a => a.transacao_id !== txId);
+      const badgeTotal = document.getElementById("badge-total-anomalias");
+      if (badgeTotal) {
+        badgeTotal.innerText = `${listaAnomalias.length} detectada${listaAnomalias.length === 1 ? '' : 's'}`;
+        if (listaAnomalias.length === 0) {
+          badgeTotal.style.background = "rgba(16, 185, 129, 0.15)";
+          badgeTotal.style.color = "#34d399";
+          badgeTotal.style.borderColor = "rgba(16, 185, 129, 0.35)";
+        }
+      }
+      renderizarAnomalias();
+    } else {
+      showToast(data.detail || "Erro ao registrar feedback", "error");
+      if (btnElement) {
+        btnElement.disabled = false;
+        btnElement.innerText = "✅ É Legítima";
+      }
+    }
+  } catch (err) {
+    showToast("Erro na requisição: " + err, "error");
+    if (btnElement) {
+      btnElement.disabled = false;
+      btnElement.innerText = "✅ É Legítima";
+    }
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   carregarCategorias();
   carregarExtratos();
+  carregarAnomalias();
 });
