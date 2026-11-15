@@ -304,3 +304,47 @@ async def sync_market_history_endpoint(request: Request, background_tasks: Backg
     background_tasks.add_task(_do_sync)
     return {"status": "queued", "message": "Sincronização de histórico de mercado agendada em segundo plano"}
 
+
+@router.get("/api/payout/score/{ticker}")
+async def get_payout_score(ticker: str, request: Request):
+    """Retorna o score de sustentabilidade de dividendos v2 (Regressão Logística) com explicabilidade completa."""
+    require_role_action(request, action_type="read")
+
+    positions = await get_canonical_positions()
+    pos = next((p for p in positions if p.ticker.upper() == ticker.upper()), None)
+    if not pos:
+        raise HTTPException(status_code=404, detail=f"Ativo {ticker.upper()} não encontrado na carteira")
+
+    from barsi.domain.payout_scorer import PayoutScorer
+    from barsi.domain.quant_ai import StatisticalBarsiEngine
+
+    atualizar_posicao_quant(pos, pos.preco_atual, pos.div_proj)
+    setor_norm = (pos.setor or "").upper()
+    perenidade = StatisticalBarsiEngine.SETOR_STATS.get(
+        setor_norm, StatisticalBarsiEngine.SETOR_STATS.get("OUTROS", {})
+    ).get("perenidade", 0.85)
+
+    scorer = PayoutScorer.get_instance()
+    result = scorer.score(pos, extras={"perenidade": perenidade})
+
+    feature_summary = {
+        name: {"weight": round(w, 4), "sinal": "favoravel" if w > 0 else "desfavoravel"}
+        for name, w in zip(scorer.feature_names, scorer.weights)
+    }
+
+    return {
+        "ticker": pos.ticker,
+        "empresa": pos.empresa,
+        "setor": pos.setor,
+        "score": result["score"],
+        "label": result["label"],
+        "badge": result["badge"],
+        "logit": result["logit"],
+        "intercept": result["intercept"],
+        "contributions": result["contributions"],
+        "feature_summary": feature_summary,
+        "is_loaded": result["is_loaded"],
+        "weights_path": os.path.basename(scorer.weights_path) if scorer.weights_path else None,
+    }
+
+

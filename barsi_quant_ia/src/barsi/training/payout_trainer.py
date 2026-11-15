@@ -11,8 +11,6 @@ from datetime import datetime, timezone
 from typing import List, Tuple, Dict, Any, Optional
 
 import numpy as np
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, log_loss
 
 from barsi.domain.payout_scorer import (
     PAYOUT_FEATURE_NAMES,
@@ -119,6 +117,15 @@ def train_and_export_payout_model(
     seed: int = 42,
 ) -> Dict[str, Any]:
     """Treina Regressão Logística com regularização L2, exporta JSON interpretável e reseta singletons."""
+    try:
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.metrics import accuracy_score, log_loss
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError(
+            "scikit-learn não instalado. Rode no PC de desenvolvimento: "
+            "pip install -e 'barsi_quant_ia[dev]'"
+        ) from exc
+
     X_list: List[List[float]] = [sample[0] for sample in BASE_PAYOUT_SAMPLES]
     y_list: List[float] = [sample[1] for sample in BASE_PAYOUT_SAMPLES]
 
