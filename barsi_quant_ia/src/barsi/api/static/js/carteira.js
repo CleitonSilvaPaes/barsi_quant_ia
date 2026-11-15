@@ -359,14 +359,31 @@ function abrirDrawer(ticker) {
 }
 
 const PAYOUT_FEATURE_MAP = {
-  "yield_score": { label: "Yield Projetado (>6%)", icon: "💰" },
-  "payout_ratio": { label: "Sustentabilidade Payout", icon: "⚖️" },
-  "roe_score": { label: "Rentabilidade (ROE)", icon: "📈" },
-  "div_growth": { label: "Crescimento DPA (5a)", icon: "🌱" },
-  "perenidade": { label: "Perenidade (B.E.S.T.)", icon: "🏛️" },
-  "leverage_penalty": { label: "Penalidade Alavancagem", icon: "⚠️" },
-  "fii_vacancia_penalty": { label: "Penalidade Vacância FII", icon: "🏢" }
+  "payout_ratio":     { label: "Sustentabilidade Payout",   icon: "⚖️" },
+  "dividend_yield":   { label: "Yield Projetado (>6%)",     icon: "💰" },
+  "debt_ebitda_inv":  { label: "Saúde Financeira (Dívida)", icon: "⚠️" },
+  "roe":              { label: "Rentabilidade (ROE)",        icon: "📈" },
+  "perenidade_setor": { label: "Perenidade (B.E.S.T.)",      icon: "🏛️" },
+  "margem_seguranca": { label: "Margem de Segurança",        icon: "🛡️" },
+  "anos_pagando":     { label: "Histórico de Pagamento",     icon: "🌱" },
+  "volatilidade_inv": { label: "Estabilidade de Preço",      icon: "📊" }
 };
+
+const _payoutCacheDrawer = {};
+
+function getCachedPayoutDrawer(ticker) {
+  const entry = _payoutCacheDrawer[ticker];
+  if (!entry) return null;
+  if (Date.now() - entry.ts > 5 * 60 * 1000) {
+    delete _payoutCacheDrawer[ticker];
+    return null;
+  }
+  return entry.data;
+}
+
+function setCachedPayoutDrawer(ticker, data) {
+  _payoutCacheDrawer[ticker] = { data, ts: Date.now() };
+}
 
 async function carregarPayoutScoreDrawer(ticker) {
   const loading = document.getElementById("drawer-payout-loading");
@@ -382,9 +399,13 @@ async function carregarPayoutScoreDrawer(ticker) {
   modelBadge.style.color = "var(--text-muted)";
 
   try {
-    const res = await fetch(`/api/payout/score/${encodeURIComponent(ticker)}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
+    let data = getCachedPayoutDrawer(ticker);
+    if (!data) {
+      const res = await fetch(`/api/payout/score/${encodeURIComponent(ticker)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      data = await res.json();
+      setCachedPayoutDrawer(ticker, data);
+    }
 
     loading.style.display = "none";
     content.style.display = "block";

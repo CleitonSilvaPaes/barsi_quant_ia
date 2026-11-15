@@ -186,28 +186,43 @@ function renderizarCards() {
 }
 
 const PAYOUT_FEATURE_MAP_INSIGHTS = {
-  "yield_score": { label: "Yield Projetado (>6%)", icon: "💰" },
-  "payout_ratio": { label: "Sustentabilidade Payout", icon: "⚖️" },
-  "roe_score": { label: "Rentabilidade (ROE)", icon: "📈" },
-  "div_growth": { label: "Crescimento DPA (5a)", icon: "🌱" },
-  "perenidade": { label: "Perenidade (B.E.S.T.)", icon: "🏛️" },
-  "leverage_penalty": { label: "Penalidade Alavancagem", icon: "⚠️" },
-  "fii_vacancia_penalty": { label: "Penalidade Vacância FII", icon: "🏢" }
+  "payout_ratio":     { label: "Sustentabilidade Payout",   icon: "⚖️" },
+  "dividend_yield":   { label: "Yield Projetado (>6%)",     icon: "💰" },
+  "debt_ebitda_inv":  { label: "Saúde Financeira (Dívida)", icon: "⚠️" },
+  "roe":              { label: "Rentabilidade (ROE)",        icon: "📈" },
+  "perenidade_setor": { label: "Perenidade (B.E.S.T.)",      icon: "🏛️" },
+  "margem_seguranca": { label: "Margem de Segurança",        icon: "🛡️" },
+  "anos_pagando":     { label: "Histórico de Pagamento",     icon: "🌱" },
+  "volatilidade_inv": { label: "Estabilidade de Preço",      icon: "📊" }
 };
 
 const _payoutCache = {};
 
+function getCachedPayout(ticker) {
+  const entry = _payoutCache[ticker];
+  if (!entry) return null;
+  if (Date.now() - entry.ts > 5 * 60 * 1000) {
+    delete _payoutCache[ticker];
+    return null;
+  }
+  return entry.data;
+}
+
+function setCachedPayout(ticker, data) {
+  _payoutCache[ticker] = { data, ts: Date.now() };
+}
+
 async function carregarPillsPayoutParaPagina(pageItems) {
-  for (const item of pageItems) {
+  await Promise.all(pageItems.map(async (item) => {
     const el = document.getElementById(`payout-pill-${item.ticker}`);
-    if (!el) continue;
+    if (!el) return;
     try {
-      let data = _payoutCache[item.ticker];
+      let data = getCachedPayout(item.ticker);
       if (!data) {
         const res = await fetch(`/api/payout/score/${encodeURIComponent(item.ticker)}`);
-        if (!res.ok) continue;
+        if (!res.ok) return;
         data = await res.json();
-        _payoutCache[item.ticker] = data;
+        setCachedPayout(item.ticker, data);
       }
       const scorePct = (data.score * 100).toFixed(0);
       let bg = "rgba(16, 185, 129, 0.15)";
@@ -229,7 +244,7 @@ async function carregarPillsPayoutParaPagina(pageItems) {
     } catch (e) {
       if (el) el.innerHTML = `<span style="color:var(--text-muted);">Indisponível</span>`;
     }
-  }
+  }));
 }
 
 async function abrirModalPayout(ticker) {
@@ -247,12 +262,12 @@ async function abrirModalPayout(ticker) {
   document.getElementById("modal-payout-empresa").innerText = item ? `${item.empresa || ''} • Setor: ${item.setor || 'B.E.S.T.'}` : '';
 
   try {
-    let data = _payoutCache[ticker];
+    let data = getCachedPayout(ticker);
     if (!data) {
       const res = await fetch(`/api/payout/score/${encodeURIComponent(ticker)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       data = await res.json();
-      _payoutCache[ticker] = data;
+      setCachedPayout(ticker, data);
     }
 
     loading.style.display = "none";

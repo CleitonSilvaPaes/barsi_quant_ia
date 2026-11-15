@@ -407,4 +407,19 @@ def test_insights_template_includes_payout_ml2_modal(isolate_database):
     assert "Decomposição dos Fatores" in html
 
 
+def test_payout_feature_map_js_alignment_with_backend():
+    """Valida formalmente que todas as features de PAYOUT_FEATURE_NAMES estão mapeadas em carteira.js e insights.js."""
+    from pathlib import Path
+    from barsi.domain.payout_scorer import PAYOUT_FEATURE_NAMES
+
+    base_dir = Path(__file__).resolve().parent.parent / "src" / "barsi" / "api" / "static" / "js"
+    carteira_js = (base_dir / "carteira.js").read_text(encoding="utf-8")
+    insights_js = (base_dir / "insights.js").read_text(encoding="utf-8")
+
+    for feat in PAYOUT_FEATURE_NAMES:
+        assert f'"{feat}":' in carteira_js, f"Feature '{feat}' ausente em carteira.js PAYOUT_FEATURE_MAP"
+        assert f'"{feat}":' in insights_js, f"Feature '{feat}' ausente em insights.js PAYOUT_FEATURE_MAP_INSIGHTS"
+
+
+
 
