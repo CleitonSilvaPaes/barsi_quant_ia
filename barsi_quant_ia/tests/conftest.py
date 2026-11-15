@@ -93,3 +93,12 @@ def isolate_database(tmp_path, monkeypatch):
         except Exception:
             pass
 
+
+@pytest.fixture(autouse=True)
+def _reset_anomaly_singleton():
+    """Garante que o singleton AnomalyDetector seja resetado entre cada teste."""
+    from barsi.domain.anomaly_detector import AnomalyDetector
+    AnomalyDetector.reset_instance()
+    yield
+    AnomalyDetector.reset_instance()
+

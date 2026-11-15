@@ -19,7 +19,7 @@ from barsi.config import settings
 from barsi.adapters.history.budget_repository import BudgetRepository
 from barsi.domain.anomaly_detector import AnomalyDetector, _c_factor
 from barsi.services.early_warning_service import EarlyWarningService
-from tools.train_anomaly import train_and_export_model, generate_synthetic_financial_baseline
+from barsi.training.anomaly_trainer import train_and_export_model, generate_synthetic_financial_baseline
 from barsi.api.http import app
 
 
@@ -200,10 +200,50 @@ async def test_feedback_ok_anomalia_dismisses_alert(test_repo, trained_model_pat
     assert not any(a["fitid"] == "TRN_CONFIRM_1" for a in anomalies_after)
 
 
-def test_api_get_extrato_anomalies(test_repo, monkeypatch):
-    """Testa endpoint GET /api/extratos/anomalias."""
+def test_threshold_calibration_matches_contamination(trained_model_path):
+    """Threshold deve rejeitar ~contamination% das amostras de treino."""
+    detector = AnomalyDetector(model_path=trained_model_path)
+    samples = generate_synthetic_financial_baseline(n_samples=1000)
+    scores = [detector.score_features(AnomalyDetector.extract_features(s)) for s in samples]
+    flagged = sum(1 for s in scores if s >= detector._anomaly_threshold)
+    flagged_pct = flagged / len(scores) * 100.0
+    assert 2.0 <= flagged_pct <= 12.0
+
+
+@pytest.mark.asyncio
+async def test_scan_ofx_anomalies_with_pydantic_objects(test_repo, trained_model_path):
+    """scan_ofx_anomalies deve aceitar Transacao pydantic (fluxo de upload) sem AttributeError."""
+    from barsi.services.ofx_service import Transacao
+    pydantic_txs = [
+        Transacao(
+            id_transacao="PYD_ANOM_1",
+            tipo="DEBIT",
+            data="2026-05-10",
+            valor=-95000.0,
+            descricao="TRANSFERENCIA SUSPEITA",
+            categoria="Outros",
+            origem="CONTA",
+        ),
+    ]
+    service = EarlyWarningService(budget_repo=test_repo)
+    anomalies = await service.scan_ofx_anomalies(transacoes=pydantic_txs, model_path=trained_model_path)
+    assert isinstance(anomalies, list)
+    assert len(anomalies) >= 1
+    assert anomalies[0]["fitid"] == "PYD_ANOM_1"
+    assert anomalies[0]["is_anomaly"] is True
+
+
+def test_api_get_extrato_anomalies(test_repo, trained_model_path, monkeypatch):
+    """Testa endpoint GET /api/extratos/anomalias com inferência real."""
+    test_repo.persist_transacoes([
+        {"id_transacao": "API_ANOM_1", "valor": 85000.0, "tipo": "DEBIT", "data": "2026-06-01", "descricao": "PIX SUSPEITO", "origem": "CONTA"},
+    ])
     monkeypatch.setattr(settings, "sqlite_db_path", test_repo.db_path)
     monkeypatch.setattr("barsi.api.routers.budget.get_current_user", lambda req: {"username": "admin", "role": "admin"})
+
+    # Força detector a carregar modelo treinado
+    from barsi.domain.anomaly_detector import AnomalyDetector
+    AnomalyDetector.get_instance(model_path=trained_model_path)
 
     client = TestClient(app)
     resp = client.get("/api/extratos/anomalias?limit=20")
@@ -211,3 +251,5 @@ def test_api_get_extrato_anomalies(test_repo, monkeypatch):
     data = resp.json()
     assert "anomalies" in data
     assert "count" in data
+    assert data["count"] >= 1
+    assert any(a["fitid"] == "API_ANOM_1" for a in data["anomalies"])

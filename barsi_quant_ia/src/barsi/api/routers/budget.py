@@ -189,9 +189,13 @@ async def trigger_extratos_web(request: Request, target_month: Optional[str] = N
     if todas:
         try:
             repo.persist_transacoes(todas)
-            await EarlyWarningService(repo).scan_ofx_anomalies(todas)
         except Exception as e:
             logger.warning("persist_transacoes_failed", error=str(e))
+
+        try:
+            await EarlyWarningService(repo).scan_ofx_anomalies(todas)
+        except Exception as e:
+            logger.warning("ofx_anomaly_scan_failed", error=str(e))
 
     reconciled_count = repo.reconcile_ofx_to_positions(resumos, target_month=target_month)
     invalidate_canonical_positions_cache(user_id=repo.user_id)
@@ -247,9 +251,13 @@ async def upload_extrato(file: UploadFile = File(...), target_month: Optional[st
     if todas:
         try:
             repo.persist_transacoes(todas)
-            await EarlyWarningService(repo).scan_ofx_anomalies(todas)
         except Exception as e:
             logger.warning("persist_transacoes_failed", error=str(e))
+
+        try:
+            await EarlyWarningService(repo).scan_ofx_anomalies(todas)
+        except Exception as e:
+            logger.warning("ofx_anomaly_scan_failed", error=str(e))
 
     reconciled_count = repo.reconcile_ofx_to_positions(resumos, target_month=target_month)
     invalidate_canonical_positions_cache(user_id=repo.user_id)

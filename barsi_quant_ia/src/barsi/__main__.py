@@ -648,6 +648,31 @@ def maintenance_cleanup():
     n2 = repo.clean_expired_login_attempts()
     typer.echo(f"[✔] Manutenção concluída: {n1} revogações expiradas e {n2} tentativas antigas de login removidas.")
 
+@app.command("ml-retrain-anomaly")
+def ml_retrain_anomaly(
+    output: Optional[str] = typer.Option(None, "--output", help="Caminho do .npz (padrão: memory/anomaly_model.npz)"),
+    contamination: Optional[float] = typer.Option(None, "--contamination", help="Taxa esperada de anomalias (padrão: settings)"),
+    trees: Optional[int] = typer.Option(None, "--trees", help="Número de árvores (padrão: settings)"),
+):
+    """Retreina o Isolation Forest de anomalias OFX (requer scikit-learn — rodar no PC, não na TV Box)."""
+    from barsi.domain.anomaly_detector import _default_model_path
+    from barsi.training.anomaly_trainer import train_and_export_model
+    try:
+        m = train_and_export_model(
+            db_path=settings.sqlite_db_path,
+            output_path=output or _default_model_path(),
+            contamination=contamination,
+            n_estimators=trees,
+        )
+    except RuntimeError as exc:
+        typer.echo(f"[!] {exc}")
+        raise typer.Exit(code=1)
+    typer.echo(
+        f"[✔] Modelo exportado: {m['output_path']} ({m['file_size_kb']} KB) | "
+        f"{m['n_real']} reais + {m['n_baseline']} baseline | threshold={m['anomaly_threshold']} | "
+        f"sinalizadas no treino={m['flagged_pct']}%"
+    )
+
 @app.command("user-audit-logs")
 def user_audit_logs(
     limit: int = typer.Option(20, "--limit", help="Quantidade de registros a exibir")

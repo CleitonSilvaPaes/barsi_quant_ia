@@ -93,6 +93,9 @@ def validate_target_month(target_month: Optional[str]) -> Optional[str]:
 class BudgetRepository:
     """Leitura e escrita de orçamento no SQLite. Sem I/O de rede, sem dependência do Google Sheets."""
 
+    # Filtro de tenant para a tabela `transacoes` (params: user_id, user_id)
+    _TX_TENANT_SQL = "(user_id = ? OR (user_id IS NULL AND ? = 1))"
+
     def __init__(self, db_path: Optional[str] = None, user_id: int = 1):
         self.db_path = resolve_db_path(db_path)
         self.user_id = int(user_id or 1)
@@ -513,10 +516,10 @@ class BudgetRepository:
                     """
                     INSERT OR IGNORE INTO transacoes
                         (fitid, data, mes_ano, tipo, valor, descricao,
-                         categoria, ticker, origem, categoria_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         categoria, ticker, origem, categoria_id, user_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                    (fitid, data, data[:7] if data else "", tipo, valor, descricao, categoria, ticker, origem, cat_id),
+                    (fitid, data, data[:7] if data else "", tipo, valor, descricao, categoria, ticker, origem, cat_id, self.user_id),
                 )
                 inserted += cur.rowcount
         logger.info("transacoes_persisted", inserted=inserted)
@@ -1524,8 +1527,8 @@ class BudgetRepository:
         offset: int = 0
     ) -> List[Dict[str, Any]]:
         """Retorna transações bancárias/cartão persistidas com filtros e busca."""
-        query = "SELECT * FROM transacoes WHERE 1=1"
-        params: List[Any] = []
+        query = f"SELECT * FROM transacoes WHERE {self._TX_TENANT_SQL}"
+        params: List[Any] = [self.user_id, self.user_id]
         if mes_ano:
             query += " AND mes_ano = ?"
             params.append(mes_ano)
@@ -1550,8 +1553,8 @@ class BudgetRepository:
         search: Optional[str] = None
     ) -> int:
         """Retorna a contagem total de transações de acordo com os filtros."""
-        query = "SELECT COUNT(*) FROM transacoes WHERE 1=1"
-        params: List[Any] = []
+        query = f"SELECT COUNT(*) FROM transacoes WHERE {self._TX_TENANT_SQL}"
+        params: List[Any] = [self.user_id, self.user_id]
         if mes_ano:
             query += " AND mes_ano = ?"
             params.append(mes_ano)
@@ -1570,7 +1573,10 @@ class BudgetRepository:
     def delete_transacao(self, transacao_id: int) -> bool:
         """Exclui uma transação bancária persistida por ID."""
         with self._conn() as c:
-            cur = c.execute("DELETE FROM transacoes WHERE id = ?", (transacao_id,))
+            cur = c.execute(
+                f"DELETE FROM transacoes WHERE id = ? AND {self._TX_TENANT_SQL}",
+                (transacao_id, self.user_id, self.user_id),
+            )
             return cur.rowcount > 0
 
     def update_transacao(
@@ -1590,33 +1596,45 @@ class BudgetRepository:
                     """
                     UPDATE transacoes
                        SET descricao = ?, categoria = ?, valor = ?, data = ?, tipo = ?, mes_ano = COALESCE(?, mes_ano)
-                     WHERE id = ?
+                     WHERE id = ? AND (user_id = ? OR (user_id IS NULL AND ? = 1))
                 """,
-                    (descricao.strip(), categoria.strip(), float(valor), data.strip(), tipo.strip().upper(), mes_ano, transacao_id),
+                    (descricao.strip(), categoria.strip(), float(valor), data.strip(), tipo.strip().upper(), mes_ano, transacao_id, self.user_id, self.user_id),
                 )
             else:
                 cur = c.execute(
                     """
                     UPDATE transacoes
                        SET descricao = ?, categoria = ?, valor = ?, data = ?, mes_ano = COALESCE(?, mes_ano)
-                     WHERE id = ?
+                     WHERE id = ? AND (user_id = ? OR (user_id IS NULL AND ? = 1))
                 """,
-                    (descricao.strip(), categoria.strip(), float(valor), data.strip(), mes_ano, transacao_id),
+                    (descricao.strip(), categoria.strip(), float(valor), data.strip(), mes_ano, transacao_id, self.user_id, self.user_id),
                 )
             return cur.rowcount > 0
 
     def get_transacao_by_id(self, transacao_id: int) -> Optional[Dict[str, Any]]:
-        """Retorna uma transação persistida por ID."""
+        """Retorna uma transação persistida por ID (escopo do tenant atual)."""
         with self._conn() as c:
-            row = c.execute("SELECT * FROM transacoes WHERE id = ?", (transacao_id,)).fetchone()
+            row = c.execute(
+                f"SELECT * FROM transacoes WHERE id = ? AND {self._TX_TENANT_SQL}",
+                (transacao_id, self.user_id, self.user_id),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def get_transacao_by_fitid(self, fitid: str) -> Optional[Dict[str, Any]]:
+        """Retorna a transação persistida mais recente com o FITID informado (escopo do tenant)."""
+        with self._conn() as c:
+            row = c.execute(
+                f"SELECT * FROM transacoes WHERE fitid = ? AND {self._TX_TENANT_SQL} ORDER BY id DESC LIMIT 1",
+                (fitid, self.user_id, self.user_id),
+            ).fetchone()
             return dict(row) if row else None
 
     def set_transacao_feedback(self, transacao_id: int, feedback: str) -> bool:
         """Registra o feedback do usuário para uma transação (ex: 'OK_ANOMALIA', 'NORMAL')."""
         with self._conn() as c:
             cur = c.execute(
-                "UPDATE transacoes SET feedback_usuario = ? WHERE id = ?",
-                (feedback.strip(), transacao_id),
+                f"UPDATE transacoes SET feedback_usuario = ? WHERE id = ? AND {self._TX_TENANT_SQL}",
+                (feedback.strip(), transacao_id, self.user_id, self.user_id),
             )
             return cur.rowcount > 0
 
@@ -1624,8 +1642,8 @@ class BudgetRepository:
         """Atualiza a pontuação de anomalia calculada para uma transação persistida."""
         with self._conn() as c:
             cur = c.execute(
-                "UPDATE transacoes SET anomaly_score = ? WHERE id = ?",
-                (float(score), transacao_id),
+                f"UPDATE transacoes SET anomaly_score = ? WHERE id = ? AND {self._TX_TENANT_SQL}",
+                (float(score), transacao_id, self.user_id, self.user_id),
             )
             return cur.rowcount > 0
 

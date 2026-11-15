@@ -59,6 +59,18 @@ class Settings(BaseSettings):
 
     sheets_cache_ttl_sec: float = Field(default_factory=lambda: float(os.getenv("BARSI_SHEETS_CACHE_TTL_SEC", "60.0")))
 
+    # Anomaly Detection OFX (Sprint ML-1) — sem magic numbers no código (.rules § 7)
+    anomaly_default_threshold: float = 0.58
+    anomaly_threshold_min: float = 0.50
+    anomaly_threshold_max: float = 0.72
+    anomaly_severity_alta: float = 0.70
+    anomaly_high_value_amount: float = 10000.0
+    anomaly_high_value_score: float = 0.54
+    anomaly_explain_value_threshold: float = 3000.0
+    anomaly_explain_pattern_score: float = 0.65
+    anomaly_contamination: float = 0.05
+    anomaly_n_estimators: int = 100
+
     # Providers
     market_provider: Literal["yfinance", "brapi", "cached"] = "yfinance"
     brapi_token: str = ""

@@ -9,6 +9,7 @@ from barsi.config import settings
 from barsi.infra.logging import logger
 from barsi.adapters.factory import AdapterFactory
 from barsi.adapters.history.budget_repository import BudgetRepository
+from barsi.domain.anomaly_detector import AnomalyDetector
 from barsi.api.common import (
     START_TIME,
     LAST_RUN_SUMMARY,
@@ -391,6 +392,10 @@ async def health():
             "news": settings.news_provider,
             "ai": settings.ai_provider,
             "sheets": settings.sheets_provider
+        },
+        "ml": {
+            "anomaly_detector_loaded": AnomalyDetector.get_instance().is_loaded,
+            "anomaly_threshold": AnomalyDetector.get_instance().anomaly_threshold,
         }
     }
 

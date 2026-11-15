@@ -110,3 +110,18 @@ Resposta esperada em até 72h.
 ### D. Invalidação Imediata de Tokens em Exclusão de Usuário
 - Tokens de usuários excluídos do banco de dados são rejeitados de imediato em `get_current_user` (verificação explícita `if not user_db: return None`), impedindo qualquer persistência de acesso após desativação ou exclusão de conta.
 - Troca de senha (`/api/user/change-password`) e desativação de 2FA (`/api/auth/2fa/disable`) reemitem o token atualizado para o dispositivo que realizou a operação, mantendo a sessão atual ativa enquanto encerram imediatamente todas as demais sessões em outros dispositivos.
+
+---
+
+## 6. Arquitetura de ML Seguro na Borda (Isolation Forest OFX)
+
+### A. Separação Estrita entre Treino e Inferência
+- **Treino Offline no PC**: O treinamento do modelo `IsolationForest` utiliza scikit-learn (`barsi.training.anomaly_trainer` / `python -m barsi ml-retrain-anomaly`) em ambiente de desenvolvimento, combinando dados reais anonimizados com baseline sintético.
+- **Inferência Ultraleve na TV Box (Edge)**: O modelo é compilado em matrizes NumPy puras compactadas (`memory/anomaly_model.npz`, < 100 KB). O runtime da TV Box executa apenas operações vetoriais de travessia em árvore (`AnomalyDetector`), sem dependência de scikit-learn ou scipy, garantindo latência < 2ms e consumo de memória irrelevante (< 1 MB).
+
+### B. Proteção contra Envenenamento de Dados (Poisoning Protection)
+- Transações com feedback do usuário marcado como `OK_ANOMALIA` são automaticamente excluídas do pipeline de treino subsequente (`load_transactions_from_db`), prevenindo viés ou envenenamento deliberado da distribuição base.
+- O isolamento multi-tenant restringe consultas, contagens e mutações de transações (`user_id`), impedindo vazamento de dados de fluxo financeiro entre usuários.
+
+### C. Resiliência e Fallback sem Alertas Falsos
+- Na ausência do arquivo compilado `.npz`, o sistema ativa modo fallback com log de aviso (`anomaly_model_missing_fallback`), aplicando apenas heurística de segurança para valores extremamente anômalos (> R$ 10.000) e suspendendo disparos automáticos de notificações para evitar ruído ou falsos alertas no Telegram.
