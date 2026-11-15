@@ -131,6 +131,20 @@ Resposta esperada em até 72h.
 - `NORMAL`: Transação confirmada como operação legítima e regular. Mantida no histórico e incluída no dataset de retreinamento como comportamento padrão do investidor.
 - `REVISAR`: Transação sob análise manual ou com pendência de conciliação. Mantém o alerta ativo no radar para revisão posterior e não altera o pipeline de aprendizado.
 
+### E. Ciclo de Vida dos Modelos de ML no Deploy (PC $\rightarrow$ TV Box)
+Os modelos de Machine Learning compilados (`memory/anomaly_model.npz` e `memory/payout_weights.json`) **NÃO** são versionados no Git por serem artefatos binários gerados pelo retreinamento:
+1. **Treino Offline no PC**:
+   - `python -m barsi ml-retrain-anomaly`: Gera o modelo vetorial de anomalias compilado (~82 KB).
+   - `python -m barsi ml-retrain-payout`: Gera os coeficientes lineares interpretáveis com RLHF (< 2 KB).
+2. **Deploy na Edge (TV Box)**:
+   - `python -m barsi sync-tvbox --upload-ml`: Sincroniza exclusivamente os artefatos compilados de ML sem sobrescrever o banco de dados canônico SQLite da TV Box (em estrita conformidade com o Path B).
+   - Alternativamente, `python -m barsi sync-tvbox --upload-db` envia tanto o banco SQLite quanto os artefatos de ML.
+3. **Validação de Prontidão Operacional**:
+   - `curl http://localhost:8000/health`: Valida que `anomaly_detector_loaded: true` e o threshold correspondente está ativo.
+   - O serviço `barsi-api.service` reiniciado pelo sync garante a recarga atômica dos singletons em memória.
+4. **Fallback Gracioso**:
+   - Se os modelos estiverem ausentes na TV Box, o sistema opera automaticamente nos modos seguros: heurística financeira para anomalias (> R$ 10.000 sem ruído de notificação) e pesos baseline conservadores Luiz Barsi para sustentabilidade de proventos.
+
 ---
 
 ## 7. Arquitetura de Sustentabilidade de Proventos v2 (Regressão Logística com RLHF)

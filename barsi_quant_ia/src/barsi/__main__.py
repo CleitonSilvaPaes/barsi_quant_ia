@@ -194,6 +194,7 @@ def sync_tvbox(
     user: Optional[str] = typer.Option(None, "--user", help="Usuário SSH (lê de BARSI_TVBOX_USER se nulo)"),
     password: Optional[str] = typer.Option(None, "--pass", help="Senha SSH (lê de BARSI_TVBOX_PASS se nulo)"),
     upload_db: bool = typer.Option(False, "--upload-db", help="Enviar banco SQLite e XLSX local para TV Box (ATENÇÃO: sobrescreve dados na TV Box!)"),
+    upload_ml: bool = typer.Option(False, "--upload-ml", help="Enviar modelos de ML locais (anomaly_model.npz e payout_weights.json) para a TV Box sem alterar o SQLite"),
     no_extratos: bool = typer.Option(False, "--no-extratos", help="Não enviar extratos OFX")
 ):
     """Sincroniza código fonte, templates e configurações para a TV Box (preserva dados SQLite por padrão)."""
@@ -324,6 +325,47 @@ def sync_tvbox(
                             typer.echo(f"    [!] Aviso ao sincronizar XLSX: {e}")
             else:
                 typer.echo("    🛡️  [Path B] Banco SQLite e XLSX remotos preservados na TV Box (use --upload-db para forçar upload).")
+
+            # 7. Modelos de Machine Learning (Isolation Forest .npz e Payout Scorer .json)
+            if upload_db or upload_ml:
+                typer.echo("    🧠 Sincronizando artefatos compilados de Machine Learning (Edge Inference)...")
+                # 7.1 Anomaly Model (.npz)
+                anomaly_candidates = [
+                    "memory/anomaly_model.npz",
+                    "barsi_quant_ia/memory/anomaly_model.npz",
+                ]
+                anomaly_synced = False
+                for a_cand in anomaly_candidates:
+                    if os.path.exists(a_cand):
+                        try:
+                            size_kb = os.path.getsize(a_cand) // 1024
+                            typer.echo(f"    - Enviando modelo de anomalia ({a_cand}, {size_kb} KB)...")
+                            scp.put(a_cand, f"{remote_home}/memory/anomaly_model.npz")
+                            anomaly_synced = True
+                            break
+                        except Exception as e:
+                            typer.echo(f"    [!] Aviso ao sincronizar modelo de anomalia: {e}")
+                if not anomaly_synced:
+                    typer.echo("    ℹ️  Nenhum modelo de anomalia (.npz) encontrado localmente.")
+
+                # 7.2 Payout Weights (.json)
+                payout_candidates = [
+                    "memory/payout_weights.json",
+                    "barsi_quant_ia/memory/payout_weights.json",
+                ]
+                payout_synced = False
+                for p_cand in payout_candidates:
+                    if os.path.exists(p_cand):
+                        try:
+                            size_kb = max(1, os.path.getsize(p_cand) // 1024)
+                            typer.echo(f"    - Enviando pesos de sustentabilidade ({p_cand}, ~{size_kb} KB)...")
+                            scp.put(p_cand, f"{remote_home}/memory/payout_weights.json")
+                            payout_synced = True
+                            break
+                        except Exception as e:
+                            typer.echo(f"    [!] Aviso ao sincronizar pesos de payout: {e}")
+                if not payout_synced:
+                    typer.echo("    ℹ️  Nenhum modelo de pesos de payout (.json) encontrado localmente.")
 
     typer.echo("    - Reiniciando serviço barsi-api na TV Box...")
     stdin, stdout, stderr = ssh.exec_command("sudo systemctl restart barsi-api.service", get_pty=True)
