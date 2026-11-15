@@ -118,11 +118,13 @@ async def do_login(request: Request):
         repo.clear_login_attempts(client_ip)
         repo.log_audit("login_success", actor_id=user["id"], actor_username=username, ip=client_ip)
         logger.info("login_success", ip=client_ip, username=username, role=user["role"])
+        jti = secrets.token_hex(16)
         token = create_session_token(
             user["id"],
             user["username"],
             user["role"],
             settings.secret_key,
+            jti=jti,
             session_version=user.get("session_version", 1)
         )
 
@@ -134,7 +136,7 @@ async def do_login(request: Request):
         )
         res = RedirectResponse(url=redirect_target, status_code=303)
         set_barsi_cookie(response=res, key="barsi_session", value=token, request=request, httponly=True, max_age=86400 * 7, samesite="lax")
-        csrf_token = generate_csrf_token(token, settings.secret_key)
+        csrf_token = repo.rotate_session_csrf(jti, user_id=user["id"])
         set_barsi_cookie(response=res, key="barsi_csrf", value=csrf_token, request=request, httponly=False, max_age=86400 * 7, samesite="lax", path="/")
         return res
 
@@ -245,16 +247,18 @@ async def do_login_2fa(request: Request):
     repo.clear_login_attempts(client_ip)
     repo.log_audit("login_2fa_success", actor_id=user_id, actor_username=user["username"], ip=client_ip)
     logger.info("login_2fa_success", user_id=user_id, username=user["username"], role=user["role"])
+    jti = secrets.token_hex(16)
     token = create_session_token(
         user["id"],
         user["username"],
         user["role"],
         settings.secret_key,
+        jti=jti,
         session_version=user.get("session_version", 1)
     )
     res = RedirectResponse(url="/", status_code=303)
     set_barsi_cookie(response=res, key="barsi_session", value=token, request=request, httponly=True, max_age=86400 * 7, samesite="lax")
-    csrf_token = generate_csrf_token(token, settings.secret_key)
+    csrf_token = repo.rotate_session_csrf(jti, user_id=user["id"])
     set_barsi_cookie(response=res, key="barsi_csrf", value=csrf_token, request=request, httponly=False, max_age=86400 * 7, samesite="lax", path="/")
     res.delete_cookie(key="barsi_2fa_pending")
     return res
@@ -381,6 +385,7 @@ async def do_logout(request: Request):
         if data and data.get("jti"):
             repo = get_user_repo()
             repo.revoke_session(data["jti"], user_id=data.get("uid"), expires_at=data.get("exp"))
+            repo.delete_session_csrf(data["jti"])
             repo.log_audit(
                 action="auth_logout",
                 actor_id=data.get("uid"),
@@ -452,11 +457,13 @@ async def change_user_password_self(req: ChangePasswordRequest, request: Request
     user_updated = repo.get_by_id(user["uid"])
     if not user_updated:
         raise HTTPException(status_code=401, detail="Usuário não encontrado ou sessão expirada")
+    new_jti = secrets.token_hex(16)
     new_token = create_session_token(
         user_updated["id"],
         user_updated["username"],
         user_updated["role"],
         settings.secret_key,
+        jti=new_jti,
         session_version=user_updated.get("session_version", 1),
     )
     res = JSONResponse(content={
@@ -467,7 +474,7 @@ async def change_user_password_self(req: ChangePasswordRequest, request: Request
         response=res, key="barsi_session", value=new_token,
         request=request, httponly=True, max_age=86400 * 7, samesite="lax"
     )
-    new_csrf = generate_csrf_token(new_token, settings.secret_key)
+    new_csrf = repo.rotate_session_csrf(new_jti, user_id=user["uid"])
     set_barsi_cookie(
         response=res, key="barsi_csrf", value=new_csrf,
         request=request, httponly=False, max_age=86400 * 7, samesite="lax", path="/"
@@ -554,11 +561,13 @@ async def disable_2fa(req: TotpConfirmRequest, request: Request):
     user_updated = repo.get_by_id(user["uid"])
     if not user_updated:
         raise HTTPException(status_code=401, detail="Usuário não encontrado ou sessão expirada")
+    new_jti = secrets.token_hex(16)
     new_token = create_session_token(
         user_updated["id"],
         user_updated["username"],
         user_updated["role"],
         settings.secret_key,
+        jti=new_jti,
         session_version=user_updated.get("session_version", 1),
     )
     res = JSONResponse(content={
@@ -569,7 +578,7 @@ async def disable_2fa(req: TotpConfirmRequest, request: Request):
         response=res, key="barsi_session", value=new_token,
         request=request, httponly=True, max_age=86400 * 7, samesite="lax"
     )
-    new_csrf = generate_csrf_token(new_token, settings.secret_key)
+    new_csrf = repo.rotate_session_csrf(new_jti, user_id=user["uid"])
     set_barsi_cookie(
         response=res, key="barsi_csrf", value=new_csrf,
         request=request, httponly=False, max_age=86400 * 7, samesite="lax", path="/"

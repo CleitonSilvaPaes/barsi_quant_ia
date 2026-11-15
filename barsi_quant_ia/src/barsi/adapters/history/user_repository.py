@@ -105,6 +105,17 @@ class UserRepository:
             );
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_login_attempts_ip ON login_attempts(ip, attempted_at);")
+
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS session_csrf (
+                session_id TEXT PRIMARY KEY,
+                csrf_token TEXT NOT NULL,
+                user_id    INTEGER,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            );
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_session_csrf_uid ON session_csrf(user_id);")
             conn.commit()
 
     def get_by_username(self, username: str) -> Optional[Dict[str, Any]]:
@@ -494,4 +505,56 @@ class UserRepository:
         with self._connection() as conn:
             conn.execute("DELETE FROM login_attempts WHERE ip = ?", (ip,))
             conn.commit()
+
+    def get_session_csrf(self, session_id: str) -> Optional[str]:
+        """Obtém o token CSRF vinculado à sessão."""
+        if not session_id:
+            return None
+        with self._connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT csrf_token FROM session_csrf WHERE session_id = ?", (session_id,))
+            row = cur.fetchone()
+            return row["csrf_token"] if row else None
+
+    def set_session_csrf(self, session_id: str, csrf_token: str, user_id: Optional[int] = None) -> None:
+        """Salva ou atualiza o token CSRF de uma sessão."""
+        if not session_id or not csrf_token:
+            return
+        now = time.time()
+        with self._connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO session_csrf (session_id, csrf_token, user_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    csrf_token = excluded.csrf_token,
+                    user_id = coalesce(excluded.user_id, session_csrf.user_id),
+                    updated_at = excluded.updated_at
+                """,
+                (session_id, csrf_token, user_id, now, now),
+            )
+            conn.commit()
+
+    def rotate_session_csrf(self, session_id: str, user_id: Optional[int] = None) -> str:
+        """Rotaciona o token CSRF gerando um novo token criptográfico de 32 bytes urlsafe."""
+        import secrets
+        new_token = secrets.token_urlsafe(32)
+        self.set_session_csrf(session_id, new_token, user_id=user_id)
+        return new_token
+
+    def delete_session_csrf(self, session_id: str) -> None:
+        """Remove o token CSRF ao revogar ou deslogar a sessão."""
+        if not session_id:
+            return
+        with self._connection() as conn:
+            conn.execute("DELETE FROM session_csrf WHERE session_id = ?", (session_id,))
+            conn.commit()
+
+    def clean_expired_session_csrf(self, max_age_sec: float = 86400.0 * 7) -> int:
+        """Remove tokens CSRF de sessões inativas há mais de max_age_sec (padrão 7 dias)."""
+        cutoff = time.time() - max_age_sec
+        with self._connection() as conn:
+            cur = conn.execute("DELETE FROM session_csrf WHERE updated_at < ?", (cutoff,))
+            conn.commit()
+            return cur.rowcount
 

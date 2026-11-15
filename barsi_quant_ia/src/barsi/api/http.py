@@ -4,6 +4,7 @@ Ponto de entrada FastAPI, configuração de middlewares de segurança (CSP, CSRF
 arquivos estáticos e inclusão dos roteadores modulares (routers/*.py).
 """
 import os
+import hashlib
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -13,7 +14,7 @@ from starlette.middleware.gzip import GZipMiddleware
 
 from barsi.config import settings
 from barsi.infra.logging import logger
-from barsi.infra.security import generate_csrf_token, verify_csrf_token
+from barsi.infra.security import generate_csrf_token, verify_csrf_token, decode_session_token
 
 from barsi.domain.models import Position
 from barsi.adapters.factory import AdapterFactory
@@ -79,6 +80,7 @@ from barsi.api.common import (
     require_role_action,
     get_cached_system_telemetry,
     render_page,
+    get_or_create_session_csrf,
 )
 from barsi.api.routers import (
     pages_router,
@@ -195,7 +197,17 @@ async def csrf_protection_middleware(request: Request, call_next):
                     or request.headers.get("X-CSRFToken")
                     or request.query_params.get("csrf_token")
                 )
-                if not csrf_token or not verify_csrf_token(str(csrf_token), session_token, settings.secret_key):
+                user_repo = get_user_repo()
+                session_data = decode_session_token(session_token, settings.secret_key)
+                session_id = session_data.get("jti") if session_data else hashlib.sha256(session_token.encode("utf-8")).hexdigest()
+                expected_session_csrf = user_repo.get_session_csrf(session_id)
+
+                if not csrf_token or not verify_csrf_token(
+                    str(csrf_token),
+                    session_token,
+                    settings.secret_key,
+                    expected_session_csrf=expected_session_csrf,
+                ):
                     logger.warning("csrf_validation_failed", path=path, method=request.method)
                     return JSONResponse(
                         status_code=403,
@@ -205,17 +217,21 @@ async def csrf_protection_middleware(request: Request, call_next):
     response = await call_next(request)
 
     session_token = request.cookies.get("barsi_session")
-    if session_token and not request.url.path.startswith("/static"):
-        token_csrf = generate_csrf_token(session_token, settings.secret_key)
-        set_barsi_cookie(
-            response=response,
-            key="barsi_csrf",
-            value=token_csrf,
-            request=request,
-            httponly=False,
-            samesite="lax",
-            path="/"
-        )
+    if session_token and not request.url.path.startswith("/static") and request.url.path != "/logout":
+        # Evita recriar CSRF token se a resposta estiver limpando a sessão
+        set_cookie_headers = response.headers.getlist("set-cookie")
+        is_session_deleted = any("barsi_session=" in h and ("Max-Age=0" in h or 'expires=' in h.lower()) for h in set_cookie_headers)
+        if not is_session_deleted:
+            token_csrf = get_or_create_session_csrf(session_token, settings.secret_key)
+            set_barsi_cookie(
+                response=response,
+                key="barsi_csrf",
+                value=token_csrf,
+                request=request,
+                httponly=False,
+                samesite="lax",
+                path="/"
+            )
     return response
 
 @app.middleware("http")

@@ -162,6 +162,11 @@ def decode_session_token(token: str, secret_key: str) -> Optional[Dict[str, Any]
         return None
 
 
+def generate_random_csrf_token() -> str:
+    """Gera um token CSRF criptograficamente aleatório e imprevisível de 32 bytes urlsafe."""
+    return secrets.token_urlsafe(32)
+
+
 def generate_csrf_token(session_token: Optional[str], secret_key: str) -> str:
     """Gera um CSRF token seguro via HMAC-SHA256 vinculado à sessão ou anônimo assinado."""
     if not session_token:
@@ -175,23 +180,35 @@ def generate_csrf_token(session_token: Optional[str], secret_key: str) -> str:
     ).hexdigest()
 
 
-def verify_csrf_token(csrf_token: Optional[str], session_token: Optional[str], secret_key: str) -> bool:
-    """Valida o token CSRF comparando com a assinatura HMAC esperada (protegido contra timing attacks)."""
-    if not csrf_token or not secret_key:
+def verify_csrf_token(
+    csrf_token: Optional[str],
+    session_token: Optional[str],
+    secret_key: str,
+    expected_session_csrf: Optional[str] = None,
+) -> bool:
+    """Valida o token CSRF comparando com o token de sessão armazenado ou com a assinatura HMAC (timing-safe)."""
+    if not csrf_token:
         return False
     csrf_token = csrf_token.strip()
     try:
-        if session_token:
+        if expected_session_csrf and expected_session_csrf.strip():
+            if hmac.compare_digest(csrf_token, expected_session_csrf.strip()):
+                return True
+
+        if session_token and secret_key:
             expected = generate_csrf_token(session_token, secret_key)
-            return hmac.compare_digest(csrf_token, expected)
-        
-        if "." not in csrf_token:
-            return False
-        raw, sig = csrf_token.split(".", 1)
-        expected_sig = hmac.new(secret_key.encode("utf-8"), f"csrf_anon:{raw}".encode("utf-8"), hashlib.sha256).hexdigest()
-        return hmac.compare_digest(sig, expected_sig)
+            if hmac.compare_digest(csrf_token, expected):
+                return True
+
+        if not session_token and secret_key:
+            if "." not in csrf_token:
+                return False
+            raw, sig = csrf_token.split(".", 1)
+            expected_sig = hmac.new(secret_key.encode("utf-8"), f"csrf_anon:{raw}".encode("utf-8"), hashlib.sha256).hexdigest()
+            return hmac.compare_digest(sig, expected_sig)
     except Exception:
         return False
+    return False
 
 
 def create_2fa_pending_token(user_id: int, username: str, secret_key: str, expires_in_sec: int = 300) -> str:

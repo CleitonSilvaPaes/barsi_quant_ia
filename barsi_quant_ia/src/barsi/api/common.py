@@ -1,6 +1,7 @@
 """Módulo de utilitários, modelos Pydantic, dependências e estado compartilhado da API Barsi Quant IA."""
 import os
 import time
+import hashlib
 from typing import List, Optional, Dict, Any, Tuple, Literal
 import psutil
 from pydantic import BaseModel, Field
@@ -441,6 +442,29 @@ def get_cached_system_telemetry(ttl: float = 10.0) -> Dict[str, Any]:
     _last_telemetry_time = now
     return _last_telemetry_cache
 
+
+def get_or_create_session_csrf(
+    session_token: Optional[str],
+    secret_key: str,
+    user_repo: Optional[UserRepository] = None
+) -> str:
+    """Retorna o token CSRF vinculado à sessão na tabela session_csrf, gerando e persistindo se necessário."""
+    if not session_token:
+        return generate_csrf_token(None, secret_key)
+    if user_repo is None:
+        user_repo = get_user_repo()
+
+    session_data = decode_session_token(session_token, secret_key)
+    session_id = session_data.get("jti") if session_data else hashlib.sha256(session_token.encode("utf-8")).hexdigest()
+
+    existing = user_repo.get_session_csrf(session_id)
+    if existing:
+        return existing
+
+    uid = session_data.get("uid") if session_data else None
+    return user_repo.rotate_session_csrf(session_id, user_id=uid)
+
+
 def render_page(template_name: str, request: Request, page_title: str, active_nav: str) -> Response:
     """Renderiza páginas compartilhando o layout mestre base.html com sidebar e telemetria."""
     user = get_current_user(request)
@@ -471,7 +495,7 @@ def render_page(template_name: str, request: Request, page_title: str, active_na
     admin_nav_html = f'<a href="/admin" class="nav-item {"active" if active_nav == "admin" else ""}"><span class="icon">🔐</span> Admin & Usuários</a>' if is_admin else ""
 
     session_token = request.cookies.get("barsi_session", "")
-    csrf_token = generate_csrf_token(session_token, settings.secret_key)
+    csrf_token = get_or_create_session_csrf(session_token, settings.secret_key)
 
     html = (
         base_html.replace("{{TITLE}}", page_title)
