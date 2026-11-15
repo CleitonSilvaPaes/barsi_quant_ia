@@ -3,13 +3,15 @@ import os
 import time
 import secrets
 import urllib.parse
-import httpx
+from datetime import datetime
 from typing import Optional
+import httpx
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 
 from barsi.config import settings
 from barsi.infra.logging import logger
+from barsi.adapters.factory import AdapterFactory
 from barsi.infra.security import (
     create_session_token,
     decode_session_token,
@@ -32,6 +34,15 @@ from barsi.api.common import (
 )
 
 router = APIRouter(tags=["auth"])
+
+
+async def _send_security_alert(title: str, body: str, level: str = "alert") -> None:
+    """Dispara alerta proativo de segurança via adaptador de notificações configurado."""
+    try:
+        notifier = AdapterFactory.create_notification_adapter(settings)
+        await notifier.notify(title=title, body=body, level=level)
+    except Exception as exc:
+        logger.warning("security_push_notification_failed", title=title, error=str(exc))
 
 # ----------------- ROTAS DE LOGIN, LOGOUT & SESSÃO -----------------
 
@@ -82,6 +93,18 @@ async def do_login(request: Request):
                     repo.record_login_attempt(client_ip)
                     repo.log_audit("login_totp_failed", actor_id=user["id"], actor_username=username, ip=client_ip, reason="invalid_totp_or_backup")
                     logger.warning("login_totp_failed", ip=client_ip, username=username, attempts=len(recent_attempts))
+                    if len(recent_attempts) == LOGIN_RATE_LIMIT_MAX:
+                        await _send_security_alert(
+                            title="Alerta de Segurança: Tentativas Excessivas de 2FA",
+                            body=(
+                                f"• *Tentativas Falhas:* `{len(recent_attempts)}`\n"
+                                f"• *IP de Origem:* `{client_ip}`\n"
+                                f"• *Usuário Visado:* `{username}`\n"
+                                f"• *Ação:* Bloqueio temporário por taxa limite ativado.\n"
+                                f"• *Data/Hora:* `{datetime.now().strftime('%d/%m/%Y %H:%M:%S')}`"
+                            ),
+                            level="alert"
+                        )
                     return RedirectResponse(url="/login?error=Código+2FA+(TOTP)+ou+de+recuperação+inválido", status_code=303)
                 if method_used == "backup_code":
                     repo.log_audit("backup_code_used", actor_id=user["id"], actor_username=username, ip=client_ip, reason="login_recovery")
@@ -120,6 +143,18 @@ async def do_login(request: Request):
     repo.record_login_attempt(client_ip)
     repo.log_audit("login_failed", actor_username=username, ip=client_ip, reason="invalid_credentials")
     logger.warning("login_failed", ip=client_ip, username=username, attempts=len(recent_attempts))
+    if len(recent_attempts) == LOGIN_RATE_LIMIT_MAX:
+        await _send_security_alert(
+            title="Alerta de Segurança: Múltiplas Tentativas de Login Falhas",
+            body=(
+                f"• *Tentativas Falhas:* `{len(recent_attempts)}` em menos de {LOGIN_RATE_LIMIT_WINDOW // 60} minuto(s)\n"
+                f"• *IP de Origem:* `{client_ip}`\n"
+                f"• *Usuário Visado:* `{username or 'desconhecido'}`\n"
+                f"• *Ação:* IP bloqueado temporariamente por taxa limite.\n"
+                f"• *Data/Hora:* `{datetime.now().strftime('%d/%m/%Y %H:%M:%S')}`"
+            ),
+            level="alert"
+        )
     return RedirectResponse(url="/login?error=Usuário+ou+senha+incorretos", status_code=303)
 
 @router.get("/login/2fa", response_class=HTMLResponse)
@@ -185,6 +220,18 @@ async def do_login_2fa(request: Request):
         repo.record_login_attempt(client_ip)
         repo.log_audit("login_2fa_failed", actor_id=user_id, actor_username=data.get("user"), ip=client_ip, reason="invalid_totp_or_backup")
         logger.warning("login_2fa_invalid_code", user_id=user_id, username=data.get("user"))
+        if len(recent_attempts) == LOGIN_RATE_LIMIT_MAX:
+            await _send_security_alert(
+                title="Alerta de Segurança: Múltiplas Falhas de 2FA",
+                body=(
+                    f"• *Tentativas Falhas:* `{len(recent_attempts)}`\n"
+                    f"• *IP de Origem:* `{client_ip}`\n"
+                    f"• *Usuário ID:* `{data.get('user') or user_id}`\n"
+                    f"• *Ação:* Bloqueio temporário por taxa limite ativado.\n"
+                    f"• *Data/Hora:* `{datetime.now().strftime('%d/%m/%Y %H:%M:%S')}`"
+                ),
+                level="alert"
+            )
         return RedirectResponse(url="/login/2fa?error=Código+2FA+ou+de+recuperação+inválido.+Tente+novamente.", status_code=303)
 
     user = repo.get_by_id(user_id)
@@ -392,6 +439,16 @@ async def change_user_password_self(req: ChangePasswordRequest, request: Request
         actor_username=user["user"],
         ip=client_ip
     )
+    await _send_security_alert(
+        title="Alerta de Segurança: Senha Mestre Alterada",
+        body=(
+            f"• *Usuário:* `{user['user']}`\n"
+            f"• *IP de Origem:* `{client_ip}`\n"
+            f"• *Data/Hora:* `{datetime.now().strftime('%d/%m/%Y %H:%M:%S')}`\n"
+            f"• *Ação:* Senha alterada com sucesso e outras sessões ativas foram encerradas."
+        ),
+        level="warn"
+    )
     user_updated = repo.get_by_id(user["uid"])
     if not user_updated:
         raise HTTPException(status_code=401, detail="Usuário não encontrado ou sessão expirada")
@@ -451,6 +508,16 @@ async def enable_2fa(req: TotpConfirmRequest, request: Request):
         actor_username=user.get("user") or user.get("username"),
         reason="user_self_service"
     )
+    await _send_security_alert(
+        title="Segurança da Conta: 2FA Ativado",
+        body=(
+            f"• *Usuário:* `{user.get('user') or user.get('username')}`\n"
+            f"• *IP de Origem:* `{_get_client_ip(request)}`\n"
+            f"• *Data/Hora:* `{datetime.now().strftime('%d/%m/%Y %H:%M:%S')}`\n"
+            f"• *Status:* Autenticação em dois fatores ativada e códigos de recuperação gerados."
+        ),
+        level="info"
+    )
     return {
         "ok": True,
         "message": "2FA (TOTP) ativado com sucesso!",
@@ -473,6 +540,16 @@ async def disable_2fa(req: TotpConfirmRequest, request: Request):
         actor_id=user["uid"],
         actor_username=user.get("user") or user.get("username"),
         reason="user_self_service"
+    )
+    await _send_security_alert(
+        title="Alerta Crítico: 2FA Desativado",
+        body=(
+            f"• *Usuário:* `{user.get('user') or user.get('username')}`\n"
+            f"• *IP de Origem:* `{_get_client_ip(request)}`\n"
+            f"• *Data/Hora:* `{datetime.now().strftime('%d/%m/%Y %H:%M:%S')}`\n\n"
+            f"⚠️ _Se você não realizou esta alteração, acesse a conta imediatamente e redefina sua senha mestre._"
+        ),
+        level="alert"
     )
     user_updated = repo.get_by_id(user["uid"])
     if not user_updated:

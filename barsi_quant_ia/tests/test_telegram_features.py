@@ -443,28 +443,36 @@ def test_telegram_webhook_backup_wal_consistency(tg_setup, tmp_path, monkeypatch
 
     monkeypatch.setattr(TelegramNotifier, "send_document", _mock_send_doc)
 
-    # 1. Escreve uma nova posição diretamente no repositório com WAL ativo
-    from barsi.domain.models import Position
-    nova_pos = Position(ticker="WALTEST3", empresa="WAL Consistency Test", row_index=99)
-    tg_setup.persist_positions([nova_pos])
+    import sqlite3
+    # Abre conexão persistente para reter o WAL ativo sem checkpoint no fechamento
+    persistent_conn = sqlite3.connect(tg_setup.db_path)
+    try:
+        persistent_conn.execute("PRAGMA journal_mode = WAL")
+        persistent_conn.execute(
+            "INSERT INTO positions (ticker, empresa, qtd_antes, preco_atual) "
+            "VALUES ('WALTEST3', 'WAL Consistency Test', 1, 100.0)"
+        )
+        persistent_conn.commit()
 
-    # 2. Executa comando /backup pelo webhook do Telegram
-    client = TestClient(app)
-    resp = client.post("/api/telegram/webhook", json={
-        "message": {"chat": {"id": 987654321}, "text": "/backup"}
-    })
-    assert resp.status_code == 200
-    assert len(sent_docs) == 1
+        # 2. Executa comando /backup pelo webhook do Telegram com a conexão aberta
+        client = TestClient(app)
+        resp = client.post("/api/telegram/webhook", json={
+            "message": {"chat": {"id": 987654321}, "text": "/backup"}
+        })
+        assert resp.status_code == 200
+        assert len(sent_docs) == 1
 
-    # 3. Restaura o arquivo recebido em um banco temporário isolado
-    backup_file = tmp_path / "restored_backup.db"
-    backup_file.write_bytes(sent_docs[0]["content"])
+        # 3. Restaura o arquivo recebido em um banco temporário isolado
+        backup_file = tmp_path / "restored_backup.db"
+        backup_file.write_bytes(sent_docs[0]["content"])
 
-    # 4. Carrega as posições do banco restaurado e valida se a escrita recente do WAL está presente
-    from barsi.adapters.history.budget_repository import BudgetRepository
-    restored_repo = BudgetRepository(str(backup_file))
-    positions = restored_repo.load_positions()
-    assert any(p.ticker == "WALTEST3" for p in positions)
+        # 4. Carrega as posições do banco restaurado e valida se a escrita do WAL está presente
+        from barsi.adapters.history.budget_repository import BudgetRepository
+        restored_repo = BudgetRepository(str(backup_file))
+        positions = restored_repo.load_positions()
+        assert any(p.ticker == "WALTEST3" for p in positions)
+    finally:
+        persistent_conn.close()
 
 
 def test_telegram_webhook_fechamento_command(tg_setup, monkeypatch):
