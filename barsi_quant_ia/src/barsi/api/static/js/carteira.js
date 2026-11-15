@@ -355,6 +355,125 @@ function abrirDrawer(ticker) {
   document.getElementById("drawer-insight").innerText = p.insight_atual || 'Margem de segurança atrativa para acúmulo de longo prazo com base nas regras quantitativas do Método Barsi.';
 
   document.getElementById("asset-drawer").style.display = "block";
+  carregarPayoutScoreDrawer(p.ticker);
+}
+
+const PAYOUT_FEATURE_MAP = {
+  "yield_score": { label: "Yield Projetado (>6%)", icon: "💰" },
+  "payout_ratio": { label: "Sustentabilidade Payout", icon: "⚖️" },
+  "roe_score": { label: "Rentabilidade (ROE)", icon: "📈" },
+  "div_growth": { label: "Crescimento DPA (5a)", icon: "🌱" },
+  "perenidade": { label: "Perenidade (B.E.S.T.)", icon: "🏛️" },
+  "leverage_penalty": { label: "Penalidade Alavancagem", icon: "⚠️" },
+  "fii_vacancia_penalty": { label: "Penalidade Vacância FII", icon: "🏢" }
+};
+
+async function carregarPayoutScoreDrawer(ticker) {
+  const loading = document.getElementById("drawer-payout-loading");
+  const content = document.getElementById("drawer-payout-content");
+  const modelBadge = document.getElementById("drawer-payout-model-badge");
+
+  if (!loading || !content) return;
+
+  loading.style.display = "block";
+  content.style.display = "none";
+  loading.innerHTML = "⏳ Calculando probabilidade de dividendos...";
+  modelBadge.innerText = "...";
+  modelBadge.style.color = "var(--text-muted)";
+
+  try {
+    const res = await fetch(`/api/payout/score/${encodeURIComponent(ticker)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    loading.style.display = "none";
+    content.style.display = "block";
+
+    const scorePct = (data.score * 100).toFixed(1);
+    const scoreEl = document.getElementById("drawer-payout-score");
+    const badgeEl = document.getElementById("drawer-payout-badge");
+    const labelEl = document.getElementById("drawer-payout-label");
+
+    scoreEl.innerText = `${scorePct}%`;
+    badgeEl.innerText = data.badge || "🟢";
+    labelEl.innerText = data.label || "SUSTENTÁVEL";
+
+    if (data.score >= 0.70) {
+      scoreEl.style.color = "var(--green)";
+      labelEl.style.background = "rgba(16, 185, 129, 0.15)";
+      labelEl.style.color = "#34d399";
+      labelEl.style.border = "1px solid rgba(16, 185, 129, 0.35)";
+    } else if (data.score >= 0.40) {
+      scoreEl.style.color = "var(--amber)";
+      labelEl.style.background = "rgba(245, 158, 11, 0.15)";
+      labelEl.style.color = "#fbbf24";
+      labelEl.style.border = "1px solid rgba(245, 158, 11, 0.35)";
+    } else {
+      scoreEl.style.color = "var(--red)";
+      labelEl.style.background = "rgba(239, 68, 68, 0.15)";
+      labelEl.style.color = "#f87171";
+      labelEl.style.border = "1px solid rgba(239, 68, 68, 0.35)";
+    }
+
+    document.getElementById("drawer-payout-logit").innerText = data.logit !== undefined ? data.logit.toFixed(2) : "0.00";
+    document.getElementById("drawer-payout-intercept").innerText = data.intercept !== undefined ? data.intercept.toFixed(2) : "0.00";
+
+    if (data.is_loaded) {
+      modelBadge.innerText = "🟢 Modelo Treinado (LR)";
+      modelBadge.style.color = "#34d399";
+    } else {
+      modelBadge.innerText = "🟡 Baseline Barsi";
+      modelBadge.style.color = "#fbbf24";
+    }
+
+    renderizarBarrasPayout(data.contributions || {});
+  } catch (err) {
+    loading.style.display = "block";
+    loading.innerHTML = `<span style="color:var(--text-muted); font-size:0.75rem;">Dados de sustentabilidade de dividendos indisponíveis para este ativo.</span>`;
+  }
+}
+
+function renderizarBarrasPayout(contribs) {
+  const container = document.getElementById("drawer-payout-bars");
+  if (!container) return;
+  container.innerHTML = "";
+
+  const entries = Object.entries(contribs);
+  if (entries.length === 0) {
+    container.innerHTML = `<div style="font-size:0.75rem; color:var(--text-muted);">Sem fatores decompostos.</div>`;
+    return;
+  }
+
+  // Ordena por maior magnitude de contribuição absoluta
+  entries.sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+
+  const maxVal = Math.max(...entries.map(e => Math.abs(e[1])), 1.0);
+
+  entries.forEach(([key, val]) => {
+    const meta = PAYOUT_FEATURE_MAP[key] || { label: key, icon: "•" };
+    const isPositive = val >= 0;
+    const widthPct = Math.min(100, Math.max(8, Math.round((Math.abs(val) / maxVal) * 100)));
+    const color = isPositive ? "#10b981" : "#ef4444";
+    const sign = isPositive ? "+" : "";
+
+    const row = document.createElement("div");
+    row.style.display = "flex";
+    row.style.flexDirection = "column";
+    row.style.gap = "0.15rem";
+    row.style.fontSize = "0.72rem";
+
+    row.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span style="color:#cbd5e1;">${esc(meta.icon)} ${esc(meta.label)}</span>
+        <strong style="color:${color}; font-family:monospace;">${sign}${val.toFixed(2)}</strong>
+      </div>
+      <div style="width:100%; height:4px; background:rgba(255,255,255,0.06); border-radius:2px; overflow:hidden;">
+        <div style="height:100%; width:${widthPct}%; background:${color}; border-radius:2px;"></div>
+      </div>
+    `;
+
+    container.appendChild(row);
+  });
 }
 
 function fecharDrawer() {

@@ -114,7 +114,7 @@ function renderizarCards() {
           <span class="${esc(badgeClass)}" style="font-size: 0.8rem;">${esc(item.acao_sugerida)}</span>
         </div>
 
-        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; background: rgba(0,0,0,0.25); border-radius: 6px; padding: 0.6rem; margin-bottom: 1rem; text-align: center;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; background: rgba(0,0,0,0.25); border-radius: 6px; padding: 0.6rem; margin-bottom: 0.75rem; text-align: center;">
           <div>
             <div style="font-size: 0.7rem; color: var(--text-muted);">COTAÇÃO</div>
             <div style="font-weight: 600;">R$ ${item.preco.toFixed(2)}</div>
@@ -127,6 +127,13 @@ function renderizarCards() {
             <div style="font-size: 0.7rem; color: var(--text-muted);">MARGEM</div>
             <div style="font-weight: 700; color: ${margemColor};">${item.margem.toFixed(1)}%</div>
           </div>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.22); border: 1px solid var(--border); border-radius: 6px; padding: 0.45rem 0.65rem; margin-bottom: 0.85rem; font-size: 0.76rem;">
+          <span style="color: var(--text-muted);">Sustentabilidade Proventos (ML-2):</span>
+          <span id="payout-pill-${esc(item.ticker)}" onclick="abrirModalPayout('${esc(item.ticker)}')" style="cursor: pointer; display: flex; align-items: center; gap: 0.35rem; padding: 0.18rem 0.55rem; border-radius: 9999px; font-weight: 600; background: rgba(255,255,255,0.06); font-size: 0.72rem;" title="Clique para ver explicabilidade matemática dos fatores">
+            ⏳ Carregando...
+          </span>
         </div>
 
         <div style="margin-bottom: 1rem;">
@@ -173,6 +180,164 @@ function renderizarCards() {
       paginationEl.innerHTML = "";
     }
   }
+
+  // Carrega assincronamente os pills de probabilidade de proventos (ML-2)
+  carregarPillsPayoutParaPagina(pageItems);
+}
+
+const PAYOUT_FEATURE_MAP_INSIGHTS = {
+  "yield_score": { label: "Yield Projetado (>6%)", icon: "💰" },
+  "payout_ratio": { label: "Sustentabilidade Payout", icon: "⚖️" },
+  "roe_score": { label: "Rentabilidade (ROE)", icon: "📈" },
+  "div_growth": { label: "Crescimento DPA (5a)", icon: "🌱" },
+  "perenidade": { label: "Perenidade (B.E.S.T.)", icon: "🏛️" },
+  "leverage_penalty": { label: "Penalidade Alavancagem", icon: "⚠️" },
+  "fii_vacancia_penalty": { label: "Penalidade Vacância FII", icon: "🏢" }
+};
+
+const _payoutCache = {};
+
+async function carregarPillsPayoutParaPagina(pageItems) {
+  for (const item of pageItems) {
+    const el = document.getElementById(`payout-pill-${item.ticker}`);
+    if (!el) continue;
+    try {
+      let data = _payoutCache[item.ticker];
+      if (!data) {
+        const res = await fetch(`/api/payout/score/${encodeURIComponent(item.ticker)}`);
+        if (!res.ok) continue;
+        data = await res.json();
+        _payoutCache[item.ticker] = data;
+      }
+      const scorePct = (data.score * 100).toFixed(0);
+      let bg = "rgba(16, 185, 129, 0.15)";
+      let color = "#34d399";
+      let border = "1px solid rgba(16, 185, 129, 0.35)";
+      if (data.score < 0.40) {
+        bg = "rgba(239, 68, 68, 0.15)";
+        color = "#f87171";
+        border = "1px solid rgba(239, 68, 68, 0.35)";
+      } else if (data.score < 0.70) {
+        bg = "rgba(245, 158, 11, 0.15)";
+        color = "#fbbf24";
+        border = "1px solid rgba(245, 158, 11, 0.35)";
+      }
+      el.innerHTML = `<span>${esc(data.badge || '🟢')}</span> <span>${scorePct}% ${esc(data.label || '')}</span>`;
+      el.style.background = bg;
+      el.style.color = color;
+      el.style.border = border;
+    } catch (e) {
+      if (el) el.innerHTML = `<span style="color:var(--text-muted);">Indisponível</span>`;
+    }
+  }
+}
+
+async function abrirModalPayout(ticker) {
+  const modal = document.getElementById("modal-payout-insights");
+  const loading = document.getElementById("modal-payout-loading");
+  const body = document.getElementById("modal-payout-body");
+  if (!modal) return;
+
+  modal.style.display = "flex";
+  loading.style.display = "block";
+  body.style.display = "none";
+
+  document.getElementById("modal-payout-ticker").innerText = ticker;
+  const item = insightsData.find(i => i.ticker === ticker);
+  document.getElementById("modal-payout-empresa").innerText = item ? `${item.empresa || ''} • Setor: ${item.setor || 'B.E.S.T.'}` : '';
+
+  try {
+    let data = _payoutCache[ticker];
+    if (!data) {
+      const res = await fetch(`/api/payout/score/${encodeURIComponent(ticker)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      data = await res.json();
+      _payoutCache[ticker] = data;
+    }
+
+    loading.style.display = "none";
+    body.style.display = "block";
+
+    const scorePct = (data.score * 100).toFixed(1);
+    const scoreEl = document.getElementById("modal-payout-score");
+    const labelEl = document.getElementById("modal-payout-label");
+    const statusEl = document.getElementById("modal-payout-status-modelo");
+
+    scoreEl.innerText = `${scorePct}%`;
+    document.getElementById("modal-payout-badge").innerText = data.badge || "🟢";
+    labelEl.innerText = data.label || "SUSTENTÁVEL";
+    document.getElementById("modal-payout-logit").innerText = data.logit !== undefined ? data.logit.toFixed(2) : "0.00";
+    document.getElementById("modal-payout-intercept").innerText = data.intercept !== undefined ? data.intercept.toFixed(2) : "0.00";
+
+    if (data.score >= 0.70) {
+      scoreEl.style.color = "var(--green)";
+      labelEl.style.background = "rgba(16, 185, 129, 0.15)";
+      labelEl.style.color = "#34d399";
+      labelEl.style.border = "1px solid rgba(16, 185, 129, 0.35)";
+    } else if (data.score >= 0.40) {
+      scoreEl.style.color = "var(--amber)";
+      labelEl.style.background = "rgba(245, 158, 11, 0.15)";
+      labelEl.style.color = "#fbbf24";
+      labelEl.style.border = "1px solid rgba(245, 158, 11, 0.35)";
+    } else {
+      scoreEl.style.color = "var(--red)";
+      labelEl.style.background = "rgba(239, 68, 68, 0.15)";
+      labelEl.style.color = "#f87171";
+      labelEl.style.border = "1px solid rgba(239, 68, 68, 0.35)";
+    }
+
+    statusEl.innerText = data.is_loaded ? "🟢 Modelo Treinado (LR)" : "🟡 Baseline Barsi";
+
+    renderizarBarrasPayoutModal(data.contributions || {});
+  } catch (err) {
+    loading.style.display = "block";
+    loading.innerHTML = `<span style="color:var(--text-muted);">Erro ao obter dados de sustentabilidade: ${err.message}</span>`;
+  }
+}
+
+function fecharModalPayout() {
+  const modal = document.getElementById("modal-payout-insights");
+  if (modal) modal.style.display = "none";
+}
+
+function renderizarBarrasPayoutModal(contribs) {
+  const container = document.getElementById("modal-payout-bars");
+  if (!container) return;
+  container.innerHTML = "";
+
+  const entries = Object.entries(contribs);
+  if (entries.length === 0) {
+    container.innerHTML = `<div style="font-size:0.75rem; color:var(--text-muted);">Sem fatores decompostos.</div>`;
+    return;
+  }
+
+  entries.sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+  const maxVal = Math.max(...entries.map(e => Math.abs(e[1])), 1.0);
+
+  entries.forEach(([key, val]) => {
+    const meta = PAYOUT_FEATURE_MAP_INSIGHTS[key] || { label: key, icon: "•" };
+    const isPositive = val >= 0;
+    const widthPct = Math.min(100, Math.max(8, Math.round((Math.abs(val) / maxVal) * 100)));
+    const color = isPositive ? "#10b981" : "#ef4444";
+    const sign = isPositive ? "+" : "";
+
+    const row = document.createElement("div");
+    row.style.display = "flex";
+    row.style.flexDirection = "column";
+    row.style.gap = "0.2rem";
+    row.style.fontSize = "0.75rem";
+
+    row.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span style="color:#cbd5e1;">${esc(meta.icon)} ${esc(meta.label)}</span>
+        <strong style="color:${color}; font-family:monospace;">${sign}${val.toFixed(2)}</strong>
+      </div>
+      <div style="width:100%; height:5px; background:rgba(255,255,255,0.06); border-radius:3px; overflow:hidden;">
+        <div style="height:100%; width:${widthPct}%; background:${color}; border-radius:3px;"></div>
+      </div>
+    `;
+    container.appendChild(row);
+  });
 }
 
 function enviarFeedback(ticker, voto) {

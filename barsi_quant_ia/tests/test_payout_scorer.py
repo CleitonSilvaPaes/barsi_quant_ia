@@ -366,4 +366,45 @@ def test_payout_endpoint_uses_sector_perenidade(isolate_database):
     assert data["contributions"]["perenidade_setor"] >= 1.8
 
 
+def test_carteira_template_includes_payout_ml2_widget(isolate_database):
+    """Template carteira.html deve conter o card e elementos visuais do Payout Scorer ML-2 no drawer."""
+    from barsi.infra.security import create_session_token
+    from barsi.config import settings
+
+    client = TestClient(app)
+    token = create_session_token(1, "admin", "admin", settings.secret_key)
+    client.cookies.set("barsi_session", token)
+
+    resp = client.get("/carteira")
+    assert resp.status_code == 200
+    html = resp.text
+
+    assert "drawer-payout-card" in html
+    assert "drawer-payout-score" in html
+    assert "drawer-payout-bars" in html
+    assert "drawer-payout-model-badge" in html
+    assert "drawer-payout-logit" in html
+    assert "Sustentabilidade Proventos (ML-2)" in html
+
+
+def test_insights_template_includes_payout_ml2_modal(isolate_database):
+    """Template insights.html deve conter o modal interativo com barras de contribuição ML-2."""
+    from barsi.infra.security import create_session_token
+    from barsi.config import settings
+
+    client = TestClient(app)
+    token = create_session_token(1, "admin", "admin", settings.secret_key)
+    client.cookies.set("barsi_session", token)
+
+    resp = client.get("/insights")
+    assert resp.status_code == 200
+    html = resp.text
+
+    assert "modal-payout-insights" in html
+    assert "modal-payout-bars" in html
+    assert "modal-payout-score" in html
+    assert "modal-payout-status-modelo" in html
+    assert "Decomposição dos Fatores" in html
+
+
 

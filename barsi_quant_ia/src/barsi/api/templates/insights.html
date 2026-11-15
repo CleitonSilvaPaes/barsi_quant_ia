@@ -62,4 +62,50 @@
 <!-- Controles de Paginação (P3) -->
 <div id="pagination-controls" style="display: flex; justify-content: center; align-items: center; gap: 1rem; margin-top: 1.5rem;"></div>
 
+<!-- Modal Detalhes de Sustentabilidade de Proventos ML-2 -->
+<div id="modal-payout-insights"
+  style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:250; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+  <div
+    style="background:#1e293b; border:1px solid var(--border); border-radius:12px; width:92%; max-width:460px; padding:1.5rem; box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; border-bottom:1px solid var(--border); padding-bottom:0.75rem;">
+      <div>
+        <h3 id="modal-payout-ticker" style="color:var(--accent); font-size:1.25rem; margin:0;">TICKER</h3>
+        <span id="modal-payout-empresa" style="font-size:0.8rem; color:var(--text-muted);">Empresa</span>
+      </div>
+      <button onclick="fecharModalPayout()" class="btn btn-outline" style="padding:0.2rem 0.55rem;">✕</button>
+    </div>
+
+    <div id="modal-payout-loading" style="text-align:center; padding:1.5rem; color:var(--text-muted); font-size:0.85rem;">
+      ⏳ Carregando decomposição matemática do modelo ML-2...
+    </div>
+
+    <div id="modal-payout-body" style="display:none;">
+      <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.25); border-radius:8px; padding:0.75rem 1rem; margin-bottom:1rem;">
+        <div>
+          <div style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase;">Probabilidade de Proventos Seguros</div>
+          <div style="display:flex; align-items:baseline; gap:0.4rem;">
+            <span id="modal-payout-score" style="font-size:1.6rem; font-weight:700; color:var(--green);">0.0%</span>
+            <span id="modal-payout-badge" style="font-size:1rem;">🟢</span>
+          </div>
+        </div>
+        <div style="text-align:right;">
+          <span id="modal-payout-label" style="font-size:0.78rem; font-weight:600; padding:0.25rem 0.6rem; border-radius:4px;">SUSTENTÁVEL</span>
+          <div id="modal-payout-status-modelo" style="font-size:0.7rem; color:var(--text-muted); margin-top:0.3rem;">Modelo Treinado</div>
+        </div>
+      </div>
+
+      <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.75rem; background:rgba(15,23,42,0.6); padding:0.5rem 0.75rem; border-radius:6px;">
+        Logit: <code id="modal-payout-logit" style="color:var(--accent);">0.00</code> | Intercept Base: <code id="modal-payout-intercept" style="color:#94a3b8;">0.00</code>
+      </div>
+
+      <div style="font-size:0.75rem; text-transform:uppercase; color:var(--text-muted); font-weight:700; margin-bottom:0.5rem;">
+        Decomposição dos Fatores (Regressão Logística):
+      </div>
+      <div id="modal-payout-bars" style="display:flex; flex-direction:column; gap:0.55rem; max-height:260px; overflow-y:auto;">
+        <!-- Barras de contribuição -->
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="/static/js/insights.js"></script>
