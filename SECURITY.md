@@ -125,3 +125,24 @@ Resposta esperada em até 72h.
 
 ### C. Resiliência e Fallback sem Alertas Falsos
 - Na ausência do arquivo compilado `.npz`, o sistema ativa modo fallback com log de aviso (`anomaly_model_missing_fallback`), aplicando apenas heurística de segurança para valores extremamente anômalos (> R$ 10.000) e suspendendo disparos automáticos de notificações para evitar ruído ou falsos alertas no Telegram.
+
+### D. Semântica de Feedback do Usuário em Transações
+- `OK_ANOMALIA`: Falso positivo confirmado pelo usuário. Arquiva os alertas ativos vinculados ao `fitid` exato e exclui a transação do dataset de retreinamento do Isolation Forest para evitar contaminação do perfil de gastos.
+- `NORMAL`: Transação confirmada como operação legítima e regular. Mantida no histórico e incluída no dataset de retreinamento como comportamento padrão do investidor.
+- `REVISAR`: Transação sob análise manual ou com pendência de conciliação. Mantém o alerta ativo no radar para revisão posterior e não altera o pipeline de aprendizado.
+
+---
+
+## 7. Arquitetura de Sustentabilidade de Proventos v2 (Regressão Logística com RLHF)
+
+### A. Modelo Probabilístico Interpretável (White-Box ML)
+- **Substituição de TinyMLP Oposta por Regressão Logística L2**: A versão 2 (`PayoutScorer` / `DividendSustainabilityScorer`) substitui a heurística de rede neural simples por uma Regressão Logística com regularização L2 calibrada via scikit-learn (`barsi.training.payout_trainer` / `python -m barsi ml-retrain-payout`).
+- **Auditabilidade Total das Decisões**: Cada característica financeira possui um coeficiente linear $w_i$ explícito, permitindo expor exatamente a contribuição de cada indicador no logit final ($z = b + \sum w_i x_i$), eliminando decisões opacas e explicando ao investidor quais fundamentos apoiam ou degradam a tese de dividendos.
+
+### B. Aprendizado por Reforço com Feedback Humano (RLHF)
+- O pipeline de retreinamento consome os feedbacks explícitos da tabela canônica `historico_analises.feedback_usuario` (`CONCORDO` $\rightarrow 1.0$, `DISCORDO` $\rightarrow 0.0$), combinando o dataset curado dos setores perenes B.E.S.T. com a intuição e critérios específicos do investidor.
+
+### C. Inferência em Borda (Edge TV Box) e Fallback Seguro
+- Os pesos aprendidos ($w \in \mathbb{R}^8$ e intercept $b$) são salvos em arquivo JSON ultra-leve (`memory/payout_weights.json`, < 2 KB).
+- O runtime de inferência executa em puro Python e NumPy sem carregar bibliotecas externas pesadas, operando com latência < 0.1ms.
+- Na ausência do arquivo de pesos, o sistema opera em modo fallback gracioso com pesos baseline conservadores derivados diretamente do método Luiz Barsi Filho.

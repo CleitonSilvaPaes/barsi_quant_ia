@@ -170,7 +170,7 @@ class QLearningBarsiAgent:
 
     def load_state(self):
         """Carrega a Q-Table persistida para preservar o aprendizado anterior."""
-        import os, json
+        import json
         if os.path.exists(self.persistence_path):
             try:
                 with open(self.persistence_path, "r", encoding="utf-8") as f:
@@ -184,7 +184,7 @@ class QLearningBarsiAgent:
 
     def save_state(self):
         """Salva os novos pesos aprendidos da Q-Table em disco."""
-        import os, json
+        import json
         os.makedirs(os.path.dirname(self.persistence_path) or ".", exist_ok=True)
         raw = {f"{k[0]}::{k[1]}": v for k, v in self.q_table.items()}
         try:
@@ -237,31 +237,16 @@ rl_agent = QLearningBarsiAgent()
 
 
 # =====================================================================
-# 4. DIVIDEND SUSTAINABILITY SCORER (DSS - TINYMLP NEURAL NET)
+# 4. DIVIDEND SUSTAINABILITY SCORER (DSS - REGRESSÃO LOGÍSTICA V2 COM RLHF)
 # =====================================================================
 class DividendSustainabilityScorer:
-    """Avaliador neural de sustentabilidade de dividendos baseado em TinyMLP (Edge ARM64)."""
+    """Avaliador de sustentabilidade de dividendos baseado em Regressão Logística interpretável (Sprint ML-2)."""
     _instance: Optional["DividendSustainabilityScorer"] = None
-    _has_weights: bool = False
 
     def __init__(self, weights_path: Optional[str] = None):
-        resolved_path = None
-        if weights_path is not None:
-            if os.path.exists(weights_path):
-                resolved_path = weights_path
-        else:
-            candidate_paths = [
-                "memory/dss_weights.json",
-                os.path.join(os.path.dirname(__file__), "..", "..", "..", "memory", "dss_weights.json"),
-                os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "memory", "dss_weights.json"),
-            ]
-            for p in candidate_paths:
-                if os.path.exists(p):
-                    resolved_path = p
-                    break
-
-        self.mlp = TinyMLP(n_inputs=8, n_hidden=6, weights_path=resolved_path)
-        self._has_weights = resolved_path is not None and os.path.exists(resolved_path)
+        from barsi.domain.payout_scorer import PayoutScorer
+        self.scorer = PayoutScorer.get_instance(weights_path=weights_path)
+        self.weights_path = self.scorer.weights_path
 
     @classmethod
     def get(cls) -> "DividendSustainabilityScorer":
@@ -272,36 +257,17 @@ class DividendSustainabilityScorer:
     @classmethod
     def reload(cls) -> None:
         """Invalida a instância singleton forçando recarga dos pesos aprendidos."""
+        from barsi.domain.payout_scorer import PayoutScorer
+        PayoutScorer.reset_instance()
         cls._instance = None
 
     def score(self, posicao: Position, extras: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        div_proj = posicao.div_proj or 0.0
-        preco = posicao.preco_atual or 1.0
-        margem = posicao.margem_seguranca or 0.0
-
-        # Se o dividendo projetado estiver zerado, sustentabilidade é 0% BAIXA
+        div_proj = float(posicao.div_proj or 0.0)
         if div_proj <= 0.0:
             return {"score": 0.0, "label": "BAIXA", "badge": "🔴"}
-
-        if not self._has_weights:
-            return {"score": 0.5, "label": "NÃO TREINADO", "badge": "⚪"}
-
-        extras = extras or {}
-
-        features = [
-            min(div_proj * 4.0 / max(extras.get("lucro_estimado", 1.0), 0.01), 2.0) / 2.0,
-            min(div_proj / max(preco, 0.01), 0.15) / 0.15,
-            1.0 / (1.0 + extras.get("deb_ebitda", 2.0)),
-            min(extras.get("roe", 0.15), 0.30) / 0.30,
-            extras.get("perenidade", 0.85),
-            min(max(margem / 100.0, -0.5), 1.0),
-            min(extras.get("anos_pagando", 5) / 10.0, 1.0),
-            1.0 / (1.0 + extras.get("vol_anual", 0.30)),
-        ]
-        prob = self.mlp.forward(features)
-        label = "ALTA" if prob >= 0.7 else ("MÉDIA" if prob >= 0.4 else "BAIXA")
-        badge = "🟢" if prob >= 0.7 else ("🟡" if prob >= 0.4 else "🔴")
-        return {"score": round(prob, 3), "label": label, "badge": badge}
+        if not self.scorer.is_loaded:
+            return {"score": 0.5, "label": "NÃO TREINADO", "badge": "⚪", "is_loaded": False}
+        return self.scorer.score(posicao, extras)
 
 # =====================================================================
 # 5. FUNÇÃO PRINCIPAL DE INSIGHT QUANTITATIVO AVANÇADO

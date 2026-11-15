@@ -4,7 +4,7 @@ import time
 import socket
 import pytest
 import uvicorn
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, expect
 from barsi.api.http import app
 from barsi.config import settings
 from barsi.adapters.history.user_repository import UserRepository
@@ -88,11 +88,12 @@ def test_playwright_e2e_flow(e2e_server, isolate_database):
         page.goto(f"{base_url}/admin")
         assert "Administração" in page.content() or page.locator("h3").first.is_visible()
         btn_senha = page.locator('button:has-text("🔑 Senha")').first
-        assert btn_senha.is_visible()
+        expect(btn_senha).to_be_visible(timeout=5000)
         btn_senha.click()
-        assert page.locator("#modal-trocar-senha").is_visible()
+        modal = page.locator("#modal-trocar-senha")
+        expect(modal).to_be_visible(timeout=5000)
         page.click('button:has-text("Cancelar")')
-        assert not page.locator("#modal-trocar-senha").is_visible()
+        expect(modal).not_to_be_visible(timeout=5000)
 
         # 5. Navegar para Extratos e verificar o empty-state limpo
         page.goto(f"{base_url}/extratos")

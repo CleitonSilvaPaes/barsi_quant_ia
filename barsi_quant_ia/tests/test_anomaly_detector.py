@@ -274,7 +274,7 @@ def test_api_get_extrato_anomalies(test_repo, trained_model_path, monkeypatch):
     assert "count" in data
     assert data["count"] >= 1
     assert data["model_loaded"] is True
-    assert data["model_path"] == trained_model_path
+    assert data["model_path"] == os.path.basename(trained_model_path)
     assert data["threshold"] is not None
     assert any(a["fitid"] == "API_ANOM_1" for a in data["anomalies"])
 

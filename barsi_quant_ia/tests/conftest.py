@@ -102,3 +102,15 @@ def _reset_anomaly_singleton():
     yield
     AnomalyDetector.reset_instance()
 
+
+@pytest.fixture(autouse=True)
+def _reset_payout_singleton():
+    """Garante que os singletons PayoutScorer e DividendSustainabilityScorer sejam resetados."""
+    from barsi.domain.payout_scorer import PayoutScorer
+    from barsi.domain.quant_ai import DividendSustainabilityScorer
+    PayoutScorer.reset_instance()
+    DividendSustainabilityScorer.reload()
+    yield
+    PayoutScorer.reset_instance()
+    DividendSustainabilityScorer.reload()
+

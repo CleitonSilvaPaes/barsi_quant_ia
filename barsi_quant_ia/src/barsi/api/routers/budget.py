@@ -133,7 +133,7 @@ async def get_extrato_anomalies_endpoint(request: Request, limit: int = 50):
         "anomalies": anomalies,
         "count": len(anomalies),
         "model_loaded": detector.is_loaded,
-        "model_path": detector.model_path if detector.is_loaded else None,
+        "model_path": os.path.basename(detector.model_path) if detector.is_loaded else None,
         "threshold": detector.anomaly_threshold if detector.is_loaded else None,
     }
 

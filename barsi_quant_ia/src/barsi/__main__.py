@@ -673,6 +673,29 @@ def ml_retrain_anomaly(
         f"sinalizadas no treino={m['flagged_pct']}%"
     )
 
+@app.command("ml-retrain-payout")
+def ml_retrain_payout(
+    output: Optional[str] = typer.Option(None, "--output", help="Caminho do JSON de pesos (padrão: memory/payout_weights.json)"),
+    db_path: Optional[str] = typer.Option(None, "--db", help="Path do SQLite com RLHF (padrão: settings)"),
+    c_param: float = typer.Option(1.0, "--c-param", help="Regularização inversa L2 (padrão: 1.0)"),
+):
+    """Retreina o modelo de sustentabilidade de dividendos via Regressão Logística + RLHF (Sprint ML-2)."""
+    from barsi.training.payout_trainer import train_and_export_payout_model
+    out_target = output or "memory/payout_weights.json"
+    db_target = db_path or settings.sqlite_db_path
+    typer.echo("[+] Treinando modelo de sustentabilidade de dividendos v2 (Logistic Regression L2)...")
+    res = train_and_export_payout_model(db_path=db_target, output_path=out_target, c_param=c_param)
+    m = res["metrics"]
+    typer.echo(
+        f"[✔] Modelo exportado: {out_target} | "
+        f"{m['n_samples']} amostras ({m['rlhf_samples']} via RLHF) | "
+        f"Acurácia={m['accuracy']:.1%} | LogLoss={m['log_loss']:.3f} | Intercept={res['intercept']}"
+    )
+    typer.echo("\n--- Pesos das Características (Explicabilidade Barsi) ---")
+    for fname, info in res["feature_summary"].items():
+        typer.echo(f" • {fname:<18}: {info['weight']:>+6.3f} ({info['direction']})")
+    typer.echo("--------------------------------------------------------\n")
+
 @app.command("user-audit-logs")
 def user_audit_logs(
     limit: int = typer.Option(20, "--limit", help="Quantidade de registros a exibir")
