@@ -22,6 +22,9 @@ def sec_setup(tmp_path, monkeypatch):
 
     db_file = str(tmp_path / "test_sec_push.db")
     monkeypatch.setattr(settings, "sqlite_db_path", db_file)
+    monkeypatch.setattr(settings, "telegram_alerts_enabled", True)
+    monkeypatch.setattr(settings, "telegram_bot_token", "fake_bot_token_123")
+    monkeypatch.setattr(settings, "telegram_chat_id", "987654321")
     user_repo = UserRepository(db_file)
     budget_repo = BudgetRepository(db_file)
 
@@ -46,25 +49,25 @@ def sec_setup(tmp_path, monkeypatch):
 def test_login_brute_force_triggers_telegram_alert(sec_setup):
     """5 tentativas falhas de login disparam notificação de alerta proativo no Telegram."""
     user_repo, _, notifications = sec_setup
-    user_repo.create_user("cleiton", "senhaCorreta123", role="admin")
+    user_repo.create_user("admin_barsi", "senhaCorreta123", role="admin")
 
     client = TestClient(app)
 
     # 4 primeiras tentativas falhas: não disparam alerta ainda
     for i in range(4):
-        resp = client.post("/login", data={"username": "cleiton", "password": f"senhaErrada{i}"}, follow_redirects=False)
+        resp = client.post("/login", data={"username": "admin_barsi", "password": f"senhaErrada{i}"}, follow_redirects=False)
         assert resp.status_code == 303
         assert len(notifications) == 0
 
     # 5ª tentativa falha: atinge LOGIN_RATE_LIMIT_MAX e dispara alerta push imediato
-    resp5 = client.post("/login", data={"username": "cleiton", "password": "senhaErrada5"}, follow_redirects=False)
+    resp5 = client.post("/login", data={"username": "admin_barsi", "password": "senhaErrada5"}, follow_redirects=False)
     assert resp5.status_code == 303
     assert len(notifications) == 1
 
     alert = notifications[0]
     assert alert["title"] == "Alerta de Segurança: Múltiplas Tentativas de Login Falhas"
     assert alert["level"] == "alert"
-    assert "cleiton" in alert["body"]
+    assert "admin_barsi" in alert["body"]
     assert "*Tentativas Falhas:* `5`" in alert["body"]
 
 

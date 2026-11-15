@@ -16,6 +16,7 @@ from barsi.api.common import invalidate_canonical_positions_cache
 def tg_setup(tmp_path, monkeypatch):
     test_db = str(tmp_path / "test_tg.db")
     monkeypatch.setattr(settings, "sqlite_db_path", test_db)
+    monkeypatch.setattr(settings, "telegram_alerts_enabled", True)
     monkeypatch.setattr(settings, "telegram_chat_id", "987654321")
     monkeypatch.setattr(settings, "telegram_bot_token", "fake_bot_token_123")
     monkeypatch.setattr(settings, "telegram_webhook_secret", "")
