@@ -191,15 +191,19 @@ def verify_csrf_token(
         return False
     csrf_token = csrf_token.strip()
     try:
+        # 1. Se há token CSRF persistido na sessão (Store canônico)
         if expected_session_csrf and expected_session_csrf.strip():
             if hmac.compare_digest(csrf_token, expected_session_csrf.strip()):
                 return True
 
+        # 2. Fallback temporário de compatibilidade com testes e sessões sem cookie atualizado
+        # TODO: desativar fallback em v1.1 após migração completa de todas as fixtures de teste
         if session_token and secret_key:
             expected = generate_csrf_token(session_token, secret_key)
             if hmac.compare_digest(csrf_token, expected):
                 return True
 
+        # 3. Token anônimo pré-login
         if not session_token and secret_key:
             if "." not in csrf_token:
                 return False

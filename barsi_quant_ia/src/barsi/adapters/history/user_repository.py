@@ -457,6 +457,7 @@ class UserRepository:
                 "INSERT OR REPLACE INTO session_revocation (jti, user_id, revoked_at, expires_at) VALUES (?, ?, ?, ?)",
                 (jti, user_id, now, exp)
             )
+            conn.execute("DELETE FROM session_csrf WHERE session_id = ?", (jti,))
             conn.commit()
         return True
 
@@ -550,11 +551,11 @@ class UserRepository:
             conn.execute("DELETE FROM session_csrf WHERE session_id = ?", (session_id,))
             conn.commit()
 
-    def clean_expired_session_csrf(self, max_age_sec: float = 86400.0 * 7) -> int:
-        """Remove tokens CSRF de sessões inativas há mais de max_age_sec (padrão 7 dias)."""
+    def clean_expired_session_csrf(self, max_age_sec: float = 86400.0 * 30) -> int:
+        """Remove tokens CSRF de sessões criadas há mais de max_age_sec (padrão 30 dias)."""
         cutoff = time.time() - max_age_sec
         with self._connection() as conn:
-            cur = conn.execute("DELETE FROM session_csrf WHERE updated_at < ?", (cutoff,))
+            cur = conn.execute("DELETE FROM session_csrf WHERE created_at < ?", (cutoff,))
             conn.commit()
             return cur.rowcount
 

@@ -136,3 +136,44 @@ def test_logout_invalidates_session_csrf(tmp_path, monkeypatch):
     assert res_logout.status_code == 303
     # Token foi removido da tabela session_csrf
     assert repo.get_session_csrf(jti) is None
+
+
+def test_revoke_session_deletes_session_csrf(tmp_path):
+    """Revogação de sessão via UserRepository.revoke_session limpa session_csrf atrelado."""
+    db_file = str(tmp_path / "test_csrf_revoke.db")
+    repo = UserRepository(db_file)
+    jti = "revoke_jti_test_456"
+
+    repo.rotate_session_csrf(jti, user_id=1)
+    assert repo.get_session_csrf(jti) is not None
+
+    # Revoga a sessão
+    repo.revoke_session(jti, user_id=1)
+    assert repo.is_session_revoked(jti) is True
+    # session_csrf foi limpo junto
+    assert repo.get_session_csrf(jti) is None
+
+
+def test_clean_expired_session_csrf_removes_old_tokens(tmp_path):
+    """Limpeza preventiva remove tokens criados há mais tempo que o limiar."""
+    db_file = str(tmp_path / "test_csrf_expire.db")
+    repo = UserRepository(db_file)
+
+    # Token recente
+    repo.rotate_session_csrf("recent_session", user_id=1)
+    # Token antigo simulado (> 30 dias atrás)
+    old_time = time.time() - (86400 * 35)
+    with repo._connection() as conn:
+        conn.execute(
+            "INSERT INTO session_csrf (session_id, csrf_token, user_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            ("old_session", "old_token_xyz", 1, old_time, old_time)
+        )
+        conn.commit()
+
+    assert repo.get_session_csrf("recent_session") is not None
+    assert repo.get_session_csrf("old_session") is not None
+
+    removed = repo.clean_expired_session_csrf(max_age_sec=86400 * 30)
+    assert removed == 1
+    assert repo.get_session_csrf("recent_session") is not None
+    assert repo.get_session_csrf("old_session") is None

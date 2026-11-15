@@ -349,6 +349,10 @@ def test_maintenance_cleanup_cli(clean_db):
             "INSERT INTO login_attempts (ip, attempted_at) VALUES (?, ?)",
             ("1.2.3.4", time.time() - 90000)
         )
+        conn.execute(
+            "INSERT INTO session_csrf (session_id, csrf_token, user_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            ("expired_csrf_session", "csrf_val_123", 1, time.time() - (86400 * 35), time.time() - (86400 * 35))
+        )
         conn.commit()
 
     result = runner.invoke(cli_app, ["maintenance-cleanup"])
@@ -358,6 +362,7 @@ def test_maintenance_cleanup_cli(clean_db):
     with repo._connection() as conn:
         assert conn.execute("SELECT COUNT(*) FROM session_revocation WHERE jti = 'expired-jti-001'").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM login_attempts WHERE ip = '1.2.3.4'").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM session_csrf WHERE session_id = 'expired_csrf_session'").fetchone()[0] == 0
 
 
 def test_user_change_password_endpoint(clean_db):

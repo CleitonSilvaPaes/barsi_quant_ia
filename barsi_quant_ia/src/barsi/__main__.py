@@ -683,12 +683,13 @@ def user_disable_2fa(
 
 @app.command("maintenance-cleanup")
 def maintenance_cleanup():
-    """Executa limpeza preventiva periódica de revogações e tentativas expiradas no banco SQLite."""
+    """Executa limpeza preventiva periódica de revogações, tentativas e tokens CSRF expirados no banco SQLite."""
     from barsi.adapters.history.user_repository import UserRepository
     repo = UserRepository(settings.sqlite_db_path)
     n1 = repo.clean_expired_session_revocations()
     n2 = repo.clean_expired_login_attempts()
-    typer.echo(f"[✔] Manutenção concluída: {n1} revogações expiradas e {n2} tentativas antigas de login removidas.")
+    n3 = repo.clean_expired_session_csrf()
+    typer.echo(f"[✔] Manutenção concluída: {n1} revogações expiradas, {n2} tentativas antigas de login e {n3} tokens CSRF órfãos removidos.")
 
 @app.command("ml-retrain-anomaly")
 def ml_retrain_anomaly(
