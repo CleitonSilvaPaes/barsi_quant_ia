@@ -20,8 +20,6 @@ from barsi.api.common import (
     NewUserRequest,
     UpdateUserPasswordRequest,
     UpdateUserEmailRequest,
-    SchedulerUpdate,
-    NotifPrefUpdate,
 )
 
 router = APIRouter(tags=["admin"])
@@ -307,68 +305,6 @@ async def health_sync_reconcile(request: Request, master: str = "sqlite"):
         }
     else:
         raise HTTPException(status_code=400, detail="Master inválido. Use 'sqlite' ou 'sheets'.")
-
-# ----------------- SCHEDULER & NOTIFICATION PREFERENCES -----------------
-
-@router.get("/api/scheduler")
-async def get_scheduler(request: Request):
-    require_role_action(request, action_type="admin")
-    repo = BudgetRepository(settings.sqlite_db_path)
-    cfg = repo.get_scheduler_config()
-    return {
-        "enabled": bool(cfg["enabled"]),
-        "days_of_week": cfg["days_of_week"],
-        "hours": cfg["hours"],
-        "minute": cfg["minute"],
-        "updated_at": cfg["updated_at"],
-        "updated_by": cfg["updated_by"],
-        "next_run": repo.next_scheduled_run(),
-    }
-
-@router.post("/api/scheduler")
-async def update_scheduler(req: SchedulerUpdate, request: Request):
-    user = require_role_action(request, action_type="admin")
-    repo = BudgetRepository(settings.sqlite_db_path)
-    try:
-        user_name = user.get("user") or user.get("username", "admin")
-        cfg = repo.update_scheduler_config(
-            **req.model_dump(exclude_none=True),
-            updated_by=user_name,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    return {
-        "ok": True,
-        "config": {
-            "enabled": bool(cfg["enabled"]),
-            "days_of_week": cfg["days_of_week"],
-            "hours": cfg["hours"],
-            "minute": cfg["minute"],
-        },
-        "next_run": repo.next_scheduled_run(),
-    }
-
-@router.get("/api/notifications/preferences")
-async def get_notification_prefs(request: Request):
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Não autenticado")
-    repo = BudgetRepository(settings.sqlite_db_path)
-    return {"items": repo.list_notification_preferences()}
-
-@router.post("/api/notifications/preferences")
-async def set_notification_pref(req: NotifPrefUpdate, request: Request):
-    user = require_role_action(request, action_type="admin")
-    repo = BudgetRepository(settings.sqlite_db_path)
-    user_name = user.get("user") or user.get("username", "admin")
-    if req.alert_type == "all":
-        count = repo.set_all_notifications_enabled(req.enabled, updated_by=user_name)
-        return {"ok": True, "alert_type": "all", "enabled": req.enabled, "updated": count}
-    try:
-        repo.set_notification_enabled(req.alert_type, req.enabled, updated_by=user_name)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    return {"ok": True, "alert_type": req.alert_type, "enabled": req.enabled}
 
 # ----------------- HEALTH CHECK -----------------
 

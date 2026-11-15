@@ -87,6 +87,9 @@ from barsi.api.routers import (
     budget_router,
     analytics_router,
     admin_router,
+    scheduler_router,
+    artifacts_router,
+    insights_router,
 )
 from barsi.api.routers.analytics import send_telegram_message
 
@@ -248,3 +251,6 @@ app.include_router(carteira_router)
 app.include_router(budget_router)
 app.include_router(analytics_router)
 app.include_router(admin_router)
+app.include_router(scheduler_router)
+app.include_router(artifacts_router)
+app.include_router(insights_router)
