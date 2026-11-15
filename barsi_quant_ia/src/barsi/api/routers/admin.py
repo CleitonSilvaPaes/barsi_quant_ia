@@ -377,7 +377,8 @@ async def health():
     mem = psutil.virtual_memory()
     proc = psutil.Process()
     uptime_sec = int(time.time() - START_TIME)
-    
+    ml_detector = AnomalyDetector.get_instance()
+
     return {
         "status": "healthy",
         "uptime_sec": uptime_sec,
@@ -394,8 +395,8 @@ async def health():
             "sheets": settings.sheets_provider
         },
         "ml": {
-            "anomaly_detector_loaded": AnomalyDetector.get_instance().is_loaded,
-            "anomaly_threshold": AnomalyDetector.get_instance().anomaly_threshold,
+            "anomaly_detector_loaded": ml_detector.is_loaded,
+            "anomaly_threshold": ml_detector.anomaly_threshold,
         }
     }
 

@@ -205,9 +205,29 @@ def test_threshold_calibration_matches_contamination(trained_model_path):
     detector = AnomalyDetector(model_path=trained_model_path)
     samples = generate_synthetic_financial_baseline(n_samples=1000)
     scores = [detector.score_features(AnomalyDetector.extract_features(s)) for s in samples]
-    flagged = sum(1 for s in scores if s >= detector._anomaly_threshold)
+    flagged = sum(1 for s in scores if s >= detector.anomaly_threshold)
     flagged_pct = flagged / len(scores) * 100.0
     assert 2.0 <= flagged_pct <= 12.0
+
+
+def test_retrain_invalidates_singleton(tmp_path):
+    """Garante que train_and_export_model invalida o singleton permitindo recarga automática."""
+    db_file = str(tmp_path / "retrain_test.db")
+    model_v1 = str(tmp_path / "model_v1.npz")
+    train_and_export_model(db_path=db_file, output_path=model_v1, n_estimators=10)
+
+    inst1 = AnomalyDetector.get_instance(model_path=model_v1)
+    assert inst1.model_path == model_v1
+    assert inst1._n_trees == 10
+
+    # Retreina v2 com mais árvores
+    model_v2 = str(tmp_path / "model_v2.npz")
+    train_and_export_model(db_path=db_file, output_path=model_v2, n_estimators=25)
+
+    # Novo get_instance deve recarregar v2
+    inst2 = AnomalyDetector.get_instance(model_path=model_v2)
+    assert inst2.model_path == model_v2
+    assert inst2._n_trees == 25
 
 
 @pytest.mark.asyncio

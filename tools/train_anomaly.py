@@ -1,8 +1,11 @@
 """Wrapper de compatibilidade — a lógica vive em `barsi.training.anomaly_trainer`.
 
-Prefira: python -m barsi ml-retrain-anomaly
+Prefira utilizar o CLI oficial: python -m barsi ml-retrain-anomaly
 """
 
+from __future__ import annotations
+
+import argparse
 import os
 import sys
 
@@ -15,5 +18,21 @@ from barsi.domain.anomaly_detector import _default_model_path
 from barsi.training.anomaly_trainer import train_and_export_model
 
 if __name__ == "__main__":
-    out = sys.argv[1] if len(sys.argv) > 1 else _default_model_path()
-    print(train_and_export_model(db_path=settings.sqlite_db_path, output_path=out))
+    parser = argparse.ArgumentParser(
+        description="[Compatibilidade] Treinamento offline de Isolation Forest (use `python -m barsi ml-retrain-anomaly`)"
+    )
+    parser.add_argument("pos_output", nargs="?", default=None, help="Caminho posicional de saída .npz")
+    parser.add_argument("--output", "-o", default=None, help="Caminho de saída .npz")
+    parser.add_argument("--db", default=settings.sqlite_db_path, help="Caminho para o SQLite")
+    parser.add_argument("--contamination", type=float, default=None, help="Taxa estimada de contaminação")
+    parser.add_argument("--trees", type=int, default=None, help="Número de árvores na floresta")
+    args = parser.parse_args()
+
+    target_output = args.output or args.pos_output or _default_model_path()
+    res = train_and_export_model(
+        db_path=args.db,
+        output_path=target_output,
+        contamination=args.contamination,
+        n_estimators=args.trees,
+    )
+    print(res)
