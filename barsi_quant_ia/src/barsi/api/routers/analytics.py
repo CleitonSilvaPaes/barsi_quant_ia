@@ -678,9 +678,8 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
 
     msg = data.get("message") or data.get("edited_message") or {}
     chat_id = str(msg.get("chat", {}).get("id") or "")
-    text = (msg.get("text") or "").strip()
 
-    if not chat_id or not text:
+    if not chat_id:
         return {"ok": True}
 
     configured_chat = str(settings.telegram_chat_id or "").strip()
@@ -688,8 +687,8 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
         logger.warning("telegram_unauthorized_chat", chat_id=chat_id)
         return {"ok": True}
 
-    cmd = text.split()[0].lower()
-    args = text.split()[1:]
+    text = (msg.get("text") or "").strip()
+    document = msg.get("document")
     repo = BudgetRepository(settings.sqlite_db_path)
     bot_token = settings.telegram_bot_token
 
@@ -700,6 +699,83 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
         except Exception:
             sender = send_telegram_message
         await sender(bot_token, chat_id, reply_text)
+
+    # 1. Trata upload de arquivos (.ofx ou .zip) enviados como documento
+    if document:
+        file_name = (document.get("file_name") or "").lower()
+        if not file_name.endswith((".ofx", ".zip")):
+            await _send_reply("⚠️ Envie apenas arquivos de extrato `.ofx` ou pacotes `.zip`.")
+            return {"ok": True}
+
+        file_id = document.get("file_id")
+        import httpx
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                r1 = await client.get(
+                    f"https://api.telegram.org/bot{bot_token}/getFile",
+                    params={"file_id": file_id}
+                )
+                r1_data = r1.json()
+                if not r1_data.get("ok"):
+                    await _send_reply("❌ Falha ao obter metadados do arquivo na API do Telegram.")
+                    return {"ok": True}
+                file_path = r1_data["result"]["file_path"]
+
+                r2 = await client.get(
+                    f"https://api.telegram.org/file/bot{bot_token}/{file_path}"
+                )
+                content = r2.content
+        except Exception as exc:
+            logger.error("telegram_ofx_download_failed", error=str(exc))
+            await _send_reply(f"❌ Falha ao baixar extrato: {exc}")
+            return {"ok": True}
+
+        os.makedirs("extratos", exist_ok=True)
+        safe_name = os.path.basename(file_name)
+        target = os.path.join("extratos", safe_name)
+        with open(target, "wb") as f:
+            f.write(content)
+
+        from barsi.services.ofx_service import OFXParserService
+        OFXParserService.reload_keywords_from_db()
+        resumos = OFXParserService.processar_diretorio_extratos("extratos")
+        todas = [t for r in resumos.values() for t in r.transacoes]
+        if todas:
+            repo.persist_transacoes(todas)
+        reconciled = repo.reconcile_ofx_to_positions(resumos)
+
+        # Radar de anomalias (ML-1)
+        anomalies = []
+        try:
+            notifier = AdapterFactory.create_notification_adapter(settings)
+            early_warning = EarlyWarningService(repo, notifier=notifier)
+            anomalies = await early_warning.scan_ofx_anomalies(todas)
+        except Exception as err:
+            logger.warning("telegram_ofx_anomalies_scan_error", error=str(err))
+
+        msg_out = (
+            f"✅ *Extrato Bancário Processado via Telegram*\n\n"
+            f"📄 *Arquivo:* `{safe_name}` ({max(1, len(content) // 1024)} KB)\n"
+            f"📅 *Meses:* {', '.join(resumos.keys()) or '—'}\n"
+            f"📊 *Transações Persistidas:* {len(todas)}\n"
+            f"🔄 *Ativos Conciliados na Carteira:* {reconciled}"
+        )
+        if anomalies:
+            msg_out += f"\n\n🚨 *{len(anomalies)} anomalia(s) detectada(s) (ML-1):*"
+            for a in anomalies[:3]:
+                desc = a.get("descricao", "Transação")[:28]
+                msg_out += f"\n• {desc} — R$ {abs(a.get('valor', 0.0)):,.2f} ({a.get('severity', 'ALTA')})"
+        else:
+            msg_out += "\n\n🟢 *Nenhuma anomalia detectada* no perfil de gastos."
+
+        await _send_reply(msg_out)
+        return {"ok": True}
+
+    if not text:
+        return {"ok": True}
+
+    cmd = text.split()[0].lower()
+    args = text.split()[1:]
 
     if cmd in ("/status", "/carteira"):
         positions = await get_canonical_positions()
@@ -852,16 +928,65 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
         else:
             await _send_reply("⚠️ Uso: `/notifications`, `/notifications on|off`, `/notifications <tipo> on|off`")
 
+    elif cmd == "/anomalias":
+        # Consulta anomalias registradas recentemente
+        raw_alerts = repo.list_thesis_alerts(ticker="EXTRATO", active_only=True)
+        alerts = [a for a in raw_alerts if a.get("risk_type") == "ANOMALIA_EXTRATO"]
+        if not alerts:
+            await _send_reply("✅ *Radar de Anomalias (ML-1)*\n\nNenhuma anomalia financeira ativa detectada no momento.")
+        else:
+            linhas = []
+            for a in alerts[:6]:
+                linhas.append(f"• *{a['headline']}*: {a['snippet']} ({a['severity']})")
+            await _send_reply("🚨 *Anomalias Ativas no Radar (ML-1)*\n\n" + "\n".join(linhas))
+
+    elif cmd == "/payout":
+        if not args:
+            await _send_reply("⚠️ Uso correto: `/payout BBAS3`")
+        else:
+            t_alvo = args[0].strip().upper()
+            positions = await get_canonical_positions()
+            p = next((x for x in positions if x.ticker == t_alvo), None)
+            if not p:
+                await _send_reply(f"❌ Ativo *{t_alvo}* não encontrado na carteira.")
+            else:
+                from barsi.domain.payout_scorer import PayoutScorer
+                from barsi.domain.quant_ai import StatisticalBarsiEngine
+                atualizar_posicao_quant(p, p.preco_atual, p.div_proj)
+                setor_classificado = StatisticalBarsiEngine.identificar_setor(p.ticker)
+                perenidade = StatisticalBarsiEngine.SETOR_STATS.get(
+                    setor_classificado, StatisticalBarsiEngine.SETOR_STATS.get("OUTROS", {})
+                ).get("perenidade", 0.85)
+                scorer = PayoutScorer.get_instance()
+                res = scorer.score(p, extras={"perenidade": perenidade})
+
+                contribs = sorted(res["contributions"].items(), key=lambda x: x[1], reverse=True)
+                top_pos = [f"  + `{k}`: +{v:.2f}" for k, v in contribs if v > 0][:3]
+                top_neg = [f"  - `{k}`: {v:.2f}" for k, v in contribs if v < 0][:2]
+                detalhes = "\n".join(top_pos + top_neg) or "  • Contribuições neutras"
+
+                resp = (
+                    f"📊 *Sustentabilidade de Proventos v2 (ML-2)*\n"
+                    f"• Ativo: *{p.ticker}* ({p.empresa or setor_classificado})\n"
+                    f"• Escore: *{res['score']:.1%}* {res['badge']} ({res['label']})\n"
+                    f"• Logit: `{res['logit']:.2f}` (Base: `{res['intercept']:.2f}`)\n\n"
+                    f"*Fatores Principais:*\n{detalhes}"
+                )
+                await _send_reply(resp)
+
     else:
         ajuda = (
             "🤖 *Comandos do Barsi Quant Bot:*\n\n"
             "• `/status` — Visão geral da carteira e patrimônio\n"
             "• `/radar` — Ativos com maior margem de segurança\n"
+            "• `/payout BBAS3` — Sustentabilidade de dividendos v2 (ML-2)\n"
+            "• `/anomalias` — Radar de anomalias em extratos (ML-1)\n"
             "• `/proventos` — Total de dividendos recebidos\n"
             "• `/ticker BBAS3` — Detalhes completos de um ativo\n"
             "• `/schedule` — Configurar agendamento automático\n"
             "• `/notifications` — Gerenciar preferências de alerta\n"
             "• `/run` — Disparar ciclo quantitativo B3 agora\n"
+            "• 📎 *Upload de OFX*: Envie um arquivo `.ofx` ou `.zip` diretamente para conciliação\n"
             "• `/help` — Exibir este menu de ajuda"
         )
         await _send_reply(ajuda)
