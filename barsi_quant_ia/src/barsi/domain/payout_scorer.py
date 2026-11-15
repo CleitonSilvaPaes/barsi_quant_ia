@@ -103,13 +103,19 @@ class PayoutScorer:
     def is_loaded(self) -> bool:
         return self._loaded
 
+    @property
+    def feature_summary(self) -> Dict[str, Dict[str, Any]]:
+        """Retorna o resumo padronizado de pesos e direção ('favoravel' / 'desfavoravel')."""
+        return {
+            name: {"weight": round(w, 4), "sinal": "favoravel" if w > 0 else "desfavoravel"}
+            for name, w in zip(self.feature_names, self.weights)
+        }
+
     @staticmethod
     def _resolve_default_path() -> str:
         candidates = [
             "memory/payout_weights.json",
-            "memory/dss_weights.json",
             os.path.join(os.path.dirname(__file__), "..", "..", "..", "memory", "payout_weights.json"),
-            os.path.join(os.path.dirname(__file__), "..", "..", "..", "memory", "dss_weights.json"),
         ]
         for c in candidates:
             if os.path.exists(c):

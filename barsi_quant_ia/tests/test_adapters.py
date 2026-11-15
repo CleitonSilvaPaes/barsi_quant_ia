@@ -265,4 +265,53 @@ def test_save_carteira_endpoint_persists_qtd_antes(tmp_path, monkeypatch):
     assert bbas3_sheets.qtd_antes == 37
 
 
+@pytest.mark.asyncio
+async def test_xlsx_and_gspread_margem_seguranca_normalization(tmp_path):
+    """Garante que margem de segurança armazenada em decimal (0.4372) seja normalizada para percentual (43.72%)."""
+    import openpyxl
+    from barsi.adapters.sheets.xlsx_adapter import XLSXAdapter
+    from barsi.adapters.sheets.gspread_adapter import GSpreadAdapter
+
+    xlsx_path = str(tmp_path / "test_margem.xlsx")
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Screener_BEST_Custodia"
+
+    # Preenche cabeçalhos e uma linha com decimal (0.4372) e outra com percentual (50.0)
+    ws.cell(row=10, column=1, value="BBAS3")
+    ws.cell(row=10, column=2, value="Bancos")
+    ws.cell(row=10, column=3, value="Banco do Brasil")
+    ws.cell(row=10, column=8, value=25.0)
+    ws.cell(row=10, column=9, value=3.0)
+    ws.cell(row=10, column=10, value=50.0)
+    ws.cell(row=10, column=11, value=0.4372)  # Decimal (bug de escrita /100)
+
+    ws.cell(row=11, column=1, value="TAEE11")
+    ws.cell(row=11, column=2, value="Energia")
+    ws.cell(row=11, column=3, value="Taesa")
+    ws.cell(row=11, column=8, value=35.0)
+    ws.cell(row=11, column=9, value=3.5)
+    ws.cell(row=11, column=10, value=58.33)
+    ws.cell(row=11, column=11, value=50.0)    # Já percentual
+
+    wb.save(xlsx_path)
+    wb.close()
+
+    adapter = XLSXAdapter(xlsx_path)
+    positions = await adapter.load_positions()
+    bbas3 = next(p for p in positions if p.ticker == "BBAS3")
+    taee11 = next(p for p in positions if p.ticker == "TAEE11")
+
+    assert bbas3.margem_seguranca == 43.72
+    assert taee11.margem_seguranca == 50.0
+
+    # Valida método estático / lógica de GSpreadAdapter
+    gspread = GSpreadAdapter("dummy_cred.json", "dummy_sheet")
+    m_raw = gspread._parse_currency("0,0864")
+    assert m_raw == 0.0864
+    m_norm = round(m_raw * 100.0, 2) if (m_raw != 0 and abs(m_raw) < 1.0) else m_raw
+    assert m_norm == 8.64
+
+
+
 

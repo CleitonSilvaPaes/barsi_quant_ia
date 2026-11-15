@@ -143,7 +143,13 @@ class GSpreadAdapter(SheetsPort):
                     # Col I (9) = DPA Projetado
                     div = self._parse_currency(r[8] if len(r) > 8 else None)
                     teto = self._parse_currency(r[9] if len(r) > 9 else None)
-                    margem = self._parse_currency(r[10] if len(r) > 10 else None)
+                    margem_raw = self._parse_currency(r[10] if len(r) > 10 else None)
+                    # Planilhas armazenam porcentagens como decimal (ex: 0.4372 para 43.72%).
+                    # Normaliza para percentual se |valor| < 1.0 e valor != 0:
+                    if margem_raw != 0 and abs(margem_raw) < 1.0:
+                        margem = round(margem_raw * 100.0, 2)
+                    else:
+                        margem = margem_raw
                     dy = self._parse_currency(r[11] if len(r) > 11 else None)
                     valor_total = self._parse_currency(r[12] if len(r) > 12 else None)
                     total_aporte = self._parse_currency(r[14] if len(r) > 14 else None)

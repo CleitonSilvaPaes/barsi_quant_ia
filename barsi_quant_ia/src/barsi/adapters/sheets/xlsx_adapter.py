@@ -62,7 +62,11 @@ class XLSXAdapter(SheetsPort):
                     preco = float(ws.cell(row=row, column=8).value or ws.cell(row=row, column=7).value or 0.0)
                     div = float(ws.cell(row=row, column=9).value or 0.0)
                     teto = float(ws.cell(row=row, column=10).value or (div / 0.06 if div else 0.0))
-                    margem = float(ws.cell(row=row, column=11).value or 0.0)
+                    margem_raw = float(ws.cell(row=row, column=11).value or 0.0)
+                    if margem_raw != 0 and abs(margem_raw) < 1.0:
+                        margem = round(margem_raw * 100.0, 2)
+                    else:
+                        margem = margem_raw
                     dy = float(ws.cell(row=row, column=12).value or 0.0)
                     val_tot = float(ws.cell(row=row, column=13).value or (qtd_total * preco))
                     tot_ap = float(ws.cell(row=row, column=15).value or (qtd_aporte * preco))

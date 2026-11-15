@@ -319,30 +319,26 @@ async def get_payout_score(ticker: str, request: Request):
     from barsi.domain.quant_ai import StatisticalBarsiEngine
 
     atualizar_posicao_quant(pos, pos.preco_atual, pos.div_proj)
-    setor_norm = (pos.setor or "").upper()
+    setor_classificado = StatisticalBarsiEngine.identificar_setor(pos.ticker)
     perenidade = StatisticalBarsiEngine.SETOR_STATS.get(
-        setor_norm, StatisticalBarsiEngine.SETOR_STATS.get("OUTROS", {})
+        setor_classificado, StatisticalBarsiEngine.SETOR_STATS.get("OUTROS", {})
     ).get("perenidade", 0.85)
 
     scorer = PayoutScorer.get_instance()
     result = scorer.score(pos, extras={"perenidade": perenidade})
 
-    feature_summary = {
-        name: {"weight": round(w, 4), "sinal": "favoravel" if w > 0 else "desfavoravel"}
-        for name, w in zip(scorer.feature_names, scorer.weights)
-    }
-
     return {
         "ticker": pos.ticker,
         "empresa": pos.empresa,
         "setor": pos.setor,
+        "setor_classificado": setor_classificado,
         "score": result["score"],
         "label": result["label"],
         "badge": result["badge"],
         "logit": result["logit"],
         "intercept": result["intercept"],
         "contributions": result["contributions"],
-        "feature_summary": feature_summary,
+        "feature_summary": scorer.feature_summary,
         "is_loaded": result["is_loaded"],
         "weights_path": os.path.basename(scorer.weights_path) if scorer.weights_path else None,
     }

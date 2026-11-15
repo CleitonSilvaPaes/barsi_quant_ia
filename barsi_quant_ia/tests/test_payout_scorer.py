@@ -295,7 +295,7 @@ def test_api_payout_score_endpoint(isolate_database):
             preco_atual=35.50,
             div_proj=3.20,
             preco_teto=53.33,
-            margem_seguranca=0.50,
+            margem_seguranca=50.0,
         )
     ])
     invalidate_canonical_positions_cache()
@@ -328,9 +328,42 @@ def test_api_payout_score_endpoint(isolate_database):
     assert "logit" in data
     assert "intercept" in data
 
-    # 2. Ativo inexistente retorna 404
+    # 3. Ativo inexistente retorna 404
     resp_404 = client.get("/api/payout/score/INEXISTENTE_999")
     assert resp_404.status_code == 404
     assert "não encontrado na carteira" in resp_404.json()["detail"]
+
+
+def test_payout_endpoint_uses_sector_perenidade(isolate_database):
+    """TAEE11 (Energia Elétrica) deve classificar como ENERGIA e usar perenidade 0.98, não 0.70 (OUTROS)."""
+    from barsi.adapters.history.budget_repository import BudgetRepository
+    from barsi.api.common import invalidate_canonical_positions_cache
+    from barsi.infra.security import create_session_token
+    from barsi.config import settings
+
+    repo = BudgetRepository(isolate_database)
+    repo.persist_positions([
+        Position(
+            ticker="TAEE11",
+            row_index=10,
+            empresa="Taesa Transmissora",
+            setor="Energia Elétrica",
+            preco_atual=35.5,
+            div_proj=3.2,
+            preco_teto=53.33,
+            margem_seguranca=50.0,
+        )
+    ])
+    invalidate_canonical_positions_cache()
+
+    client = TestClient(app)
+    token = create_session_token(1, "admin", "admin", settings.secret_key)
+    client.cookies.set("barsi_session", token)
+
+    data = client.get("/api/payout/score/TAEE11").json()
+    assert data["setor_classificado"] == "ENERGIA"
+    # Com perenidade 0.98, contributions['perenidade_setor'] é ponderada por 0.98 (muito acima de 0.70)
+    assert data["contributions"]["perenidade_setor"] >= 1.8
+
 
 
