@@ -68,6 +68,22 @@ def test_pwa_icons_exist():
         assert header == b"\x89PNG\r\n\x1a\n"
 
 
+def test_pwa_icons_are_tracked_in_git():
+    """Garante que os ícones PWA (SVG e PNG) estão devidamente rastreados pelo git."""
+    import subprocess
+    result = subprocess.run(
+        ["git", "ls-files", "barsi_quant_ia/src/barsi/api/static/icons/"],
+        capture_output=True,
+        text=True,
+        check=False
+    )
+    tracked = [f.replace("\\", "/").strip() for f in result.stdout.strip().split("\n")]
+    assert any("icon-192.svg" in f for f in tracked)
+    assert any("icon-512.svg" in f for f in tracked)
+    assert any("icon-192.png" in f for f in tracked)
+    assert any("icon-512.png" in f for f in tracked)
+
+
 def test_base_template_has_pwa_tags():
     """Garante que o template base.html possui as meta tags de PWA e o link para o manifest."""
     base_path = os.path.join(os.path.dirname(__file__), "..", "src", "barsi", "api", "templates", "base.html")
@@ -75,6 +91,7 @@ def test_base_template_has_pwa_tags():
         html = f.read()
     assert '<link rel="manifest" href="/manifest.json">' in html
     assert '<meta name="theme-color"' in html
+    assert '<meta name="mobile-web-app-capable"' in html
     assert '<meta name="apple-mobile-web-app-capable"' in html
     assert 'pwa-install-btn' in html
 

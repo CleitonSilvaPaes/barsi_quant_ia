@@ -4,6 +4,7 @@
 *.json
 !repomix.config.json
 !barsi_quant_ia/src/barsi/api/static/manifest.json
+!barsi_quant_ia/src/barsi/api/static/icons/*
 credentials.json
 barsi-quant-ia-*.json
 
