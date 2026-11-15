@@ -24,7 +24,6 @@ from barsi.api.common import (
     SnowballSimulateRequest,
     DividendItem,
 )
-from barsi.api.routers.telegram import send_telegram_message
 
 router = APIRouter(tags=["analytics"])
 

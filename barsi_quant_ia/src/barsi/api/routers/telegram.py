@@ -20,6 +20,10 @@ from barsi.api.common import get_canonical_positions, get_sync_service
 
 router = APIRouter(tags=["telegram"])
 
+# Nota: `_telegram_run_lock` existe em ambos `telegram.py` (canônico do router)
+# e `http.py` (espelho legado, acessado por testes automatizados). Mantemos ambos
+# sincronizados via _is_tg_locked() / _set_tg_locked() para não quebrar testes que
+# manipulam diretamente `http._telegram_run_lock`.
 _telegram_run_lock = False
 
 
