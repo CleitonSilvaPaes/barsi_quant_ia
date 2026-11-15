@@ -328,3 +328,123 @@ def test_telegram_webhook_ofx_download_error_handling(tg_setup, monkeypatch):
     assert resp.status_code == 200
     assert any("Falha ao baixar arquivo" in m["text"] for m in sent_messages)
 
+
+@respx.mock
+def test_telegram_webhook_ofx_signature_validation(tg_setup, monkeypatch):
+    """Arquivo sem cabeçalho <OFX> ou OFXHEADER deve ser rejeitado por assinatura inválida."""
+    sent_messages = []
+
+    async def _mock_send_telegram(token, chat_id, text):
+        sent_messages.append({"token": token, "chat_id": chat_id, "text": text})
+
+    import barsi.api.http as http_mod
+    monkeypatch.setattr(http_mod, "send_telegram_message", _mock_send_telegram)
+
+    fake_token = "fake_bot_token_123"
+    respx.get(f"https://api.telegram.org/bot{fake_token}/getFile?file_id=doc_html").mock(
+        return_value=httpx.Response(200, json={"ok": True, "result": {"file_path": "documents/fake.ofx"}})
+    )
+    respx.get(f"https://api.telegram.org/file/bot{fake_token}/documents/fake.ofx").mock(
+        return_value=httpx.Response(200, content=b"<html><body>Erro no proxy corporativo</body></html>")
+    )
+
+    client = TestClient(app)
+    resp = client.post("/api/telegram/webhook", json={
+        "message": {
+            "chat": {"id": 987654321},
+            "document": {"file_id": "doc_html", "file_name": "fake.ofx"}
+        }
+    })
+    assert resp.status_code == 200
+    assert any("não possui cabeçalho ou assinatura OFX válida" in m["text"] for m in sent_messages)
+
+
+def test_telegram_webhook_health_command(tg_setup, monkeypatch):
+    """Testa comando /health reportando status dos modelos ML e SQLite."""
+    sent_messages = []
+
+    async def _mock_send_telegram(token, chat_id, text):
+        sent_messages.append({"token": token, "chat_id": chat_id, "text": text})
+
+    import barsi.api.http as http_mod
+    monkeypatch.setattr(http_mod, "send_telegram_message", _mock_send_telegram)
+
+    client = TestClient(app)
+    resp = client.post("/api/telegram/webhook", json={
+        "message": {"chat": {"id": 987654321}, "text": "/health"}
+    })
+    assert resp.status_code == 200
+    assert len(sent_messages) == 1
+    text = sent_messages[0]["text"]
+    assert "Diagnóstico de Saúde & Status Operacional" in text
+    assert "Isolation Forest (ML-1):" in text
+    assert "Payout Scorer (ML-2):" in text
+    assert "SQLite Canônico:" in text
+
+
+def test_telegram_webhook_backup_command(tg_setup, monkeypatch):
+    """Testa comando /backup enviando documento SQLite diretamente pelo Telegram."""
+    sent_messages = []
+    sent_docs = []
+
+    async def _mock_send_telegram(token, chat_id, text):
+        sent_messages.append({"token": token, "chat_id": chat_id, "text": text})
+
+    import barsi.api.http as http_mod
+    monkeypatch.setattr(http_mod, "send_telegram_message", _mock_send_telegram)
+
+    from barsi.adapters.notifications.telegram_adapter import TelegramNotifier
+
+    async def _mock_send_doc(self, filename, content, caption=None, content_type=None):
+        sent_docs.append({
+            "filename": filename,
+            "content": content,
+            "caption": caption,
+            "content_type": content_type
+        })
+        return True
+
+    monkeypatch.setattr(TelegramNotifier, "send_document", _mock_send_doc)
+
+    client = TestClient(app)
+    resp = client.post("/api/telegram/webhook", json={
+        "message": {"chat": {"id": 987654321}, "text": "/backup"}
+    })
+    assert resp.status_code == 200
+    assert len(sent_docs) == 1
+    doc = sent_docs[0]
+    assert doc["filename"].startswith("barsi_memory_backup_")
+    assert doc["filename"].endswith(".db")
+    assert len(doc["content"]) > 0
+    assert "Backup Canônico SQLite" in doc["caption"]
+
+
+def test_telegram_webhook_fechamento_command(tg_setup, monkeypatch):
+    """Testa comando /fechamento gerando relatório executivo e enviando via Telegram."""
+    sent_messages = []
+    closing_called = []
+
+    async def _mock_send_telegram(token, chat_id, text):
+        sent_messages.append({"token": token, "chat_id": chat_id, "text": text})
+
+    import barsi.api.http as http_mod
+    monkeypatch.setattr(http_mod, "send_telegram_message", _mock_send_telegram)
+
+    from barsi.services.monthly_closing_service import MonthlyClosingService
+
+    async def _mock_closing(self, notifier, mes_ano=None):
+        closing_called.append(mes_ano)
+        return True
+
+    monkeypatch.setattr(MonthlyClosingService, "send_closing_via_telegram", _mock_closing)
+
+    client = TestClient(app)
+    resp = client.post("/api/telegram/webhook", json={
+        "message": {"chat": {"id": 987654321}, "text": "/fechamento 2026-06"}
+    })
+    assert resp.status_code == 200
+    assert len(closing_called) == 1
+    assert closing_called[0] == "2026-06"
+    assert any("Gerando relatório executivo" in m["text"] for m in sent_messages)
+
+

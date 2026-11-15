@@ -57,8 +57,14 @@ class TelegramNotifier(NotificationsPort):
             logger.error("telegram_notification_exception", title=title, error=str(exc))
             return False
 
-    async def send_document(self, filename: str, content: bytes, caption: Optional[str] = None) -> bool:
-        """Envia um arquivo binário (ex: PDF do Fechamento Mensal Barsi) diretamente para o chat do Telegram."""
+    async def send_document(
+        self,
+        filename: str,
+        content: bytes,
+        caption: Optional[str] = None,
+        content_type: Optional[str] = None
+    ) -> bool:
+        """Envia um arquivo binário (PDF, SQLite .db, etc.) diretamente para o chat do Telegram."""
         if not self.bot_token or not self.chat_id:
             logger.warning("telegram_credentials_missing", chat_id=bool(self.chat_id))
             return False
@@ -69,7 +75,8 @@ class TelegramNotifier(NotificationsPort):
             data["caption"] = caption
             data["parse_mode"] = "Markdown"
 
-        files = {"document": (filename, content, "application/pdf")}
+        mime = content_type or ("application/pdf" if filename.lower().endswith(".pdf") else "application/octet-stream")
+        files = {"document": (filename, content, mime)}
 
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
@@ -96,7 +103,13 @@ class NoOpNotifier(NotificationsPort):
         logger.debug("noop_notification_skipped", title=title, level=level)
         return True
 
-    async def send_document(self, filename: str, content: bytes, caption: Optional[str] = None) -> bool:
+    async def send_document(
+        self,
+        filename: str,
+        content: bytes,
+        caption: Optional[str] = None,
+        content_type: Optional[str] = None
+    ) -> bool:
         logger.debug("noop_document_skipped", filename=filename)
         return True
 

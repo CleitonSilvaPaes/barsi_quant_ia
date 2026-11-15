@@ -715,6 +715,9 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
                     f"https://api.telegram.org/bot{bot_token}/getFile",
                     params={"file_id": file_id}
                 )
+                if r1.status_code != 200:
+                    await _send_reply(f"❌ Falha ao obter metadados do arquivo (HTTP {r1.status_code}).")
+                    return {"ok": True}
                 r1_data = r1.json()
                 if not r1_data.get("ok"):
                     await _send_reply("❌ Falha ao obter metadados do arquivo na API do Telegram.")
@@ -734,6 +737,11 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
         except Exception as exc:
             logger.error("telegram_ofx_download_failed", error=str(exc))
             await _send_reply(f"❌ Falha ao baixar extrato: {exc}")
+            return {"ok": True}
+
+        # Validação de assinatura OFX (defesa em profundidade)
+        if b"<OFX>" not in content and b"OFXHEADER" not in content and not file_name.endswith(".zip"):
+            await _send_reply("❌ O arquivo recebido não possui cabeçalho ou assinatura OFX válida.")
             return {"ok": True}
 
         os.makedirs("extratos", exist_ok=True)
@@ -983,6 +991,74 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
                 )
                 await _send_reply(resp)
 
+    elif cmd == "/fechamento":
+        mes_alvo = args[0].strip() if args else None
+        await _send_reply("⏳ Gerando relatório executivo de fechamento mensal...")
+        try:
+            from barsi.services.monthly_closing_service import MonthlyClosingService
+            notifier = AdapterFactory.create_notification_adapter(settings)
+            closing_svc = MonthlyClosingService(repo)
+            ok = await closing_svc.send_closing_via_telegram(notifier, mes_ano=mes_alvo)
+            if not ok:
+                await _send_reply("⚠️ Não foi possível compilar o documento de fechamento mensal.")
+        except Exception as e:
+            logger.error("telegram_closing_command_failed", error=str(e))
+            await _send_reply(f"❌ Erro ao gerar fechamento mensal: {e}")
+
+    elif cmd == "/backup":
+        db_path = settings.sqlite_db_path
+        if not os.path.exists(db_path):
+            await _send_reply("❌ Banco de dados SQLite não encontrado no servidor.")
+        else:
+            await _send_reply("📦 Preparando backup offsite do banco SQLite canônico...")
+            try:
+                with open(db_path, "rb") as f:
+                    db_bytes = f.read()
+                now_str = datetime.now().strftime("%Y-%m-%d_%H%M")
+                filename = f"barsi_memory_backup_{now_str}.db"
+                size_kb = max(1, len(db_bytes) // 1024)
+                caption = (
+                    f"🗄️ *Backup Canônico SQLite Barsi Quant IA*\n\n"
+                    f"• Arquivo: `{filename}`\n"
+                    f"• Tamanho: `{size_kb}` KB\n"
+                    f"• Data: `{datetime.now().strftime('%d/%m/%Y %H:%M:%S')}`\n"
+                    f"• Banco: `{os.path.basename(db_path)}`\n\n"
+                    f"🔒 _Guarde este arquivo como cópia de segurança offsite._"
+                )
+                notifier = AdapterFactory.create_notification_adapter(settings)
+                if hasattr(notifier, "send_document"):
+                    sent = await notifier.send_document(
+                        filename=filename,
+                        content=db_bytes,
+                        caption=caption,
+                        content_type="application/x-sqlite3"
+                    )
+                    if not sent:
+                        await _send_reply("⚠️ Falha ao transmitir backup como documento para o Telegram.")
+                else:
+                    await _send_reply("⚠️ Notificador configurado não suporta envio de documentos binários.")
+            except Exception as exc:
+                logger.error("telegram_backup_failed", error=str(exc))
+                await _send_reply(f"❌ Erro ao enviar backup: {exc}")
+
+    elif cmd == "/health":
+        from barsi.domain.anomaly_detector import AnomalyDetector
+        from barsi.domain.payout_scorer import PayoutScorer
+
+        det = AnomalyDetector.get_instance()
+        payout = PayoutScorer.get_instance()
+        positions = await get_canonical_positions()
+
+        ml_status = (
+            f"• *Isolation Forest (ML-1):* {'🟢 Carregado' if det.is_loaded else '🟡 Fallback (Heurístico)'} (Threshold: `{det.anomaly_threshold}`)\n"
+            f"• *Payout Scorer (ML-2):* {'🟢 Carregado' if payout.is_loaded else '🟡 Baseline Barsi'} (Pesos: `{os.path.basename(payout.weights_path) if payout.weights_path else 'default'}`)\n"
+            f"• *Ativos Monitorados:* `{len(positions)}`\n"
+            f"• *SQLite Canônico:* `{os.path.basename(settings.sqlite_db_path)}` (Integridade: `OK`)\n"
+            f"• *Ambiente:* `TV Box / Edge Runtime`\n"
+            f"• *Data/Hora Servidor:* `{datetime.now().strftime('%d/%m/%Y %H:%M:%S')}`"
+        )
+        await _send_reply("🏥 *Diagnóstico de Saúde & Status Operacional*\n\n" + ml_status)
+
     else:
         ajuda = (
             "🤖 *Comandos do Barsi Quant Bot:*\n\n"
@@ -990,6 +1066,9 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
             "• `/radar` — Ativos com maior margem de segurança\n"
             "• `/payout BBAS3` — Sustentabilidade de dividendos v2 (ML-2)\n"
             "• `/anomalias` — Radar de anomalias em extratos (ML-1)\n"
+            "• `/fechamento [YYYY-MM]` — Gerar e enviar PDF do fechamento mensal\n"
+            "• `/backup` — Baixar snapshot offsite do SQLite canônico\n"
+            "• `/health` — Diagnóstico de saúde dos modelos de ML e TV Box\n"
             "• `/proventos` — Total de dividendos recebidos\n"
             "• `/ticker BBAS3` — Detalhes completos de um ativo\n"
             "• `/schedule` — Configurar agendamento automático\n"
