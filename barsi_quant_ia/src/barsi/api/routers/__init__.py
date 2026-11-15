@@ -8,6 +8,7 @@ from barsi.api.routers.admin import router as admin_router
 from barsi.api.routers.scheduler import router as scheduler_router
 from barsi.api.routers.artifacts import router as artifacts_router
 from barsi.api.routers.insights import router as insights_router
+from barsi.api.routers.telegram import router as telegram_router, send_telegram_message
 
 __all__ = [
     "pages_router",
@@ -19,5 +20,7 @@ __all__ = [
     "scheduler_router",
     "artifacts_router",
     "insights_router",
+    "telegram_router",
+    "send_telegram_message",
 ]
 

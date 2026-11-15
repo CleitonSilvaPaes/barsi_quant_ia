@@ -90,8 +90,9 @@ from barsi.api.routers import (
     scheduler_router,
     artifacts_router,
     insights_router,
+    telegram_router,
+    send_telegram_message,
 )
-from barsi.api.routers.analytics import send_telegram_message
 
 _telegram_run_lock = False
 
@@ -254,3 +255,4 @@ app.include_router(admin_router)
 app.include_router(scheduler_router)
 app.include_router(artifacts_router)
 app.include_router(insights_router)
+app.include_router(telegram_router)
