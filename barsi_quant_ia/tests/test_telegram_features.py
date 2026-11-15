@@ -417,6 +417,54 @@ def test_telegram_webhook_backup_command(tg_setup, monkeypatch):
     assert doc["filename"].endswith(".db")
     assert len(doc["content"]) > 0
     assert "Backup Canônico SQLite" in doc["caption"]
+    assert doc["content_type"] == "application/vnd.sqlite3"
+
+
+def test_telegram_webhook_backup_wal_consistency(tg_setup, tmp_path, monkeypatch):
+    """Testa se o comando /backup captura escritas não flushadas no WAL via sqlite3.backup()."""
+    sent_docs = []
+
+    async def _mock_send_telegram(token, chat_id, text):
+        pass
+
+    import barsi.api.http as http_mod
+    monkeypatch.setattr(http_mod, "send_telegram_message", _mock_send_telegram)
+
+    from barsi.adapters.notifications.telegram_adapter import TelegramNotifier
+
+    async def _mock_send_doc(self, filename, content, caption=None, content_type=None):
+        sent_docs.append({
+            "filename": filename,
+            "content": content,
+            "caption": caption,
+            "content_type": content_type
+        })
+        return True
+
+    monkeypatch.setattr(TelegramNotifier, "send_document", _mock_send_doc)
+
+    # 1. Escreve uma nova posição diretamente no repositório com WAL ativo
+    from barsi.domain.models import Position
+    nova_pos = Position(ticker="WALTEST3", empresa="WAL Consistency Test", row_index=99)
+    tg_setup.persist_positions([nova_pos])
+
+    # 2. Executa comando /backup pelo webhook do Telegram
+    client = TestClient(app)
+    resp = client.post("/api/telegram/webhook", json={
+        "message": {"chat": {"id": 987654321}, "text": "/backup"}
+    })
+    assert resp.status_code == 200
+    assert len(sent_docs) == 1
+
+    # 3. Restaura o arquivo recebido em um banco temporário isolado
+    backup_file = tmp_path / "restored_backup.db"
+    backup_file.write_bytes(sent_docs[0]["content"])
+
+    # 4. Carrega as posições do banco restaurado e valida se a escrita recente do WAL está presente
+    from barsi.adapters.history.budget_repository import BudgetRepository
+    restored_repo = BudgetRepository(str(backup_file))
+    positions = restored_repo.load_positions()
+    assert any(p.ticker == "WALTEST3" for p in positions)
 
 
 def test_telegram_webhook_fechamento_command(tg_setup, monkeypatch):

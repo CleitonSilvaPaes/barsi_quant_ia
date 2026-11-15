@@ -1012,8 +1012,25 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
         else:
             await _send_reply("📦 Preparando backup offsite do banco SQLite canônico...")
             try:
-                with open(db_path, "rb") as f:
-                    db_bytes = f.read()
+                import tempfile
+                with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+                    tmp_backup_path = tmp.name
+
+                try:
+                    src_conn = sqlite3.connect(db_path)
+                    dst_conn = sqlite3.connect(tmp_backup_path)
+                    try:
+                        src_conn.backup(dst_conn)
+                    finally:
+                        src_conn.close()
+                        dst_conn.close()
+
+                    with open(tmp_backup_path, "rb") as f:
+                        db_bytes = f.read()
+                finally:
+                    if os.path.exists(tmp_backup_path):
+                        os.remove(tmp_backup_path)
+
                 now_str = datetime.now().strftime("%Y-%m-%d_%H%M")
                 filename = f"barsi_memory_backup_{now_str}.db"
                 size_kb = max(1, len(db_bytes) // 1024)
@@ -1031,7 +1048,7 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
                         filename=filename,
                         content=db_bytes,
                         caption=caption,
-                        content_type="application/x-sqlite3"
+                        content_type="application/vnd.sqlite3"
                     )
                     if not sent:
                         await _send_reply("⚠️ Falha ao transmitir backup como documento para o Telegram.")
