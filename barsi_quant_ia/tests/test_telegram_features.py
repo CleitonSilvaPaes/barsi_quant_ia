@@ -224,3 +224,107 @@ NEWFILEKEY:NONE
     assert "Extrato Bancário Processado via Telegram" in resp_text
     assert "extrato_junho.ofx" in resp_text
     assert "Transações Persistidas:" in resp_text
+
+
+def test_anomalias_command_shows_ticker_specific_alerts(tg_setup, monkeypatch):
+    """Anomalia em transação com ticker (BBAS3) deve aparecer em /anomalias."""
+    sent_messages = []
+
+    async def _mock_send_telegram(token, chat_id, text):
+        sent_messages.append({"token": token, "chat_id": chat_id, "text": text})
+
+    import barsi.api.http as http_mod
+    monkeypatch.setattr(http_mod, "send_telegram_message", _mock_send_telegram)
+
+    tg_setup.record_thesis_alert(
+        ticker="BBAS3",
+        risk_type="ANOMALIA_EXTRATO",
+        severity="ALTA",
+        headline="Compra suspeita BBAS3",
+        snippet="[fit_123] R$ 45.000",
+        source="test",
+    )
+
+    client = TestClient(app)
+    resp = client.post("/api/telegram/webhook", json={
+        "message": {"chat": {"id": 987654321}, "text": "/anomalias"}
+    })
+    assert resp.status_code == 200
+    assert any("BBAS3" in m["text"] and "Compra suspeita BBAS3" in m["text"] for m in sent_messages)
+
+
+@respx.mock
+def test_telegram_ofx_upload_with_anomalies(tg_setup, monkeypatch):
+    """Upload OFX com anomalias deve invocar EarlyWarningService e reportar no Telegram."""
+    sent_messages = []
+
+    async def _mock_send_telegram(token, chat_id, text):
+        sent_messages.append({"token": token, "chat_id": chat_id, "text": text})
+
+    import barsi.api.http as http_mod
+    monkeypatch.setattr(http_mod, "send_telegram_message", _mock_send_telegram)
+
+    from barsi.services.early_warning_service import EarlyWarningService
+
+    async def _fake_scan(self, transacoes=None, **kwargs):
+        return [{
+            "descricao": "PIX SUSPEITO",
+            "valor": -45000.0,
+            "severity": "ALTA",
+            "score": 0.92,
+            "fitid": "FIT_TG_001"
+        }]
+
+    monkeypatch.setattr(EarlyWarningService, "scan_ofx_anomalies", _fake_scan)
+
+    fake_token = "fake_bot_token_123"
+    respx.get(f"https://api.telegram.org/bot{fake_token}/getFile?file_id=doc_anom").mock(
+        return_value=httpx.Response(200, json={"ok": True, "result": {"file_path": "documents/extrato_anom.ofx"}})
+    )
+    respx.get(f"https://api.telegram.org/file/bot{fake_token}/documents/extrato_anom.ofx").mock(
+        return_value=httpx.Response(200, content=b"OFXHEADER:100\nDATA:OFXSGML\nVERSION:102\n<OFX>\n<BANKTRANLIST>\n<STMTTRN><TRNAMT>-45000.00</TRNAMT></STMTTRN>\n</BANKTRANLIST>\n</OFX>")
+    )
+
+    client = TestClient(app)
+    resp = client.post("/api/telegram/webhook", json={
+        "message": {
+            "chat": {"id": 987654321},
+            "document": {"file_id": "doc_anom", "file_name": "extrato_anom.ofx"}
+        }
+    })
+    assert resp.status_code == 200
+    assert len(sent_messages) == 1
+    text = sent_messages[0]["text"]
+    assert "1 anomalia(s) detectada(s)" in text
+    assert "PIX SUSPEITO" in text
+
+
+@respx.mock
+def test_telegram_webhook_ofx_download_error_handling(tg_setup, monkeypatch):
+    """Falha de download no Telegram (ex: HTTP 404) é tratada com resposta amigável."""
+    sent_messages = []
+
+    async def _mock_send_telegram(token, chat_id, text):
+        sent_messages.append({"token": token, "chat_id": chat_id, "text": text})
+
+    import barsi.api.http as http_mod
+    monkeypatch.setattr(http_mod, "send_telegram_message", _mock_send_telegram)
+
+    fake_token = "fake_bot_token_123"
+    respx.get(f"https://api.telegram.org/bot{fake_token}/getFile?file_id=doc_err").mock(
+        return_value=httpx.Response(200, json={"ok": True, "result": {"file_path": "documents/inexistente.ofx"}})
+    )
+    respx.get(f"https://api.telegram.org/file/bot{fake_token}/documents/inexistente.ofx").mock(
+        return_value=httpx.Response(404, content=b"Not Found")
+    )
+
+    client = TestClient(app)
+    resp = client.post("/api/telegram/webhook", json={
+        "message": {
+            "chat": {"id": 987654321},
+            "document": {"file_id": "doc_err", "file_name": "extrato_err.ofx"}
+        }
+    })
+    assert resp.status_code == 200
+    assert any("Falha ao baixar arquivo" in m["text"] for m in sent_messages)
+

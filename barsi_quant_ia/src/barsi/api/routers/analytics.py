@@ -724,6 +724,12 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
                 r2 = await client.get(
                     f"https://api.telegram.org/file/bot{bot_token}/{file_path}"
                 )
+                if r2.status_code != 200 or not r2.content:
+                    await _send_reply(f"❌ Falha ao baixar arquivo do Telegram (HTTP {r2.status_code}).")
+                    return {"ok": True}
+                if len(r2.content) < 10 or len(r2.content) > 20 * 1024 * 1024:
+                    await _send_reply(f"❌ Tamanho de arquivo inválido ({len(r2.content)} bytes).")
+                    return {"ok": True}
                 content = r2.content
         except Exception as exc:
             logger.error("telegram_ofx_download_failed", error=str(exc))
@@ -748,7 +754,7 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
         anomalies = []
         try:
             notifier = AdapterFactory.create_notification_adapter(settings)
-            early_warning = EarlyWarningService(repo, notifier=notifier)
+            early_warning = EarlyWarningService(repo, notification_adapter=notifier)
             anomalies = await early_warning.scan_ofx_anomalies(todas)
         except Exception as err:
             logger.warning("telegram_ofx_anomalies_scan_error", error=str(err))
@@ -929,15 +935,16 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
             await _send_reply("⚠️ Uso: `/notifications`, `/notifications on|off`, `/notifications <tipo> on|off`")
 
     elif cmd == "/anomalias":
-        # Consulta anomalias registradas recentemente
-        raw_alerts = repo.list_thesis_alerts(ticker="EXTRATO", active_only=True)
-        alerts = [a for a in raw_alerts if a.get("risk_type") == "ANOMALIA_EXTRATO"]
+        # Consulta anomalias registradas recentemente (com ou sem ticker associado)
+        all_alerts = repo.list_thesis_alerts(active_only=True)
+        alerts = [a for a in all_alerts if a.get("risk_type") == "ANOMALIA_EXTRATO"]
         if not alerts:
             await _send_reply("✅ *Radar de Anomalias (ML-1)*\n\nNenhuma anomalia financeira ativa detectada no momento.")
         else:
             linhas = []
             for a in alerts[:6]:
-                linhas.append(f"• *{a['headline']}*: {a['snippet']} ({a['severity']})")
+                ticker_tag = f"*{a['ticker']}*: " if a.get("ticker") and a["ticker"] != "EXTRATO" else ""
+                linhas.append(f"• {ticker_tag}{a['headline']} ({a['severity']})")
             await _send_reply("🚨 *Anomalias Ativas no Radar (ML-1)*\n\n" + "\n".join(linhas))
 
     elif cmd == "/payout":
@@ -962,7 +969,9 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
 
                 contribs = sorted(res["contributions"].items(), key=lambda x: x[1], reverse=True)
                 top_pos = [f"  + `{k}`: +{v:.2f}" for k, v in contribs if v > 0][:3]
-                top_neg = [f"  - `{k}`: {v:.2f}" for k, v in contribs if v < 0][:2]
+                # Seleciona as contribuições mais negativas (maior impacto desfavorável)
+                top_neg_raw = sorted([(k, v) for k, v in contribs if v < 0], key=lambda x: x[1])[:2]
+                top_neg = [f"  - `{k}`: {v:.2f}" for k, v in top_neg_raw]
                 detalhes = "\n".join(top_pos + top_neg) or "  • Contribuições neutras"
 
                 resp = (
