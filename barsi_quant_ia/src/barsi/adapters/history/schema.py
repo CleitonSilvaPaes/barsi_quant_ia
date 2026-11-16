@@ -372,6 +372,8 @@ DEFAULT_SCHEDULER_HOURS = "9,10,11,12,13,14,15,16,17,18"
 DEFAULT_NOTIFICATION_PREFS: List[Tuple[str, int]] = [
     ("margem_20", 1),  # alertas individuais >= 20% de margem
     ("radar_summary", 1),  # resumo horário consolidado
+    ("radar_b3", 1),  # screening diário B3 ampliado
+    ("rebalanceamento_setorial", 1),  # alertas de concentração setorial
 ]
 
 VALID_ALERT_TYPES = {alert_type for alert_type, _ in DEFAULT_NOTIFICATION_PREFS}

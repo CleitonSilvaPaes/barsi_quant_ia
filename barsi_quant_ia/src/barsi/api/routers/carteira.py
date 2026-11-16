@@ -344,3 +344,31 @@ async def get_payout_score(ticker: str, request: Request):
     }
 
 
+@router.get("/api/carteira/setores")
+async def get_carteira_setores(request: Request, max_concentracao: float = 35.0):
+    """Retorna análise de concentração setorial B.E.S.T. e recomendações de rebalanceamento."""
+    require_role_action(request, action_type="read")
+    positions = await get_canonical_positions()
+    from barsi.services.portfolio_balance_service import PortfolioBalanceService
+    return PortfolioBalanceService.analyze_sector_allocation(positions, max_concentration=max_concentracao)
+
+
+@router.get("/api/radar/b3")
+async def get_radar_b3(request: Request, margem_min: float = 20.0):
+    """Executa screening da B3 para ativos B.E.S.T. com margem de segurança atrativa."""
+    require_role_action(request, action_type="read")
+    positions = await get_canonical_positions()
+    from barsi.services.radar_screening_service import RadarScreeningService
+    market = AdapterFactory.create_market_adapter(settings)
+    oportunidades = await RadarScreeningService.screen_opportunities(
+        market_adapter=market,
+        margem_min=margem_min,
+        canonical_positions=positions,
+    )
+    return {
+        "margem_min": margem_min,
+        "total": len(oportunidades),
+        "oportunidades": oportunidades,
+    }
+
+

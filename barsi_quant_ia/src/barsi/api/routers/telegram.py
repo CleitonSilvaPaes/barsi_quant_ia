@@ -218,6 +218,41 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
             resposta = "🎯 *Radar B.E.S.T. (Top Oportunidades)*\n\n" + "\n".join(linhas)
         await _send_reply(resposta)
 
+    elif cmd in ("/radar_b3", "/radar_ampliado"):
+        margem_min = 20.0
+        if args:
+            try:
+                margem_min = float(args[0].replace("%", "").replace(",", "."))
+            except ValueError:
+                margem_min = 20.0
+
+        await _send_reply(f"🔍 Executando screening ampliado da B3 (margem >= {margem_min:.0f}%)...")
+        try:
+            from barsi.services.radar_screening_service import RadarScreeningService
+            market = AdapterFactory.create_market_adapter(settings)
+            positions = await get_canonical_positions()
+            oportunidades = await RadarScreeningService.screen_opportunities(
+                market_adapter=market,
+                margem_min=margem_min,
+                canonical_positions=positions,
+            )
+            msg_radar = RadarScreeningService.format_telegram_summary(oportunidades, margem_min=margem_min)
+            await _send_reply(msg_radar)
+        except Exception as e:
+            logger.error("telegram_radar_b3_failed", error=str(e))
+            await _send_reply(f"❌ Erro ao executar radar B3: {e}")
+
+    elif cmd in ("/setores", "/rebalanceamento", "/concentracao"):
+        try:
+            from barsi.services.portfolio_balance_service import PortfolioBalanceService
+            positions = await get_canonical_positions()
+            analise = PortfolioBalanceService.analyze_sector_allocation(positions)
+            msg_setores = PortfolioBalanceService.format_telegram_report(analise)
+            await _send_reply(msg_setores)
+        except Exception as e:
+            logger.error("telegram_sectors_failed", error=str(e))
+            await _send_reply(f"❌ Erro ao analisar setores: {e}")
+
     elif cmd == "/proventos":
         total_hist = repo.get_total_dividends_received()
         ano_atual = datetime.now().year
@@ -475,13 +510,19 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
         )
         await _send_reply("🏥 *Diagnóstico de Saúde & Status Operacional*\n\n" + ml_status)
 
-    elif cmd in ("/wrapped", "/retrospectiva"):
+    elif cmd in ("/wrapped", "/retrospectiva", "/wrapped_img"):
         ano_alvo = None
-        if args:
-            try:
-                ano_alvo = int(args[0].strip())
-            except ValueError:
-                ano_alvo = None
+        quer_imagem = cmd == "/wrapped_img"
+        for arg in args:
+            arg_clean = arg.strip().lower()
+            if arg_clean in ("img", "imagem", "foto", "stories"):
+                quer_imagem = True
+            elif arg_clean.isdigit():
+                try:
+                    ano_alvo = int(arg_clean)
+                except ValueError:
+                    pass
+
         if not ano_alvo:
             now = datetime.now()
             ano_alvo = now.year - 1 if now.month == 1 else now.year
@@ -489,10 +530,29 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
         await _send_reply(f"🎁 Compilando *Barsi Wrapped {ano_alvo}*...")
         try:
             from barsi.services.wrapped_service import WrappedService
+            from barsi.services.wrapped_image_service import WrappedImageService
             positions = await get_canonical_positions()
             wrapped_data = WrappedService.get_annual_retrospective(ano_alvo, repo, positions)
             card = WrappedService.generate_telegram_card(wrapped_data)
             await _send_reply(card)
+
+            # Geração do Card PNG Stories / WhatsApp
+            img_bytes = WrappedImageService.generate_image_bytes(wrapped_data)
+            if img_bytes:
+                notifier = AdapterFactory.create_notification_adapter(settings)
+                if hasattr(notifier, "send_photo"):
+                    await notifier.send_photo(
+                        content=img_bytes,
+                        filename=f"barsi_wrapped_{ano_alvo}.png",
+                        caption=f"📸 *Barsi Wrapped {ano_alvo}* — Seu card de dividendos pronto para compartilhar!"
+                    )
+                elif hasattr(notifier, "send_document"):
+                    await notifier.send_document(
+                        filename=f"barsi_wrapped_{ano_alvo}.png",
+                        content=img_bytes,
+                        caption=f"📸 *Barsi Wrapped {ano_alvo}*",
+                        content_type="image/png"
+                    )
         except Exception as e:
             logger.error("telegram_wrapped_command_failed", error=str(e))
             await _send_reply(f"❌ Erro ao compilar Barsi Wrapped: {e}")
@@ -501,8 +561,10 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
         ajuda = (
             "🤖 *Comandos do Barsi Quant Bot:*\n\n"
             "• `/status` — Visão geral da carteira e patrimônio\n"
-            "• `/radar` — Ativos com maior margem de segurança\n"
-            "• `/wrapped [ANO]` — Retrospectiva anual de proventos e conquistas\n"
+            "• `/radar` — Ativos da carteira com maior margem de segurança\n"
+            "• `/radar_b3 [MARGEM]` — Screening de 28 ativos B.E.S.T. fora da carteira\n"
+            "• `/setores` — Rebalanceamento e alerta de concentração B.E.S.T.\n"
+            "• `/wrapped [ANO]` — Retrospectiva anual (Texto + Card PNG Stories)\n"
             "• `/payout BBAS3` — Sustentabilidade de dividendos v2 (ML-2)\n"
             "• `/anomalias` — Radar de anomalias em extratos (ML-1)\n"
             "• `/fechamento [YYYY-MM]` — Gerar e enviar PDF do fechamento mensal\n"

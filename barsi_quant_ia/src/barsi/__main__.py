@@ -1293,53 +1293,108 @@ def tvbox_headless_cli(
 
 @app.command("radar-screening")
 def radar_screening_cli(
-    margem_min: float = typer.Option(20.0, "--margem", help="Margem de segurança mínima percentual")
+    margem_min: float = typer.Option(20.0, "--margem", help="Margem de segurança mínima percentual"),
+    notify: bool = typer.Option(True, "--notify/--no-notify", help="Dispara notificação via Telegram/WhatsApp"),
 ):
-    """Screening ampliado de ativos líquidos da B3 no radar B.E.S.T. com Margem > 20%."""
+    """Screening ampliado de ativos líquidos da B3 no radar B.E.S.T. com Margem >= 20%."""
     import asyncio
     from barsi.adapters.factory import AdapterFactory
-    from barsi.domain.rules import calcular_margem_seguranca
+    from barsi.services.radar_screening_service import RadarScreeningService
+    from barsi.adapters.history.budget_repository import BudgetRepository
 
     market = AdapterFactory.create_market_adapter(settings)
-    notifier = AdapterFactory.create_notification_adapter(settings)
-
-    TICKERS_RADAR = [
-        "BBAS3", "ITSA4", "SANB11", "BBDC4", "BBSE3", "CXSE3", "PSSA3",
-        "TAEE11", "TRPL4", "CPLE6", "EGIE3", "CMIG4", "ALUP11", "NEOE3",
-        "SAPR11", "SBSP3", "CSMG3", "VIVT3", "TIMS3", "KLBN11", "SUZB3",
-        "VALE3", "PETR4", "VBBR3", "RAIZ4", "WEGE3", "FLRY3", "ODPV3"
-    ]
+    notifier = AdapterFactory.create_notification_adapter(settings) if notify else None
+    repo = BudgetRepository(settings.sqlite_db_path)
 
     async def _screen():
-        typer.echo(f"[+] Iniciando screening ampliado de {len(TICKERS_RADAR)} ativos B3...")
-        oportunidades = []
-        for ticker in TICKERS_RADAR:
-            try:
-                hist = await market.get_history(ticker, period="1mo")
-                if not hist:
-                    continue
-                preco_atual = hist[-1].close
-                div_proj = preco_atual * 0.08
-                teto_real = div_proj / 0.06
-                margem = calcular_margem_seguranca(teto_real, preco_atual)
-                if margem >= margem_min:
-                    oportunidades.append((ticker, preco_atual, teto_real, margem))
-            except Exception:
-                pass
-
-        if oportunidades:
-            linhas = [f"• *{t}*: R$ {p:.2f} (Teto R$ {tt:.2f} | Margem +{m:.1f}%)" for t, p, tt, m in oportunidades]
-            corpo = "\n".join(linhas)
-            typer.echo(f"[✔] Encontradas {len(oportunidades)} oportunidades no radar ampliado:\n{corpo}")
-            await notifier.notify(
-                title=f"🎯 Radar B3 Ampliado — {len(oportunidades)} Oportunidades > {margem_min:.0f}%",
-                body=corpo,
-                level="alert"
-            )
+        typer.echo(f"[+] Iniciando screening ampliado de ativos da B3 (margem >= {margem_min:.0f}%)...")
+        res = await RadarScreeningService.execute_and_notify(
+            market_adapter=market,
+            notifier=notifier,
+            repo=repo,
+            margem_min=margem_min,
+            force=True
+        )
+        total = res.get("total_oportunidades", 0)
+        if total > 0:
+            typer.echo(f"[✔] Encontradas {total} oportunidades no radar B3!")
+            for op in res.get("oportunidades", []):
+                tag = " (na carteira)" if op.get("na_carteira") else ""
+                typer.echo(f"   • {op['ticker']:<6} ({op['setor']}){tag}: R$ {op['preco_atual']:>6.2f} (Teto R$ {op['preco_teto']:>6.2f} | Margem +{op['margem_seguranca']:>5.1f}%)")
         else:
-            typer.echo(f"[i] Nenhuma ação com margem > {margem_min:.0f}% no momento.")
+            typer.echo(f"[i] Nenhuma oportunidade com margem >= {margem_min:.0f}% no momento.")
 
     asyncio.run(_screen())
+
+@app.command("rebalanceamento")
+def rebalanceamento_cli(
+    max_concentracao: float = typer.Option(35.0, "--max-setor", help="Limite prudencial de concentração por setor (%)"),
+    notify: bool = typer.Option(False, "--notify/--no-notify", help="Dispara alerta se houver concentração excessiva"),
+):
+    """Diagnóstico de concentração setorial e diretrizes de rebalanceamento passivo B.E.S.T."""
+    import asyncio
+    from barsi.api.common import get_canonical_positions
+    from barsi.services.portfolio_balance_service import PortfolioBalanceService
+    from barsi.adapters.factory import AdapterFactory
+    from barsi.adapters.history.budget_repository import BudgetRepository
+
+    async def _diag():
+        positions = await get_canonical_positions()
+        analise = PortfolioBalanceService.analyze_sector_allocation(positions, max_concentration=max_concentracao)
+        typer.echo("\n" + "=" * 65)
+        typer.echo("    DIAGNÓSTICO SETORIAL & CONCENTRAÇÃO B.E.S.T. (BARSI)    ")
+        typer.echo("=" * 65)
+        typer.echo(f"Patrimônio Total Analisado: R$ {analise['patrimonio_total']:,.2f}")
+        typer.echo(f"Teto Máximo por Setor     : {analise['concentracao_maxima']:.0f}%\n")
+
+        for s in analise["setores"]:
+            alerta = " [!] HIPERCONCENTRADO" if s["percentual"] > max_concentracao else ""
+            best_tag = "B.E.S.T." if s["is_best"] else "Outros"
+            typer.echo(f"• {s['setor']:<15} ({best_tag:<6}): {s['percentual']:>5.1f}% | R$ {s['valor_total']:>10.2f}{alerta}")
+
+        typer.echo(f"\n💡 DIRETRIZ: {analise['recomendacao']}")
+
+        if notify and analise.get("tem_alerta"):
+            notifier = AdapterFactory.create_notification_adapter(settings)
+            repo = BudgetRepository(settings.sqlite_db_path)
+            await PortfolioBalanceService.check_and_notify_imbalance(positions, notifier, repo, force=True)
+            typer.echo("[✔] Alerta de concentração disparado via notificador!")
+
+    asyncio.run(_diag())
+
+@app.command("wrapped")
+def wrapped_cli(
+    ano: Optional[int] = typer.Option(None, "--ano", help="Ano da retrospectiva (ex: 2026)"),
+    save_img: bool = typer.Option(False, "--img", help="Gera e salva imagem PNG no formato Stories/WhatsApp"),
+    out_dir: str = typer.Option(".", "--out", help="Pasta de saída para a imagem gerada"),
+):
+    """Gera o Barsi Wrapped (Retrospectiva Anual de Dividendos e Conquistas)."""
+    import asyncio
+    from datetime import datetime
+    from barsi.api.common import get_canonical_positions
+    from barsi.services.wrapped_service import WrappedService
+    from barsi.services.wrapped_image_service import WrappedImageService
+    from barsi.adapters.history.budget_repository import BudgetRepository
+
+    ano_alvo = ano or (datetime.now().year - 1 if datetime.now().month == 1 else datetime.now().year)
+
+    async def _wrapped():
+        repo = BudgetRepository(settings.sqlite_db_path)
+        positions = await get_canonical_positions()
+        data = WrappedService.get_annual_retrospective(ano_alvo, repo, positions)
+        card = WrappedService.generate_telegram_card(data)
+        typer.echo(card)
+
+        if save_img:
+            img_bytes = WrappedImageService.generate_image_bytes(data)
+            if img_bytes:
+                out_path = Path(out_dir) / f"barsi_wrapped_{ano_alvo}.png"
+                out_path.write_bytes(img_bytes)
+                typer.echo(f"\n[✔] Card visual PNG salvo com sucesso em: {out_path.resolve()}")
+            else:
+                typer.echo("\n[!] Falha ao gerar imagem visual (Pillow indisponível ou erro na renderização).")
+
+    asyncio.run(_wrapped())
 
 @app.command("import-b3")
 def import_b3(

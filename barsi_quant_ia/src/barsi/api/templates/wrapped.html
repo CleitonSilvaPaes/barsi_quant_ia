@@ -15,6 +15,9 @@
         <!-- As opções serão populadas dinamicamente via JS -->
       </select>
     </div>
+    <button onclick="baixarWrappedImagem()" id="btn-download-img" class="btn btn-outline" style="display: flex; align-items: center; gap: 0.45rem; border-color: #10b981; color: #10b981;">
+      <span>📸</span> Baixar Card (Stories)
+    </button>
     <button onclick="enviarParaTelegram()" id="btn-share-tg" class="btn btn-outline" style="display: flex; align-items: center; gap: 0.45rem; border-color: #2AABEE; color: #2AABEE;">
       <span>📲</span> Enviar para Telegram
     </button>
@@ -396,6 +399,21 @@ function renderizarBadges(badges) {
       </div>
     `;
   }).join("");
+}
+
+function baixarWrappedImagem() {
+  const select = document.getElementById("wrapped-year-select");
+  const year = select ? select.value : new Date().getFullYear();
+  const link = document.createElement("a");
+  link.href = `/api/wrapped/${year}/image`;
+  link.download = `barsi_wrapped_${year}.png`;
+  link.target = "_blank";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  if (typeof showToast === 'function') {
+    showToast("📸 Baixando card PNG do Barsi Wrapped...", "info");
+  }
 }
 
 async function enviarParaTelegram() {
