@@ -94,6 +94,24 @@ class StatisticalBarsiEngine:
     }
 
     @staticmethod
+    def normalize_sector(s: str) -> str:
+        """Normaliza qualquer representação textual de setor para as categorias canônicas B.E.S.T."""
+        s_up = (s or "").strip().upper()
+        if "BANCO" in s_up or "FINANC" in s_up:
+            return "BANCOS"
+        if "ENERG" in s_up or "ELETR" in s_up or "TRANSMI" in s_up or "GERA" in s_up:
+            return "ENERGIA"
+        if "SANEAM" in s_up or "AGUA" in s_up or "ÁGUA" in s_up or "ESGOTO" in s_up:
+            return "SANEAMENTO"
+        if "SEGUR" in s_up or "PREVID" in s_up:
+            return "SEGUROS"
+        if "TELECOM" in s_up or "TELEFON" in s_up or "COMUNIC" in s_up:
+            return "TELECOM"
+        if "FII" in s_up or "IMOBIL" in s_up:
+            return "FII"
+        return "OUTROS"
+
+    @staticmethod
     def identificar_setor(ticker: str) -> str:
         t = ticker.upper()
         if any(b in t for b in ["BBAS", "ITUB", "BBDC", "SANB"]):

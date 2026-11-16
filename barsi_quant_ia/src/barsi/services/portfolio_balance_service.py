@@ -48,10 +48,10 @@ class PortfolioBalanceService:
             valor_ativo = qtd * preco
             patrimonio_total += valor_ativo
 
-            setor_nome = (
-                pos.setor
-                or StatisticalBarsiEngine.identificar_setor(pos.ticker)
-            )
+            # Normalização canônica do setor garantindo padrão B.E.S.T.
+            setor_nome = StatisticalBarsiEngine.normalize_sector(pos.setor) if pos.setor else "OUTROS"
+            if setor_nome == "OUTROS":
+                setor_nome = StatisticalBarsiEngine.identificar_setor(pos.ticker)
 
             if setor_nome not in setores_dados:
                 setores_dados[setor_nome] = {

@@ -1,7 +1,7 @@
-"""Adapter de cotação utilizando Yahoo Finance (yfinance)."""
+"""Adapter de cotação e dados históricos utilizando Yahoo Finance (yfinance)."""
 import asyncio
-from typing import Optional
-from barsi.ports.market import MarketDataPort
+from typing import Optional, List
+from barsi.ports.market import MarketDataPort, HistoryBar
 from barsi.domain.models import MarketQuote
 from barsi.infra.circuit_breaker import CircuitBreaker
 from barsi.infra.logging import logger
@@ -32,3 +32,35 @@ class YFinanceAdapter(MarketDataPort):
             logger.error("yfinance_quote_failed", ticker=ticker, error=str(exc))
         return None
 
+    async def get_history(self, ticker: str, period: str = "1mo") -> List[HistoryBar]:
+        if not self.breaker.can_execute():
+            logger.warn("circuit_open_skipping_history", ticker=ticker, provider="yfinance")
+            return []
+
+        simbolo = f"{ticker.strip().upper()}.SA"
+        try:
+            def _fetch():
+                t = yf.Ticker(simbolo)
+                hist = t.history(period=period, timeout=8)
+                if hist is None or hist.empty:
+                    return []
+                bars = []
+                for dt, row in hist.iterrows():
+                    date_str = dt.strftime("%Y-%m-%d") if hasattr(dt, "strftime") else str(dt)[:10]
+                    bars.append(
+                        HistoryBar(
+                            close=float(row["Close"]),
+                            volume=float(row.get("Volume", 0.0) or 0.0),
+                            date=date_str,
+                        )
+                    )
+                return bars
+
+            bars = await asyncio.to_thread(_fetch)
+            if bars:
+                self.breaker.record_success()
+                return bars
+        except Exception as exc:
+            self.breaker.record_failure()
+            logger.error("yfinance_history_failed", ticker=ticker, error=str(exc))
+        return []

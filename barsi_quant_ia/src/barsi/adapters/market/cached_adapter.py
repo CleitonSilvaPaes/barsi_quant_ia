@@ -1,8 +1,8 @@
 """Adapter Decorator para Caching persistente em disco (diskcache)."""
 import os
-from typing import Optional
+from typing import Optional, List
 from diskcache import Cache
-from barsi.ports.market import MarketDataPort
+from barsi.ports.market import MarketDataPort, HistoryBar
 from barsi.domain.models import MarketQuote
 from barsi.infra.logging import logger
 from datetime import datetime
@@ -38,3 +38,19 @@ class CachedMarketAdapter(MarketDataPort):
         # Se falhou e existe cache expirado no disco, usa como fallback defensivo
         return None
 
+    async def get_history(self, ticker: str, period: str = "1mo") -> List[HistoryBar]:
+        cache_key = f"hist_{ticker.upper()}_{period}"
+        cached_data = self.cache.get(cache_key)
+        if cached_data:
+            logger.debug("market_cache_history_hit", ticker=ticker)
+            return [HistoryBar(**bar) if isinstance(bar, dict) else bar for bar in cached_data]
+
+        # Busca no provedor real
+        bars = await self.inner.get_history(ticker, period=period)
+        if bars:
+            ttl = self._get_ttl()
+            bars_dict = [{"close": b.close, "volume": b.volume, "date": b.date} for b in bars]
+            self.cache.set(cache_key, bars_dict, expire=ttl)
+            logger.debug("market_cache_history_stored", ticker=ticker, ttl=ttl)
+            return bars
+        return []

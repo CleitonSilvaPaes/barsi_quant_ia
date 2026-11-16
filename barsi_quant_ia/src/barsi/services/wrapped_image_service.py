@@ -57,7 +57,7 @@ class WrappedImageService:
             font_footer = get_font(20)
 
             # Cabeçalho
-            draw.text((width // 2, 85), "🏛️  BARSI QUANT IA", fill="#10b981", font=font_subtitle, anchor="mm")
+            draw.text((width // 2, 85), "BARSI QUANT IA", fill="#10b981", font=font_subtitle, anchor="mm")
             ano = data.get("year", 2026)
             draw.text((width // 2, 145), f"RETROSPECTIVA {ano}", fill="#f8fafc", font=font_title, anchor="mm")
             draw.text((width // 2, 195), "Relatório Oficial de Liberdade Financeira & Dividendos", fill="#94a3b8", font=font_subtitle, anchor="mm")
@@ -87,15 +87,17 @@ class WrappedImageService:
 
             # Melhor Mês
             melhor = data.get("melhor_mes")
-            melhor_lbl = f"{melhor['nome']}" if melhor else "—"
-            melhor_val = f"R$ {melhor['total']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if melhor else "R$ 0,00"
+            melhor_lbl = f"{melhor.get('nome') or '—'}" if melhor else "—"
+            melhor_total = float((melhor.get("total") or 0.0)) if melhor else 0.0
+            melhor_val = f"R$ {melhor_total:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
             cards.append((f"MELHOR MÊS ({melhor_lbl})", melhor_val, "#facc15"))
 
             # Campeão de Dividendos
             campeao = data.get("campeao")
-            camp_ticker = campeao["ticker"] if campeao else "—"
-            camp_val = f"R$ {campeao['total']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if campeao else "R$ 0,00"
-            cards.append((f"REI DOS DIVIDENDOS", f"{camp_ticker} ({camp_val})", "#ec4899"))
+            camp_ticker = campeao.get("ticker", "—") if campeao else "—"
+            camp_total = float((campeao.get("total") or 0.0)) if campeao else 0.0
+            camp_val = f"R$ {camp_total:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            cards.append(("REI DOS DIVIDENDOS", f"{camp_ticker} ({camp_val})", "#ec4899"))
 
             # Bola de Neve
             bola = data.get("bola_de_neve", {})
@@ -144,8 +146,8 @@ class WrappedImageService:
                     by1 = badges_y + 30
                     by2 = by1 + 75
                     draw.rectangle([(bx1, by1), (bx2, by2)], fill="#0f172a", outline="#334155", width=1)
-                    titulo_curto = b.get("titulo", "")[:14]
-                    draw.text((bx1 + b_w // 2, by1 + 38), f"{b.get('icon', '🎖️')} {titulo_curto}", fill="#e2e8f0", font=font_card_lbl, anchor="mm")
+                    titulo_curto = b.get("titulo", "")[:16]
+                    draw.text((bx1 + b_w // 2, by1 + 38), f"★ {titulo_curto}", fill="#e2e8f0", font=font_card_lbl, anchor="mm")
 
             # 5. Frase de Luiz Barsi e Rodapé
             quote_y = height - 220

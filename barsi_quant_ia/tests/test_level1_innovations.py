@@ -213,21 +213,120 @@ def test_wrapped_image_generation():
 
 # ----------------- TESTES DO NOTIFICADOR SEND_PHOTO -----------------
 
+import respx
+
 @pytest.mark.asyncio
-async def test_telegram_notifier_send_photo_success(respx_mock):
-    """Valida envio de foto via TelegramNotifier."""
+@respx.mock
+async def test_telegram_notifier_send_photo_success():
+    """Valida envio de foto via TelegramNotifier usando decorator @respx.mock."""
     from barsi.adapters.notifications.telegram_adapter import TelegramNotifier
 
     bot_token = "123456:tok_photo"
     chat_id = "987654"
     url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
 
-    respx_mock.post(url).respond(status_code=200, json={"ok": True, "result": {"message_id": 202}})
+    respx.post(url).respond(status_code=200, json={"ok": True, "result": {"message_id": 202}})
     notifier = TelegramNotifier(bot_token=bot_token, chat_id=chat_id)
 
     dummy_png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
     ok = await notifier.send_photo(dummy_png, filename="test.png", caption="Legenda teste")
     assert ok is True
+
+
+# ----------------- TESTES DE CONTRATO DOS ADAPTERS DE MERCADO (BUG #1) -----------------
+
+def test_market_adapters_implement_get_history_contract():
+    """Garante que YFinanceAdapter, BrapiAdapter e CachedMarketAdapter implementam get_history."""
+    from barsi.ports.market import MarketDataPort
+    from barsi.adapters.market.yfinance_adapter import YFinanceAdapter
+    from barsi.adapters.market.brapi_adapter import BrapiAdapter
+    from barsi.adapters.market.cached_adapter import CachedMarketAdapter
+
+    yf_adapter = YFinanceAdapter()
+    assert hasattr(yf_adapter, "get_history"), "get_history ausente no YFinanceAdapter"
+    assert callable(yf_adapter.get_history)
+    assert isinstance(yf_adapter, MarketDataPort)
+
+    brapi = BrapiAdapter()
+    assert hasattr(brapi, "get_history"), "get_history ausente no BrapiAdapter"
+    assert callable(brapi.get_history)
+    assert isinstance(brapi, MarketDataPort)
+
+    cached = CachedMarketAdapter(inner=yf_adapter)
+    assert hasattr(cached, "get_history"), "get_history ausente no CachedMarketAdapter"
+    assert callable(cached.get_history)
+    assert isinstance(cached, MarketDataPort)
+
+
+# ----------------- TESTE DE NORMALIZAÇÃO DE SETORES REAIS (BUG #2) -----------------
+
+def test_portfolio_balance_normalizes_real_sector_names():
+    """Garante que 'Telecomunicações', 'Energia Elétrica' e 'Saneamento Básico' são B.E.S.T."""
+    posicoes_reais = [
+        Position(
+            ticker="VIVT3",
+            row_index=1,
+            empresa="Telefônica Brasil",
+            setor="Telecomunicações",  # Nome real vindo da custódia B3
+            qtd_antes=300,
+            preco_atual=50.0,
+            div_proj=3.50,
+            status_barsi=AcaoBarsi.ACUMULAR,
+        ),
+        Position(
+            ticker="TAEE11",
+            row_index=2,
+            empresa="Taesa",
+            setor="Energia Elétrica",  # Nome real composto
+            qtd_antes=400,
+            preco_atual=35.0,
+            div_proj=3.00,
+            status_barsi=AcaoBarsi.ACUMULAR,
+        ),
+        Position(
+            ticker="SAPR11",
+            row_index=3,
+            empresa="Sanepar",
+            setor="Saneamento Básico",  # Nome real composto
+            qtd_antes=500,
+            preco_atual=25.0,
+            div_proj=2.00,
+            status_barsi=AcaoBarsi.ACUMULAR,
+        ),
+    ]
+
+    analise = PortfolioBalanceService.analyze_sector_allocation(posicoes_reais)
+    setores_map = {s["setor"]: s for s in analise["setores"]}
+
+    # Todos os 3 setores devem ser reconhecidos como canônicos B.E.S.T.
+    assert "TELECOM" in setores_map
+    assert setores_map["TELECOM"]["is_best"] is True
+
+    assert "ENERGIA" in setores_map
+    assert setores_map["ENERGIA"]["is_best"] is True
+
+    assert "SANEAMENTO" in setores_map
+    assert setores_map["SANEAMENTO"]["is_best"] is True
+
+
+def test_wrapped_image_handles_none_values():
+    """Garante resiliência total a valores None no WrappedImageService (BUG #5)."""
+    data_com_none = {
+        "year": 2026,
+        "total_proventos": 1000.0,
+        "media_mensal": 83.33,
+        "proventos_por_dia": 2.74,
+        "melhor_mes": {"nome": None, "total": None},
+        "campeao": {"ticker": "BBAS3", "total": None, "percentual": None},
+        "pct_best": 90.0,
+        "meses_com_renda": 5,
+        "bola_de_neve": {"cotas_compradas": 0, "ticker_referencia": None},
+        "badges": [{"id": "b1", "titulo": "Teste", "desbloqueado": True}],
+    }
+
+    img_bytes = WrappedImageService.generate_image_bytes(data_com_none)
+    assert img_bytes is not None
+    assert img_bytes.startswith(b"\x89PNG\r\n\x1a\n")
 
 
 # ----------------- TESTES DOS ENDPOINTS REST LEVEL 1 -----------------
