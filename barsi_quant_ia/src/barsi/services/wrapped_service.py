@@ -36,6 +36,11 @@ SETORES_BEST = {"BANCOS", "ENERGIA", "SANEAMENTO", "SEGUROS", "TELECOM"}
 class WrappedService:
     """Calcula e formata a retrospectiva anual no padrão Barsi."""
 
+    @staticmethod
+    def format_brl(val: float) -> str:
+        """Formata valor monetário no padrão brasileiro (R$ 1.500,00)."""
+        return f"R$ {val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
     @classmethod
     def get_annual_retrospective(
         cls,
@@ -53,7 +58,6 @@ class WrappedService:
         # Caso dividends_received esteja vazio para o ano, buscamos transações OFX com categoria Proventos/Dividendos
         if not dividends:
             try:
-                txs = repo.get_transacoes_by_mes(f"{year}-01")  # fallback leve para checar
                 # Busca transações do ano todo se houver categoria Proventos
                 with repo._conn() as c:
                     rows = c.execute(
@@ -64,7 +68,13 @@ class WrappedService:
                             UPPER(categoria) LIKE '%PROVENT%' OR
                             UPPER(categoria) LIKE '%DIVIDEND%' OR
                             UPPER(categoria) LIKE '%JCP%' OR
-                            UPPER(categoria) LIKE '%RENDIMENT%'
+                            UPPER(categoria) LIKE '%RENDIMENT%' OR
+                            UPPER(categoria) LIKE '%JUROS%' OR
+                            UPPER(descricao) LIKE '%PROVENT%' OR
+                            UPPER(descricao) LIKE '%DIVIDEND%' OR
+                            UPPER(descricao) LIKE '%JCP%' OR
+                            UPPER(descricao) LIKE '%RENDIMENT%' OR
+                            UPPER(descricao) LIKE '%JUROS%'
                         )
                         ORDER BY data ASC
                         """,
@@ -319,7 +329,7 @@ class WrappedService:
             "titulo": "Mês de Ouro",
             "descricao": f"Pico mensal expressivo de renda passiva ({melhor_mes['nome'] if melhor_mes else '—'}).",
             "desbloqueado": b_ouro_unlocked,
-            "progresso": f"R$ {pico_mes:,.2f}",
+            "progresso": cls.format_brl(pico_mes),
         })
 
         # 4. Bola de Neve Ativada
@@ -342,7 +352,7 @@ class WrappedService:
             "titulo": "Rei dos Dividendos",
             "descricao": f"Um ativo gerador com proventos anuais sólidos ({campeao['ticker'] if campeao else '—'}).",
             "desbloqueado": b_rei_unlocked,
-            "progresso": f"{campeao['ticker'] if campeao else '—'} (R$ {campeao_val:,.2f})",
+            "progresso": f"{campeao['ticker'] if campeao else '—'} ({cls.format_brl(campeao_val)})",
         })
 
         # 6. Disciplina de Barsi
@@ -368,6 +378,7 @@ class WrappedService:
         campeao = data.get("campeao")
         melhor = data.get("melhor_mes")
         bola = data.get("bola_de_neve", {})
+        ticker_ref = bola.get("ticker_referencia", "B.E.S.T.")
         pct_best = data.get("pct_best", 0.0)
         badges = data.get("badges", [])
         unlocked_badges = [b for b in badges if b.get("desbloqueado")]
@@ -375,20 +386,20 @@ class WrappedService:
         card = (
             f"🎁 *Barsi Wrapped {year} — Retrospectiva Anual*\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"💰 *Total de Proventos:* R$ {total:,.2f}\n"
-            f"📅 *Média Mensal:* R$ {media:,.2f}/mês\n"
-            f"☀️ *Renda Passiva/Dia:* R$ {dia:,.2f}/dia\n\n"
+            f"💰 *Total de Proventos:* {cls.format_brl(total)}\n"
+            f"📅 *Média Mensal:* {cls.format_brl(media)}/mês\n"
+            f"☀️ *Renda Passiva/Dia:* {cls.format_brl(dia)}/dia\n\n"
         )
 
         if melhor and melhor.get("total", 0) > 0:
-            card += f"🏆 *Melhor Mês:* {melhor['nome']} (R$ {melhor['total']:,.2f})\n"
+            card += f"🏆 *Melhor Mês:* {melhor['nome']} ({cls.format_brl(melhor['total'])})\n"
 
         if campeao:
-            card += f"👑 *Rei dos Dividendos:* *{campeao['ticker']}* — R$ {campeao['total']:,.2f} ({campeao['percentual']}% do total)\n"
+            card += f"👑 *Rei dos Dividendos:* *{campeao['ticker']}* — {cls.format_brl(campeao['total'])} ({campeao['percentual']}% do total)\n"
 
         card += (
             f"🏛️ *Alocação B.E.S.T.:* {pct_best:.1f}%\n"
-            f"❄️ *Bola de Neve:* Proventos pagaram *{bola.get('cotas_compradas', 0)}* novas ações de `{bola.get('ticker_referencia', 'B.E.S.T.')}`\n\n"
+            f"❄️ *Bola de Neve:* Proventos pagaram *{bola.get('cotas_compradas', 0)}* novas ações de _{ticker_ref}_\n\n"
         )
 
         # Top 3 Ações
@@ -396,7 +407,7 @@ class WrappedService:
         if top3:
             card += "*Top Ativos Pagadores:*\n"
             for idx, item in enumerate(top3, 1):
-                card += f"  {idx}. *{item['ticker']}*: R$ {item['total']:,.2f} ({item['percentual']}%)\n"
+                card += f"  {idx}. *{item['ticker']}*: {cls.format_brl(item['total'])} ({item['percentual']}%)\n"
             card += "\n"
 
         # Conquistas
@@ -407,7 +418,7 @@ class WrappedService:
         card += (
             "━━━━━━━━━━━━━━━━━━━━━\n"
             "💬 _\"Compre ações para ser sócio de empresas perenes e acumule quantidade.\"_ — Luiz Barsi Filho\n"
-            "🌐 _Veja a retrospectiva completa no painel web em `/wrapped`_"
+            "🌐 _Veja a retrospectiva completa no painel web em /wrapped_"
         )
 
         return card

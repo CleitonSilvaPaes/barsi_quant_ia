@@ -74,7 +74,7 @@ async def send_wrapped_telegram(year: int, request: Request) -> Dict[str, Any]:
         await notifier.notify(
             title=f"🎁 Barsi Wrapped {year}",
             body=card_text,
-            severity="info",
+            level="info",
         )
         return {"ok": True, "year": year, "card": card_text}
     except Exception as exc:

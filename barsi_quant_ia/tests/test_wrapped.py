@@ -7,6 +7,7 @@ formatação do card Telegram e endpoints REST.
 from __future__ import annotations
 
 import pytest
+import respx
 from starlette.testclient import TestClient
 
 from barsi.adapters.factory import AdapterFactory
@@ -65,8 +66,8 @@ class MockTelegramNotifier:
     def __init__(self):
         self.sent_notifications = []
 
-    async def notify(self, title: str, body: str, severity: str = "info") -> bool:
-        self.sent_notifications.append({"title": title, "body": body, "severity": severity})
+    async def notify(self, title: str, body: str, level: str = "info") -> bool:
+        self.sent_notifications.append({"title": title, "body": body, "level": level})
         return True
 
 
@@ -165,7 +166,7 @@ def test_wrapped_telegram_card_formatting(tmp_path):
 
     card = WrappedService.generate_telegram_card(data)
     assert "🎁 *Barsi Wrapped 2026 — Retrospectiva Anual*" in card
-    assert "Total de Proventos:* R$ 1,500.00" in card
+    assert "Total de Proventos:* R$ 1.500,00" in card
     assert "TAEE11" in card
     assert "Alocação B.E.S.T.:" in card
     assert "Luiz Barsi Filho" in card
@@ -267,4 +268,91 @@ def test_wrapped_telegram_bot_command(tmp_path, monkeypatch):
     assert len(captured_replies) >= 2
     final_reply = captured_replies[-1]["text"]
     assert "Barsi Wrapped 2026" in final_reply
-    assert "Total de Proventos:* R$ 1,200.00" in final_reply
+    assert "Total de Proventos:* R$ 1.200,00" in final_reply
+
+
+def test_wrapped_fallback_counts_ofx_dividends_only(tmp_path):
+    """Se dividends_received está vazio mas OFX tem transações de provento, devem ser contadas."""
+    db_file = str(tmp_path / "test_wrapped_ofx_fallback.db")
+    repo = BudgetRepository(db_file)
+
+    # Nenhuma entrada em dividends_received
+    assert repo.get_total_dividends_received(year=2026) == 0.0
+
+    # Transação OFX de provento inserida
+    repo.persist_transacoes([
+        {
+            "id_transacao": "fit-div-01",
+            "data": "2026-06-15",
+            "tipo": "CREDIT",
+            "valor": 500.0,
+            "descricao": "DIVIDENDO BBAS3",
+            "categoria": "Proventos B3",
+            "ticker_relacionado": "BBAS3",
+        },
+        {
+            "id_transacao": "fit-div-02",
+            "data": "2026-09-20",
+            "tipo": "CREDIT",
+            "valor": 300.0,
+            "descricao": "JCP TAEE11",
+            "categoria": "Juros Sobre Capital",
+            "ticker_relacionado": "TAEE11",
+        },
+    ])
+
+    adapter = MockSheetsAdapter()
+    res = WrappedService.get_annual_retrospective(2026, repo, adapter.positions)
+
+    assert res["total_proventos"] == 800.0
+    assert res["meses_com_renda"] == 2
+    assert res["campeao"]["ticker"] == "BBAS3"
+    assert res["campeao"]["total"] == 500.0
+
+
+@respx.mock
+def test_wrapped_telegram_uses_real_notifier(tmp_path, monkeypatch):
+    """Garante que o endpoint POST /api/wrapped/{year}/telegram chama notifier.notify com kwargs corretos (level=, não severity=)."""
+    db_file = str(tmp_path / "test_wrapped_real_tg.db")
+    monkeypatch.setattr(settings, "sqlite_db_path", db_file)
+    monkeypatch.setattr(settings, "telegram_alerts_enabled", True)
+    monkeypatch.setattr(settings, "telegram_chat_id", "998877")
+    monkeypatch.setattr(settings, "telegram_bot_token", "fake_bot_token_123")
+
+    repo = BudgetRepository(db_file)
+    user_repo = UserRepository(db_file)
+    user_repo.create_user("investidor_real", "senhaForte123", role="investidor")
+    repo.record_dividend_received(ticker="BBAS3", data_pagamento="2026-05-10", valor_total=950.0)
+
+    mock_adapter = MockSheetsAdapter()
+    monkeypatch.setattr(AdapterFactory, "create_sheets_adapter", lambda s: mock_adapter)
+
+    # Mocka a chamada HTTP real à API do Telegram
+    respx.post("https://api.telegram.org/botfake_bot_token_123/sendMessage").respond(
+        200, json={"ok": True}
+    )
+
+    client = TestClient(app)
+    session_id = "test_real_notifier_jti"
+    token = create_session_token(
+        user_id=1,
+        username="investidor_real",
+        role="investidor",
+        secret_key=settings.secret_key,
+        expires_in_sec=3600,
+        jti=session_id,
+    )
+    client.cookies.set("barsi_session", token)
+
+    csrf = user_repo.rotate_session_csrf(session_id, user_id=1)
+    client.cookies.set("barsi_csrf", csrf)
+
+    resp = client.post(
+        "/api/wrapped/2026/telegram",
+        headers={"X-CSRF-Token": csrf},
+    )
+    # Com o fix level=, status deve ser 200 (não 500)
+    assert resp.status_code == 200
+    res_json = resp.json()
+    assert res_json["ok"] is True
+    assert "Barsi Wrapped 2026" in res_json["card"]
