@@ -356,3 +356,25 @@ def test_wrapped_telegram_uses_real_notifier(tmp_path, monkeypatch):
     res_json = resp.json()
     assert res_json["ok"] is True
     assert "Barsi Wrapped 2026" in res_json["card"]
+
+
+def test_wrapped_html_page_render_and_dynamic_years():
+    """Valida renderização da página HTML /wrapped e presença da função de anos dinâmicos."""
+    client = TestClient(app)
+    session_id = "test_page_render_jti"
+    token = create_session_token(
+        user_id=1,
+        username="investidor_teste",
+        role="investidor",
+        secret_key=settings.secret_key,
+        expires_in_sec=3600,
+        jti=session_id,
+    )
+    client.cookies.set("barsi_session", token)
+
+    resp = client.get("/wrapped")
+    assert resp.status_code == 200
+    assert "Barsi Wrapped — Retrospectiva Anual" in resp.text
+    assert "popularAnosWrapped" in resp.text
+    assert "wrapped-year-select" in resp.text
+

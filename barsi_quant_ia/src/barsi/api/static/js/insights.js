@@ -6,7 +6,7 @@ let insightsData = [];
 let filtroDecisao = 'TODOS';
 let pendingFeedback = {};
 let feedbackDebounceTimer = null;
-const PAGE_SIZE = 9;
+const PAGE_SIZE = 10;
 let currentPage = 0;
 
 async function carregarInsights() {
@@ -27,7 +27,7 @@ async function carregarInsights() {
       if (salvo && ['TODOS', 'ACUMULAR', 'AGUARDAR'].includes(salvo)) {
         filtroDecisao = salvo;
       }
-    } catch(e) {}
+    } catch (e) { }
     atualizarBotoesFiltro(filtroDecisao);
 
     renderizarCards();
@@ -41,7 +41,7 @@ function filtrarCards(decisao, btnEl) {
   currentPage = 0;
   try {
     localStorage.setItem('insights_filter', decisao);
-  } catch(e) {}
+  } catch (e) { }
   atualizarBotoesFiltro(decisao);
   renderizarCards();
 }
@@ -186,14 +186,14 @@ function renderizarCards() {
 }
 
 const PAYOUT_FEATURE_MAP_INSIGHTS = {
-  "payout_ratio":     { label: "Sustentabilidade Payout",   icon: "⚖️" },
-  "dividend_yield":   { label: "Yield Projetado (>6%)",     icon: "💰" },
-  "debt_ebitda_inv":  { label: "Saúde Financeira (Dívida)", icon: "⚠️" },
-  "roe":              { label: "Rentabilidade (ROE)",        icon: "📈" },
-  "perenidade_setor": { label: "Perenidade (B.E.S.T.)",      icon: "🏛️" },
-  "margem_seguranca": { label: "Margem de Segurança",        icon: "🛡️" },
-  "anos_pagando":     { label: "Histórico de Pagamento",     icon: "🌱" },
-  "volatilidade_inv": { label: "Estabilidade de Preço",      icon: "📊" }
+  "payout_ratio": { label: "Sustentabilidade Payout", icon: "⚖️" },
+  "dividend_yield": { label: "Yield Projetado (>6%)", icon: "💰" },
+  "debt_ebitda_inv": { label: "Saúde Financeira (Dívida)", icon: "⚠️" },
+  "roe": { label: "Rentabilidade (ROE)", icon: "📈" },
+  "perenidade_setor": { label: "Perenidade (B.E.S.T.)", icon: "🏛️" },
+  "margem_seguranca": { label: "Margem de Segurança", icon: "🛡️" },
+  "anos_pagando": { label: "Histórico de Pagamento", icon: "🌱" },
+  "volatilidade_inv": { label: "Estabilidade de Preço", icon: "📊" }
 };
 
 const _payoutCache = {};

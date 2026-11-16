@@ -10,10 +10,9 @@
   <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
     <div style="display: flex; align-items: center; gap: 0.4rem; background: var(--card-bg); padding: 0.3rem 0.6rem; border-radius: 8px; border: 1px solid var(--border);">
       <label for="wrapped-year-select" style="font-size: 0.82rem; color: var(--text-muted); font-weight: 600;">Ano:</label>
-      <select id="wrapped-year-select" class="tbl-input" style="width: auto; padding: 0.25rem 0.5rem; font-weight: 700; border: none; background: transparent;" onchange="carregarWrapped()">
-        <option value="2026" selected>2026</option>
-        <option value="2025">2025</option>
-        <option value="2024">2024</option>
+      <!-- O style inline no <select> e <option> corrige o contraste do Dark Mode -->
+      <select id="wrapped-year-select" class="tbl-input" style="width: auto; padding: 0.25rem 0.5rem; font-weight: 700; border: none; background: transparent; color: var(--text); cursor: pointer;" onchange="carregarWrapped()">
+        <!-- As opções serão populadas dinamicamente via JS -->
       </select>
     </div>
     <button onclick="enviarParaTelegram()" id="btn-share-tg" class="btn btn-outline" style="display: flex; align-items: center; gap: 0.45rem; border-color: #2AABEE; color: #2AABEE;">
@@ -146,6 +145,27 @@
 <script>
 let chartMesesInstance = null;
 let chartSetoresInstance = null;
+
+// Popula os anos dinamicamente (Ano atual e os anteriores) com suporte a contraste em Dark Mode
+function popularAnosWrapped() {
+  const select = document.getElementById("wrapped-year-select");
+  if (!select) return;
+
+  const anoAtual = new Date().getFullYear();
+  select.innerHTML = ""; // Limpa opções antigas
+
+  for (let i = 0; i < 4; i++) {
+    const ano = anoAtual - i;
+    if (ano < 2020) break;
+    const opt = document.createElement("option");
+    opt.value = ano;
+    opt.textContent = ano;
+    // Força background e texto no dropdown nativo para evitar bug do Dark Mode no OS
+    opt.style.backgroundColor = "#111827"; // Equivalente a var(--card-bg)
+    opt.style.color = "#f8fafc";           // Equivalente a var(--text)
+    select.appendChild(opt);
+  }
+}
 
 async function carregarWrapped() {
   const select = document.getElementById("wrapped-year-select");
@@ -416,6 +436,7 @@ async function enviarParaTelegram() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  popularAnosWrapped();
   carregarWrapped();
 });
 </script>
