@@ -475,11 +475,34 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
         )
         await _send_reply("🏥 *Diagnóstico de Saúde & Status Operacional*\n\n" + ml_status)
 
+    elif cmd in ("/wrapped", "/retrospectiva"):
+        ano_alvo = None
+        if args:
+            try:
+                ano_alvo = int(args[0].strip())
+            except ValueError:
+                ano_alvo = None
+        if not ano_alvo:
+            now = datetime.now()
+            ano_alvo = now.year - 1 if now.month == 1 else now.year
+
+        await _send_reply(f"🎁 Compilando *Barsi Wrapped {ano_alvo}*...")
+        try:
+            from barsi.services.wrapped_service import WrappedService
+            positions = await get_canonical_positions()
+            wrapped_data = WrappedService.get_annual_retrospective(ano_alvo, repo, positions)
+            card = WrappedService.generate_telegram_card(wrapped_data)
+            await _send_reply(card)
+        except Exception as e:
+            logger.error("telegram_wrapped_command_failed", error=str(e))
+            await _send_reply(f"❌ Erro ao compilar Barsi Wrapped: {e}")
+
     else:
         ajuda = (
             "🤖 *Comandos do Barsi Quant Bot:*\n\n"
             "• `/status` — Visão geral da carteira e patrimônio\n"
             "• `/radar` — Ativos com maior margem de segurança\n"
+            "• `/wrapped [ANO]` — Retrospectiva anual de proventos e conquistas\n"
             "• `/payout BBAS3` — Sustentabilidade de dividendos v2 (ML-2)\n"
             "• `/anomalias` — Radar de anomalias em extratos (ML-1)\n"
             "• `/fechamento [YYYY-MM]` — Gerar e enviar PDF do fechamento mensal\n"

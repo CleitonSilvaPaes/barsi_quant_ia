@@ -93,6 +93,7 @@ from barsi.api.routers import (
     artifacts_router,
     insights_router,
     telegram_router,
+    wrapped_router,
     send_telegram_message,
 )
 
@@ -272,3 +273,4 @@ app.include_router(scheduler_router)
 app.include_router(artifacts_router)
 app.include_router(insights_router)
 app.include_router(telegram_router)
+app.include_router(wrapped_router)

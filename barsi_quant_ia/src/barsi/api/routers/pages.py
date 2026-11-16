@@ -76,6 +76,10 @@ async def page_insights(request: Request):
 async def page_analytics(request: Request):
     return render_page("analytics", request, "Análise Patrimonial & Benchmarks", "analytics")
 
+@router.get("/wrapped", response_class=HTMLResponse)
+async def page_wrapped(request: Request):
+    return render_page("wrapped", request, "Barsi Wrapped — Retrospectiva Anual", "wrapped")
+
 @router.get("/settings", response_class=HTMLResponse)
 async def page_settings(request: Request):
     return render_page("settings", request, "Configurações & Conectividade", "settings")

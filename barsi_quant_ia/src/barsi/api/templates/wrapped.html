@@ -1,0 +1,421 @@
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+  <div>
+    <h2 style="font-size: 1.45rem; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 0.5rem; margin: 0;">
+      🎁 Barsi Wrapped — Retrospectiva Anual
+    </h2>
+    <p style="color: var(--text-muted); font-size: 0.88rem; margin-top: 0.25rem;">
+      Celebre a colheita dos proventos e a força do efeito bola de neve da sua carteira.
+    </p>
+  </div>
+  <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+    <div style="display: flex; align-items: center; gap: 0.4rem; background: var(--card-bg); padding: 0.3rem 0.6rem; border-radius: 8px; border: 1px solid var(--border);">
+      <label for="wrapped-year-select" style="font-size: 0.82rem; color: var(--text-muted); font-weight: 600;">Ano:</label>
+      <select id="wrapped-year-select" class="tbl-input" style="width: auto; padding: 0.25rem 0.5rem; font-weight: 700; border: none; background: transparent;" onchange="carregarWrapped()">
+        <option value="2026" selected>2026</option>
+        <option value="2025">2025</option>
+        <option value="2024">2024</option>
+      </select>
+    </div>
+    <button onclick="enviarParaTelegram()" id="btn-share-tg" class="btn btn-outline" style="display: flex; align-items: center; gap: 0.45rem; border-color: #2AABEE; color: #2AABEE;">
+      <span>📲</span> Enviar para Telegram
+    </button>
+  </div>
+</div>
+
+<!-- Grid de Indicadores Principais (KPIs) -->
+<div class="grid-stats">
+  <div class="stat-card" style="border-top: 3px solid #f59e0b;">
+    <h4>Total de Proventos no Ano</h4>
+    <div class="val" id="wr-total-proventos" style="color: #f59e0b;">R$ 0,00</div>
+    <div class="sub" id="wr-media-mensal">Média: R$ 0,00 / mês</div>
+  </div>
+  <div class="stat-card" style="border-top: 3px solid var(--green);">
+    <h4>Rei dos Dividendos</h4>
+    <div class="val" id="wr-campeao-ticker" style="color: var(--green);">—</div>
+    <div class="sub" id="wr-campeao-sub">Maior pagador do ano</div>
+  </div>
+  <div class="stat-card" style="border-top: 3px solid var(--accent);">
+    <h4>Alocação B.E.S.T.</h4>
+    <div class="val" id="wr-pct-best" style="color: var(--accent);">0.0%</div>
+    <div class="sub" id="wr-best-sub">Setores perenes blindados</div>
+  </div>
+  <div class="stat-card" style="border-top: 3px solid #38bdf8;">
+    <h4>Bola de Neve Gerada</h4>
+    <div class="val" id="wr-cotas-compradas" style="color: #38bdf8;">0 cotas</div>
+    <div class="sub" id="wr-snowball-sub">Ações geradas pelos proventos</div>
+  </div>
+</div>
+
+<!-- Gráficos: Distribuição Mensal e Alocação Setorial -->
+<div class="responsive-grid-2-1" style="margin-bottom: 1.5rem;">
+  <div class="card" style="margin: 0;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+      <h3 style="color: var(--accent); font-size: 1.05rem; margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+        📊 Proventos Recebidos Mês a Mês
+      </h3>
+      <span id="wr-melhor-mes-pill" class="badge-status" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid #f59e0b;">
+        🏆 Melhor Mês: —
+      </span>
+    </div>
+    <div class="chart-container" style="position: relative; height: 280px;">
+      <canvas id="chart-wrapped-meses"></canvas>
+    </div>
+  </div>
+
+  <div class="card" style="margin: 0;">
+    <h3 style="color: var(--accent); font-size: 1.05rem; margin-bottom: 0.5rem;">
+      🏛️ Fortaleza Setorial B.E.S.T.
+    </h3>
+    <div style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.8rem;">
+      Composição do patrimônio nos setores à prova de balas
+    </div>
+    <div class="chart-container" style="position: relative; height: 250px;">
+      <canvas id="chart-wrapped-setores"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- Ranking Top Ações Geradoras -->
+<div class="card" style="margin-bottom: 1.5rem;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+    <h3 style="color: var(--accent); font-size: 1.05rem; margin: 0;">
+      👑 Campeões de Proventos do Ano
+    </h3>
+    <span style="font-size: 0.8rem; color: var(--text-muted);">Empresas que mais geraram renda passiva</span>
+  </div>
+  <div class="table-container">
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th style="width: 50px;">#</th>
+          <th>Ativo / Empresa</th>
+          <th>Setor</th>
+          <th>Total Recebido</th>
+          <th>Participação</th>
+          <th>Pagamentos</th>
+        </tr>
+      </thead>
+      <tbody id="tbl-ranking-body">
+        <tr>
+          <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">
+            ⏳ Compilando dados de proventos...
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Painel de Conquistas & Badges Barsi -->
+<div class="card" style="margin-bottom: 1.5rem;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+    <div>
+      <h3 style="color: var(--accent); font-size: 1.05rem; margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+        🎖️ Mural de Conquistas & Badges Barsi
+      </h3>
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem;">
+        Marcos conquistados na jornada do acúmulo previdenciário contínuo.
+      </p>
+    </div>
+    <span id="wr-badges-counter" class="badge-status" style="background: rgba(16, 185, 129, 0.15); color: var(--green); border: 1px solid var(--green);">
+      0/6 Desbloqueados
+    </span>
+  </div>
+
+  <div id="wr-badges-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem;">
+    <!-- Renderizado dinamicamente via JS -->
+  </div>
+</div>
+
+<!-- Citação Barsi -->
+<div class="card" style="border-left: 4px solid #f59e0b; background: var(--card-bg); margin-bottom: 2rem;">
+  <div style="display: flex; align-items: flex-start; gap: 0.75rem;">
+    <span style="font-size: 1.8rem; line-height: 1;">💡</span>
+    <div>
+      <blockquote style="margin: 0; font-size: 0.92rem; font-style: italic; color: var(--text); line-height: 1.5;">
+        "O dividendo não é um ganho aleatório; ele é o pagamento pelo aluguel do seu dinheiro às melhores empresas do país. Nunca venda as ações geradoras para realizar lucro; compre mais sempre que estiverem abaixo do teto."
+      </blockquote>
+      <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.5rem; font-weight: 600;">
+        — Luiz Barsi Filho, Maior Investidor Pessoa Física do Brasil
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Script do Barsi Wrapped -->
+<script>
+let chartMesesInstance = null;
+let chartSetoresInstance = null;
+
+async function carregarWrapped() {
+  const select = document.getElementById("wrapped-year-select");
+  const year = select.value;
+
+  try {
+    const resp = await fetch(`/api/wrapped/${year}`);
+    if (!resp.ok) {
+      if (resp.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+      throw new Error(`Erro HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    renderizarWrapped(data);
+  } catch (err) {
+    if (typeof showToast === 'function') {
+      showToast("Falha ao carregar retrospectiva: " + err.message, "error");
+    }
+  }
+}
+
+function renderizarWrapped(data) {
+  // KPIs
+  document.getElementById("wr-total-proventos").textContent = "R$ " + data.total_proventos.toLocaleString("pt-BR", { minimumFractionDigits: 2 });
+  document.getElementById("wr-media-mensal").textContent = "Média: R$ " + data.media_mensal.toLocaleString("pt-BR", { minimumFractionDigits: 2 }) + " / mês (" + data.meses_com_renda + " meses)";
+
+  const campeao = data.campeao;
+  if (campeao) {
+    document.getElementById("wr-campeao-ticker").textContent = campeao.ticker;
+    document.getElementById("wr-campeao-sub").textContent = campeao.empresa + " (R$ " + campeao.total.toLocaleString("pt-BR", { minimumFractionDigits: 2 }) + " · " + campeao.percentual + "%)";
+  } else {
+    document.getElementById("wr-campeao-ticker").textContent = "Sem proventos";
+    document.getElementById("wr-campeao-sub").textContent = "Nenhum dividendo registrado no ano";
+  }
+
+  document.getElementById("wr-pct-best").textContent = data.pct_best.toFixed(1) + "%";
+  document.getElementById("wr-best-sub").textContent = data.pct_best >= 60 ? "Portfólio resiliente e defensivo 🛡️" : "Diversificação em evolução";
+
+  const bola = data.bola_de_neve || {};
+  document.getElementById("wr-cotas-compradas").textContent = (bola.cotas_compradas || 0) + " ações";
+  document.getElementById("wr-snowball-sub").textContent = "Compradas só com proventos (" + (bola.ticker_referencia || "B.E.S.T.") + ")";
+
+  // Melhor mês
+  if (data.melhor_mes && data.melhor_mes.total > 0) {
+    document.getElementById("wr-melhor-mes-pill").textContent = "🏆 Melhor Mês: " + data.melhor_mes.nome + " (R$ " + data.melhor_mes.total.toLocaleString("pt-BR", { minimumFractionDigits: 2 }) + ")";
+    document.getElementById("wr-melhor-mes-pill").style.display = "inline-block";
+  } else {
+    document.getElementById("wr-melhor-mes-pill").style.display = "none";
+  }
+
+  // Gráfico Mensal
+  renderizarGraficoMeses(data.meses, data.melhor_mes);
+
+  // Gráfico Setores
+  renderizarGraficoSetores(data.alocacao_setores);
+
+  // Tabela Ranking
+  renderizarRanking(data.ranking_ativos);
+
+  // Badges
+  renderizarBadges(data.badges);
+}
+
+function renderizarGraficoMeses(meses, melhorMes) {
+  const ctx = document.getElementById("chart-wrapped-meses").getContext("2d");
+  if (chartMesesInstance) chartMesesInstance.destroy();
+
+  const labels = meses.map(m => m.sigla);
+  const values = meses.map(m => m.total);
+  const backgroundColors = meses.map(m => {
+    if (melhorMes && m.mes === melhorMes.mes && m.total > 0) {
+      return "#f59e0b"; // Ouro para o melhor mês
+    }
+    return "#10b981"; // Verde para os demais
+  });
+
+  chartMesesInstance = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: labels,
+      datasets: [{
+        label: "Proventos Recebidos (R$)",
+        data: values,
+        backgroundColor: backgroundColors,
+        borderRadius: 6,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: function(c) {
+              return " R$ " + c.parsed.y.toLocaleString("pt-BR", { minimumFractionDigits: 2 });
+            }
+          }
+        }
+      },
+      scales: {
+        x: { grid: { display: false } },
+        y: {
+          beginAtZero: true,
+          ticks: {
+            callback: function(v) { return "R$ " + v; }
+          }
+        }
+      }
+    }
+  });
+}
+
+function renderizarGraficoSetores(setores) {
+  const ctx = document.getElementById("chart-wrapped-setores").getContext("2d");
+  if (chartSetoresInstance) chartSetoresInstance.destroy();
+
+  const labels = Object.keys(setores || {});
+  const values = Object.values(setores || {});
+
+  const coresBase = {
+    "BANCOS": "#3b82f6",
+    "ENERGIA": "#eab308",
+    "SANEAMENTO": "#06b6d4",
+    "SEGUROS": "#8b5cf6",
+    "TELECOM": "#ec4899",
+    "FII": "#10b981",
+    "OUTROS": "#6b7280"
+  };
+  const colors = labels.map(l => coresBase[l] || "#94a3b8");
+
+  chartSetoresInstance = new Chart(ctx, {
+    type: "doughnut",
+    data: {
+      labels: labels,
+      datasets: [{
+        data: values,
+        backgroundColor: colors,
+        borderWidth: 2,
+        borderColor: "rgba(0,0,0,0.3)"
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: "right",
+          labels: { font: { size: 11 }, boxWidth: 12 }
+        },
+        tooltip: {
+          callbacks: {
+            label: function(c) {
+              const val = c.parsed;
+              return " " + c.label + ": R$ " + val.toLocaleString("pt-BR", { minimumFractionDigits: 2 });
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
+function renderizarRanking(ranking) {
+  const tbody = document.getElementById("tbl-ranking-body");
+  if (!ranking || ranking.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">Nenhum provento registrado no ano.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = ranking.map((r, idx) => {
+    const badgeBest = r.is_best ? `<span class="badge-status" style="background: rgba(16,185,129,0.15); color: var(--green); border: 1px solid var(--green); font-size: 0.7rem;">B.E.S.T.</span>` : "";
+    const medalha = idx === 0 ? "🥇" : idx === 1 ? "🥈" : idx === 2 ? "🥉" : `${idx + 1}º`;
+    return `
+      <tr>
+        <td style="font-weight: 700; color: var(--text);">${medalha}</td>
+        <td>
+          <strong>${r.ticker}</strong>
+          <div style="font-size: 0.75rem; color: var(--text-muted);">${r.empresa || '—'}</div>
+        </td>
+        <td>${r.setor} ${badgeBest}</td>
+        <td style="font-weight: 700; color: var(--green);">R$ ${r.total.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
+        <td>
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span>${r.percentual}%</span>
+            <div style="width: 60px; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden;">
+              <div style="width: ${Math.min(r.percentual, 100)}%; height: 100%; background: var(--accent);"></div>
+            </div>
+          </div>
+        </td>
+        <td>${r.lancamentos}x</td>
+      </tr>
+    `;
+  }).join("");
+}
+
+function renderizarBadges(badges) {
+  const container = document.getElementById("wr-badges-grid");
+  const counter = document.getElementById("wr-badges-counter");
+  if (!badges || badges.length === 0) {
+    container.innerHTML = `<div style="color: var(--text-muted);">Nenhum badge disponível.</div>`;
+    return;
+  }
+
+  const desbloqueados = badges.filter(b => b.desbloqueado).length;
+  counter.textContent = `${desbloqueados}/${badges.length} Desbloqueados`;
+
+  container.innerHTML = badges.map(b => {
+    const isUnlocked = b.desbloqueado;
+    const borderStyle = isUnlocked ? "border: 1px solid rgba(16, 185, 129, 0.4); background: rgba(16, 185, 129, 0.05);" : "border: 1px solid var(--border); opacity: 0.55; filter: grayscale(80%);";
+    const statusText = isUnlocked ? `<span style="color: var(--green); font-weight: 700; font-size: 0.72rem;">✓ CONQUISTADO</span>` : `<span style="color: var(--text-muted); font-size: 0.72rem;">🔒 BLOQUEADO</span>`;
+
+    return `
+      <div style="padding: 1rem; border-radius: 10px; ${borderStyle} display: flex; flex-direction: column; justify-content: space-between;">
+        <div>
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem;">
+            <span style="font-size: 1.8rem;">${b.icon}</span>
+            ${statusText}
+          </div>
+          <h4 style="margin: 0; font-size: 0.95rem; color: var(--text); font-weight: 700;">${b.titulo}</h4>
+          <p style="font-size: 0.78rem; color: var(--text-muted); margin: 0.35rem 0 0.75rem 0; line-height: 1.35;">${b.descricao}</p>
+        </div>
+        <div style="font-size: 0.74rem; color: var(--accent); font-weight: 600;">
+          ${b.progresso}
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+async function enviarParaTelegram() {
+  const btn = document.getElementById("btn-share-tg");
+  const select = document.getElementById("wrapped-year-select");
+  const year = select.value;
+
+  btn.disabled = true;
+  const originalHtml = btn.innerHTML;
+  btn.innerHTML = `<span>⏳</span> Enviando...`;
+
+  try {
+    const resp = await fetch(`/api/wrapped/${year}/telegram`, {
+      method: "POST",
+      headers: {
+        "X-CSRF-Token": typeof getCsrfToken === 'function' ? getCsrfToken() : ""
+      }
+    });
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status}`);
+    }
+    const res = await resp.json();
+    if (res.ok) {
+      if (typeof showToast === 'function') {
+        showToast("🎁 Barsi Wrapped enviado com sucesso para o Telegram!", "success");
+      }
+    } else {
+      throw new Error(res.error || "Falha desconhecida");
+    }
+  } catch (err) {
+    if (typeof showToast === 'function') {
+      showToast("Falha ao enviar para o Telegram: " + err.message, "error");
+    }
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalHtml;
+  }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  carregarWrapped();
+});
+</script>
